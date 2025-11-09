@@ -1,0 +1,105 @@
+/**
+ * @file rmt_neopixel_serial.h
+ * @brief ESP32: RMT-based 1-Wire NeoPixel Driver
+ *
+ * Uses ESP32 RMT (Remote Control Module) to control WS2812/SK6812 LEDs.
+ *
+ * RMT channels per variant:
+ * - ESP32 (Original):  8 channels (0-7, 0 reserved = 7 available)
+ * - ESP32-S2:          4 channels (0-3, 0 reserved = 3 available)
+ * - ESP32-S3:          4 channels (0-3, 0 reserved = 3 available)
+ * - ESP32-C3:          2 channels (0-1, 0 reserved = 1 available)
+ *
+ * Features:
+ * - Hardware-precise timing (like PIO, but fewer channels)
+ * - DMA for large buffers
+ * - Automatic channel allocation
+ * - Support for RGB and RGBW
+ */
+
+#pragma once
+
+#if defined(ARDUINO_ARCH_ESP32)
+
+    #include "../IHardwareDriver.h"
+    #include <driver/rmt_tx.h>
+    #include <stdint.h>
+    #include <stdlib.h>
+
+/**
+ * RMT NeoPixel Serial Instance
+ */
+struct rmt_neopixel_serial_inst
+{
+    rmt_channel_handle_t channel; // RMT channel
+    rmt_encoder_handle_t encoder; // Encoder for LED data
+
+    uint pin;              // GPIO pin
+    uint16_t ledCount;     // Number of LEDs
+    uint8_t bytesPerLed;   // 3 for RGB, 4 for RGBW
+    LedProtocol protocol;  // LED protocol
+    ColorOrder colorOrder; // Color order
+
+    uint8_t* buffer;   // LED data buffer
+    size_t bufferSize; // Buffer size in bytes
+
+    bool initialized;   // Initialized?
+    volatile bool busy; // Transfer running?
+};
+typedef struct rmt_neopixel_serial_inst rmt_neopixel_serial_inst_t;
+
+/**
+ * ESP32 RMT NeoPixel Serial Driver
+ */
+class RMT_NeoPixel_Serial : public IHardwareDriver
+{
+  public:
+    /**
+     * Constructor
+     * @param pin GPIO pin for data
+     * @param ledCount Number of LEDs
+     * @param protocol LED protocol (WS2812, SK6812, etc.)
+     */
+    RMT_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtocol protocol);
+
+    /**
+     * Destructor
+     */
+    virtual ~RMT_NeoPixel_Serial();
+
+    // IHardwareDriver interface
+    bool init() override;
+    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b) override;
+    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w) override;
+    bool show() override;
+    bool isBusy() override;
+    void clear() override;
+    uint16_t getLedCount() const override { return _inst ? _inst->ledCount : 0; }
+    LedProtocol getProtocol() const override { return _inst ? _inst->protocol : LedProtocol::WS2812; }
+    DriverCapabilities getCapabilities() const override;
+    uint8_t* getBuffer() override { return _inst ? _inst->buffer : nullptr; }
+    size_t getBufferSize() const override { return _inst ? _inst->bufferSize : 0; }
+    bool isInitialized() const override { return _inst ? _inst->initialized : false; }
+
+    // ESP32-specific getters for status reporting
+    inline rmt_channel_handle_t getRmtChannel() const { return _inst ? _inst->channel : nullptr; }
+    inline rmt_encoder_handle_t getRmtEncoder() const { return _inst ? _inst->encoder : nullptr; }
+
+    // Static Resource Detection Methods (ESP32-S3)
+    static uint getAvailableRmtChannels(); // Count available RMT channels
+    static uint getTotalRmtChannels();     // Total RMT channels (4 for ESP32-S3)
+
+  private:
+    rmt_neopixel_serial_inst_t* _inst;
+
+    void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
+
+    /**
+     * Static mapping for callbacks
+     */
+    static RMT_NeoPixel_Serial* _instances[8]; // Max 8 RMT channels
+    static void registerInstance(int channel, RMT_NeoPixel_Serial* instance);
+    static RMT_NeoPixel_Serial* getInstance(int channel);
+};
+
+#endif // ARDUINO_ARCH_ESP32
