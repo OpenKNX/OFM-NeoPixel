@@ -360,6 +360,11 @@ GND         ────────► GND
 5V/12V      ────────► VCC
 ```
 
+**Important:** A 3.3V-to-5V **level shifter is highly recommended** for reliable operation. While some setups work without it (especially with short wires <30cm), LED strips expect 5V logic levels. The RP2040/RP2350/ESP32 output 3.3V, which may cause:
+- Random flickering or glitches
+- First LED showing wrong colors
+- Unreliable data transmission with longer strips
+
 #### SPI (APA102, WS2801)
 
 ```
@@ -371,13 +376,31 @@ GND         ────────► GND
 5V          ────────► VCC
 ```
 
+**Important:** A 3.3V-to-5V **level shifter is highly recommended** for both MOSI and SCK lines. APA102/WS2801 strips expect 5V logic levels for reliable high-speed SPI communication.
+
 ### Power Considerations
 
-- WS2812B: ~60mA per LED at full white
-- SK6812 RGBW: ~80mA per LED at full white
-- Add 1000µF capacitor between VCC and GND near LED strip
-- Use 470Ω resistor on data line for reliability
-- External power supply required for >10 LEDs
+- **Current Draw:**
+  - WS2812B: ~60mA per LED at full white
+  - SK6812 RGBW: ~80mA per LED at full white
+  - APA102: ~60mA per LED at full brightness
+  
+- **Power Supply:**
+  - Use external 5V power supply for >10 LEDs
+  - Calculate total current: (LED count × 60mA) + 20% safety margin
+  - Example: 100 LEDs × 60mA = 6A minimum power supply
+  
+- **Wiring Best Practices:**
+  - Add 1000µF capacitor between VCC and GND near LED strip
+  - Use 470Ω resistor on data line for signal protection
+  - Keep data wire short (<30cm) or use level shifter
+  - Use proper wire gauge for power (18-22 AWG for <3A, 16 AWG for >3A)
+  
+- **Level Shifter:**
+  - **Highly recommended** for 3.3V microcontrollers (RP2040/RP2350/ESP32)
+  - Prevents flickering, glitches, and unreliable operation
+  - Required for long cable runs (>30cm)
+  - See wiring section above for recommended ICs and tutorials
 
 ---
 
