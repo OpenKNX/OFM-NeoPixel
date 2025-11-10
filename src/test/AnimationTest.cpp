@@ -1,3 +1,4 @@
+#ifdef OPENKNX_NEOPIXEL_TESTS
 #include "test/AnimationTest.h"
 #include "OpenKNX/Log/Logger.h"
 #include <Arduino.h>
@@ -560,3 +561,4 @@ void AnimationTest::printStats()
     openknx.logger.logWithValues("Brightness:   %d/255", _brightness);
     print_end_separator();
 }
+#endif // OPENKNX_NEOPIXEL_TESTS

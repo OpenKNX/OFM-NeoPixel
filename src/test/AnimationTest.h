@@ -1,3 +1,4 @@
+#ifdef OPENKNX_NEOPIXEL_TESTS
 /**
  * @file AnimationTest.h
  * @brief Animation Test System for NeoPixel
@@ -96,3 +97,4 @@ class AnimationTest
     void logPerformanceStats();
     void initRainbowTable(uint8_t brightness);
 };
+#endif // OPENKNX_NEOPIXEL_TESTS

@@ -260,6 +260,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     // Simple test commands
     else if (command == "neo simple")
     {
+        SimpleTest::instance().init( 22, 64);
         SimpleTest::instance().runOnce();
         return true;
     }
