@@ -2232,7 +2232,7 @@ bool NeoPixel::processEffectsCommand()
     openknx.logger.log(" 5 │ Juggle       │ FastLED │ Weaving colored dots");
     openknx.logger.log(" 6 │ BPM          │ FastLED │ Pulsing stripes");
     openknx.logger.log(" 7 │ Cylon        │ FastLED │ Bouncing LED eye");
-    openknx.logger.log(" 8 │ SK6812Test   │ Test    │ RGBW test pattern");
+    openknx.logger.log(" 8 │ RGBW Test    │ Test    │ RGBW test pattern");
     openknx.logger.log(" 9 │ GarageDoor   │ Custom  │ 3-phase garage animation");
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
     openknx.logger.log("══════════════════════════════════════════════════════════");
@@ -2303,7 +2303,7 @@ bool NeoPixel::processEffectCommand(const std::string& args)
             effect = EffectPool::getCylon();
             break;
         case 8:
-            effect = EffectPool::getSK6812Test();
+            effect = EffectPool::getRGBWTest();
             break;
         case 9:
             effect = EffectPool::getGarageDoor();

@@ -30,7 +30,7 @@ class ConfettiEffect;
 class JuggleEffect;
 class BPMEffect;
 class CylonEffect;
-class SK6812TestEffect;
+class RGBWTestEffect;
 class GarageDoorEffect;
 
 /**
@@ -49,7 +49,7 @@ class EffectPool
     static Effect* getJuggle();
     static Effect* getBPM();
     static Effect* getCylon();
-    static Effect* getSK6812Test();
+    static Effect* getRGBWTest();
     static Effect* getGarageDoor();
     //
     // -----------------------------------------------------------
