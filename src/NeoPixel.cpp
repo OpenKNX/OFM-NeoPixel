@@ -1,5 +1,4 @@
 #include "NeoPixel.h"
-#include "effects/EffectPool.h"      // Effect Pool for LED effects
 #include "test/PerformanceTracker.h" // Performance tracking (always available)
 
 #ifdef OPENKNX_NEOPIXEL_TESTS // Test systems (optional - animation/simple tests only)
@@ -38,7 +37,6 @@ NeoPixel::~NeoPixel()
         _manager = nullptr;
     }
 }
-
 
 // =============================================================================
 // NeoPixel OpenKNX Module Methods
@@ -171,6 +169,24 @@ PhysicalStrip* NeoPixel::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol p
 }
 
 /**
+ * @brief Add a new SPI LED strip
+ * @param mosiPin MOSI pin number (Data pin of the strip)
+ * @param sckPin SCK pin number (Clock pin of the strip)
+ * @param ledCount Number of LEDs in the strip
+ * @param protocol LED protocol type (Optional, default is APA102)
+ */
+PhysicalStrip* NeoPixel::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol)
+{
+    if (!_manager)
+    {
+        logErrorP("NeoPixel manager not initialized!");
+        return nullptr;
+    }
+
+    return _manager->addSpiStrip(mosiPin, sckPin, ledCount, protocol);
+}
+
+/**
  * @brief Add a virtual strip
  */
 VirtualStrip* NeoPixel::addVirtualStrip(uint16_t totalLeds, ColorOrder colorOrder)
@@ -236,5 +252,3 @@ void NeoPixel::setAutoUpdate(bool enabled)
         logInfoP("Auto-update disabled");
     }
 }
-
-

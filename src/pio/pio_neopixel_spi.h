@@ -110,6 +110,7 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
     uint8_t* getBuffer() override { return _inst ? _inst->buffer : nullptr; }
     size_t getBufferSize() const override { return _inst ? _inst->bufferSize : 0; }
     bool isInitialized() const override { return _inst ? _inst->initialized : false; }
+    DriverImplementation getDriverType() const override { return DriverImplementation::PIO_SPI; }
 
     inline PIO getPio() const { return _inst ? _inst->pio : nullptr; }
     inline uint getStateMachine() const { return _inst ? _inst->sm : 0; }

@@ -529,8 +529,7 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
         // According to protocol, first byte is brightness/gray level byte, then B, G, R
         // The highest 3 bits are '111' followed by 5 bits of brightness
         // Example: brightness=31 -> 0xFF(11111111) (full brightness), brightness=0 -> 0xE0(11100000) (off)
-        uint8_t brightness_byte = 0xE0 | (brightness & 0x1F); // 111xxxxx
-        _inst->buffer[offset] = brightness_byte;
+        _inst->buffer[offset] = 0xE0 | (brightness & 0x1F); // 111xxxxx
         _inst->buffer[offset + 1] = b;
         _inst->buffer[offset + 2] = g;
         _inst->buffer[offset + 3] = r;
@@ -540,7 +539,7 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
         {
             openknx.logger.logWithPrefixAndValues("PIO NeoPixel Spi",
                                                   "  Written: [%d]=%02X [%d]=%02X [%d]=%02X [%d]=%02X",
-                                                  offset, brightness_byte,
+                                                  offset, 0xE0 | (brightness & 0x1F),
                                                   offset + 1, b,
                                                   offset + 2, g,
                                                   offset + 3, r);

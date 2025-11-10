@@ -281,7 +281,20 @@ bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, 
 }
 
 /**
- * Convert RGB to buffer format
+ * @brief Convert hardware-ordered bytes to SPI buffer format
+ * @param index LED index
+ * @param r First color byte (already in hardware order)
+ * @param g Second color byte (already in hardware order)
+ * @param b Third color byte (already in hardware order)
+ * @param brightness Brightness value (0-255, converted to 5-bit for APA102)
+ * 
+ * IMPORTANT: PhysicalStrip has already converted RGB to hardware ColorOrder!
+ * For APA102 with BGR: r=B, g=G, b=R (not RGB!)
+ * 
+ * This function writes hardware-ordered bytes directly to protocol-specific buffer:
+ * - APA102/SK9822: [Brightness byte][byte0][byte1][byte2]
+ * - WS2801: [byte0][byte1][byte2]
+ * - LPD8806: [byte0][byte1][byte2] (7-bit format)
  */
 void HW_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t brightness)
 {
@@ -292,20 +305,19 @@ void HW_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t 
         case LedProtocol::APA102:
         case LedProtocol::SK9822:
         {
-            // Info - Format: 0b11111BBB RRRRGGGG BBBBWWWW for APA102
-            // Start Frame:   4x 0x00
-            // End Frame:     max. 15 Bits at the end
+            // APA102: [Brightness][byte0][byte1][byte2]
+            // PhysicalStrip already converted RGB to hardware order (e.g., BGR)
             uint32_t offset = 4 + (index * 4);                  // Skip Start Frame
-            _inst->buffer[offset] = 0xE0 | (brightness & 0x1F); // Global Brightness
-            _inst->buffer[offset + 1] = b;                      // Blue
-            _inst->buffer[offset + 2] = r;                      // Red
-            _inst->buffer[offset + 3] = g;                      // Green
+            _inst->buffer[offset] = 0xE0 | (brightness & 0x1F); // Global Brightness (5-bit)
+            _inst->buffer[offset + 1] = r;                      // Hardware byte 0
+            _inst->buffer[offset + 2] = g;                      // Hardware byte 1
+            _inst->buffer[offset + 3] = b;                      // Hardware byte 2
             break;
         }
 
         case LedProtocol::WS2801:
         {
-            // Format: RGB simple, 8-Bit per color
+            // WS2801: [byte0][byte1][byte2] (hardware order)
             uint32_t offset = index * 3;
             _inst->buffer[offset] = r;
             _inst->buffer[offset + 1] = g;
@@ -315,7 +327,7 @@ void HW_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t 
 
         case LedProtocol::LPD8806:
         {
-            // Format: 7-Bit RGB (MSB is used as "Update" bit) - This is a special format. Need to shift right by 1
+            // LPD8806: 7-Bit format with MSB=1 as update bit
             uint32_t offset = index * 3;
             _inst->buffer[offset] = 0x80 | (r >> 1);     // MSB = 1: Update bit
             _inst->buffer[offset + 1] = 0x80 | (g >> 1); // MSB = 1: Update bit

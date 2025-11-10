@@ -69,18 +69,44 @@ class PhysicalStrip
     const char* getDriverName() const;
 
     // ====================================================================
+    // Color Order
+    // ====================================================================
+    void setColorOrder(ColorOrder order)
+    {
+        _colorOrder = order;
+        _hasColorOrder = true;
+    }
+    ColorOrder getColorOrder() const { return _colorOrder; }
+    bool hasColorOrder() const { return _hasColorOrder; }
+
+    // ====================================================================
+    // Hardware Brightness (APA102/SK9822 only)
+    // ====================================================================
+    /**
+     * @brief Set hardware brightness for APA102/SK9822 (0-255)
+     * Only effective for SPI protocols with global brightness support
+     * Silently ignored for WS2812B, SK6812, etc.
+     */
+    void setHardwareBrightness(uint8_t brightness);
+    uint8_t getHardwareBrightness() const { return _hardwareBrightness; }
+    bool supportsHardwareBrightness() const;
+
+    // ====================================================================
     // Advanced
     // ====================================================================
     bool setUpdateFrequency(uint32_t frequencyHz);
     IHardwareDriver* getDriver() const { return _driver; }
 
   private:
-    IHardwareDriver* _driver; // Underlying driver
-    uint32_t _dataPin;        // GPIO pin (MOSI/Data)
-    uint32_t _clockPin;       // GPIO pin (Clock for SPI)
-    uint16_t _ledCount;       // Number of LEDs
-    LedProtocol _protocol;    // LED protocol
-    bool _initialized;        // Initialized?
+    IHardwareDriver* _driver;    // Underlying driver
+    uint32_t _dataPin;           // GPIO pin (MOSI/Data)
+    uint32_t _clockPin;          // GPIO pin (Clock for SPI)
+    uint16_t _ledCount;          // Number of LEDs
+    LedProtocol _protocol;       // LED protocol
+    bool _initialized;           // Initialized?
+    ColorOrder _colorOrder;      // Color order for this strip
+    bool _hasColorOrder;         // Whether ColorOrder was explicitly set
+    uint8_t _hardwareBrightness; // Hardware brightness (0-255, default 255 = max, only APA102/SK9822)
 
     bool createDriver(DriverType driverType); // Create appropriate driver
 };

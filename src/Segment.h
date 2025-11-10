@@ -40,23 +40,23 @@ class Effect; // Forward declaration
  */
 struct EffectConfig
 {
-    uint8_t speed;            // Speed 1-255
-    uint8_t intensity;        // Intensity 1-255
-    uint8_t brightness;       // Segment brightness 0-255 (255 = no dimming, all strips)
-    uint8_t apa102Brightness; // APA102 hardware brightness 0-255 (255 = max, only for APA102)
-    uint32_t primaryRGBW;     // Primary color (RGBW packed)
-    uint32_t secondaryRGBW;   // Secondary color (RGBW packed)
-    uint8_t reverse;          // Reverse direction (0/1)
-    uint8_t count;            // Count (e.g. dots, drops)
-    uint8_t fade;             // Fade amount 0-255
-    uint8_t mode;             // Effect-specific mode
+    uint8_t speed;              // Speed 1-255
+    uint8_t intensity;          // Intensity 1-255
+    uint8_t brightness;         // Software brightness 0-255 (255 = no dimming, ALL LED types)
+    uint8_t hardwareBrightness; // Hardware brightness 0-255 (255 = max, only for APA102/SK9822)
+    uint32_t primaryRGBW;       // Primary color (RGBW packed)
+    uint32_t secondaryRGBW;     // Secondary color (RGBW packed)
+    uint8_t reverse;            // Reverse direction (0/1)
+    uint8_t count;              // Count (e.g. dots, drops)
+    uint8_t fade;               // Fade amount 0-255
+    uint8_t mode;               // Effect-specific mode
 
     uint32_t option1; // Additional parameter 1
     uint32_t option2; // Additional parameter 2
 
     // Default Constructor
     EffectConfig()
-        : speed(128), intensity(128), brightness(255), apa102Brightness(255),
+        : speed(128), intensity(128), brightness(255), hardwareBrightness(255),
           primaryRGBW(0xFFFFFFFF), secondaryRGBW(0x00000000),
           reverse(0), count(1), fade(128), mode(0),
           option1(0), option2(0) {}
@@ -121,6 +121,18 @@ class Segment
     void clearAll();
     bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) const;
     bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& w) const;
+    inline uint32_t getPrimaryColor() const { return _config.primaryRGBW; }     // Get primary color
+    inline uint32_t getSecondaryColor() const { return _config.secondaryRGBW; } // Get secondary color
+    inline bool setPrimaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t w)
+    {
+        _config.primaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)w;
+        return true;
+    } // Set primary color
+    inline bool setSecondaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t w)
+    {
+        _config.secondaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)w;
+        return true;
+    } // Set secondary color
 
     // ====================================================================
     // Update & Control
@@ -139,19 +151,25 @@ class Segment
     // ====================================================================
     // Effect Configuration & State Access
     // ====================================================================
-    EffectConfig& getConfig() { return _config; }                               // Get effect configuration (read/write)
-    const EffectConfig& getConfig() const { return _config; }                   // Get effect configuration (read-only)
-    EffectState& getState() { return _state; }                                  // Get effect state (read/write)
-    const EffectState& getState() const { return _state; }                      // Get effect state (read-only)
-    void setBrightness(uint8_t brightness) { _config.brightness = brightness; } // Set segment brightness (0-255)
-    uint8_t getBrightness() const { return _config.brightness; }                // Get segment brightness (0-255)
+    EffectConfig& getConfig() { return _config; }             // Get effect configuration (read/write)
+    const EffectConfig& getConfig() const { return _config; } // Get effect configuration (read-only)
+    EffectState& getState() { return _state; }                // Get effect state (read/write)
+    const EffectState& getState() const { return _state; }    // Get effect state (read-only)
 
     /**
-     * @brief Set APA102 hardware brightness (0-255, default 255 = max)
-     * Only affects APA102 strips, uses hardware brightness feature
+     * @brief Set software brightness (0-255, default 255 = no dimming)
+     * Applies RGB multiplication in Effect::update() - works for ALL LED types
      */
-    void setAPA102Brightness(uint8_t brightness) { _config.apa102Brightness = brightness; } // Set APA102 hardware brightness (0-255, default 255 = max)
-    uint8_t getAPA102Brightness() const { return _config.apa102Brightness; }                // Get APA102 hardware brightness (0-255)
+    void setBrightness(uint8_t brightness) { _config.brightness = brightness; }
+    uint8_t getBrightness() const { return _config.brightness; }
+
+    /**
+     * @brief Set hardware brightness (0-255, default 255 = max)
+     * Only effective for APA102/SK9822 strips (uses hardware global brightness feature)
+     * Silently ignored for WS2812B, SK6812, etc. (they don't support hardware brightness)
+     */
+    void setHardwareBrightness(uint8_t brightness) { _config.hardwareBrightness = brightness; }
+    uint8_t getHardwareBrightness() const { return _config.hardwareBrightness; }
 
   private:
     VirtualStrip* _virtualStrip; // Belongs to this virtual strip

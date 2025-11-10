@@ -2,7 +2,6 @@
 #include "OpenKNX/Log/Logger.h"
 #include <Arduino.h>
 
-
 // ============================================================================
 // Constructor & Destructor
 // ============================================================================
@@ -43,7 +42,6 @@ NeoPixelManager::~NeoPixelManager()
     _strips.clear();
 }
 
-
 // =====================================================================
 // Strip Management
 // =====================================================================
@@ -54,10 +52,7 @@ NeoPixelManager::~NeoPixelManager()
  * @param ledCount Number of LEDs
  * @param protocol LED protocol (WS2812B, SK6812, APA102, etc.)
  */
-PhysicalStrip* NeoPixelManager::addStrip(
-    uint32_t pin,
-    uint16_t ledCount,
-    LedProtocol protocol)
+PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol)
 {
 #if NEOPIXEL_ENFORCE_LIMITS
     // Check if maximum number of strips reached
@@ -100,11 +95,7 @@ PhysicalStrip* NeoPixelManager::addStrip(
  * @param protocol LED protocol (WS2812B, SK6812, APA102, etc.)
  * @param driverType Explicit driver selection (default: AUTO)
  */
-PhysicalStrip* NeoPixelManager::addStrip(
-    uint32_t pin,
-    uint16_t ledCount,
-    LedProtocol protocol,
-    DriverType driverType)
+PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType)
 {
 #if NEOPIXEL_ENFORCE_LIMITS
     // Check if maximum number of strips reached
@@ -160,11 +151,7 @@ PhysicalStrip* NeoPixelManager::addStrip(
  * @param ledCount Number of LEDs
  * @param protocol LED protocol (WS2812B, SK6812, APA102, etc.)
  */
-PhysicalStrip* NeoPixelManager::addSpiStrip(
-    uint32_t mosiPin,
-    uint32_t sckPin,
-    uint16_t ledCount,
-    LedProtocol protocol)
+PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol)
 {
 #if NEOPIXEL_ENFORCE_LIMITS
     // Check if maximum number of strips reached
@@ -209,12 +196,7 @@ PhysicalStrip* NeoPixelManager::addSpiStrip(
  * @param protocol LED protocol (WS2812B, SK6812, APA102, etc.)
  * @param driverType Explicit driver selection (default: AUTO)
  */
-PhysicalStrip* NeoPixelManager::addSpiStrip(
-    uint32_t mosiPin,
-    uint32_t sckPin,
-    uint16_t ledCount,
-    LedProtocol protocol,
-    DriverType driverType)
+PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, DriverType driverType)
 {
 #if NEOPIXEL_ENFORCE_LIMITS
     // Check if maximum number of strips reached
@@ -259,6 +241,62 @@ PhysicalStrip* NeoPixelManager::addSpiStrip(
     logDebugP("NeoPixelManager: Added SPI strip at MOSI=%d, SCK=%d with %d LEDs (Driver: %d)",
               mosiPin, sckPin, ledCount, (int)driverType);
 
+    return strip;
+}
+
+/**
+ * Add PhysicalStrip with ColorOrder
+ */
+PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder)
+{
+    PhysicalStrip* strip = addStrip(pin, ledCount, protocol);
+    if (strip)
+    {
+        strip->setColorOrder(colorOrder);
+        logDebugP("NeoPixelManager: Set ColorOrder %d for strip at pin %d", (int)colorOrder, pin);
+    }
+    return strip;
+}
+
+/**
+ * Add PhysicalStrip with ColorOrder and DriverType
+ */
+PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType, ColorOrder colorOrder)
+{
+    PhysicalStrip* strip = addStrip(pin, ledCount, protocol, driverType);
+    if (strip)
+    {
+        strip->setColorOrder(colorOrder);
+        logDebugP("NeoPixelManager: Set ColorOrder %d for strip at pin %d", (int)colorOrder, pin);
+    }
+    return strip;
+}
+
+/**
+ * Add SPI PhysicalStrip with ColorOrder
+ */
+PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder)
+{
+    PhysicalStrip* strip = addSpiStrip(mosiPin, sckPin, ledCount, protocol);
+    if (strip)
+    {
+        strip->setColorOrder(colorOrder);
+        logDebugP("NeoPixelManager: Set ColorOrder %d for SPI strip at MOSI=%d", (int)colorOrder, mosiPin);
+    }
+    return strip;
+}
+
+/**
+ * Add SPI PhysicalStrip with ColorOrder and DriverType
+ */
+PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, DriverType driverType, ColorOrder colorOrder)
+{
+    PhysicalStrip* strip = addSpiStrip(mosiPin, sckPin, ledCount, protocol, driverType);
+    if (strip)
+    {
+        strip->setColorOrder(colorOrder);
+        logDebugP("NeoPixelManager: Set ColorOrder %d for SPI strip at MOSI=%d", (int)colorOrder, mosiPin);
+    }
     return strip;
 }
 
@@ -432,12 +470,18 @@ void NeoPixelManager::update(uint32_t deltaTime)
     }
 
     // ========== PHASE 2: SYNC VIRTUAL TO PHYSICAL ==========
-    // Synchronisiere alle Virtual→Physical Buffer
-    for (auto vstrip : _virtualStrips)
+    // Synchronisiere alle Virtual→Physical Buffer mit Hardware-Brightness
+    for (auto segment : _segments)
     {
-        if (vstrip && vstrip->isDirty())
+        if (segment && segment->getVirtualStrip())
         {
-            vstrip->syncToPhysical();
+            VirtualStrip* vstrip = segment->getVirtualStrip();
+            if (vstrip->isDirty())
+            {
+                // Propagiere Hardware-Brightness vom Segment zu PhysicalStrips
+                uint8_t hwBrightness = segment->getHardwareBrightness();
+                vstrip->syncToPhysical(hwBrightness);
+            }
         }
     }
 
@@ -779,7 +823,6 @@ void NeoPixelManager::countResourceUsage(uint32_t& pioUsed, uint32_t& spiUsed, u
     }
 }
 
-
 // ============================================================================
 // Virtual Strip Management
 // ============================================================================
@@ -843,7 +886,6 @@ VirtualStrip* NeoPixelManager::getVirtualStrip(uint32_t index)
     if (index >= _virtualStrips.size()) return nullptr;
     return _virtualStrips[index];
 }
-
 
 // ============================================================================
 // Segment Management
@@ -915,7 +957,6 @@ bool NeoPixelManager::attachEffect(Segment* segment, Effect* effect)
     segment->setEffect(effect);
     return true;
 }
-
 
 // ============================================================================
 // VirtualStrip Removal

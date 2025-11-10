@@ -3,11 +3,11 @@
  * @brief Central Management for Multiple LED Strips
  *
  * NeoPixelManager is the main manager for all LED strips in the application
- * 
-* @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
+ *
+ * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
- 
- /* 
+
+/*
  * NeoPixelManager manages:
  * - Multiple PhysicalStrips (1-Wire and SPI)
  * - Update loops
@@ -43,7 +43,7 @@
  * Maximum number of physical LED strips that can be managed.
  * Can be overridden before including this header:
  *   #define NEOPIXEL_MAX_PHYSICAL_STRIPS 16
- * 
+ *
  * Default: 8 (sufficient for most RP2040/ESP32 applications)
  */
 #ifndef NEOPIXEL_MAX_PHYSICAL_STRIPS
@@ -53,7 +53,7 @@
 /**
  * Maximum number of virtual LED strips that can be created.
  * Virtual strips are lightweight wrappers around segments of physical strips.
- * 
+ *
  * Default: 4 (typical use cases)
  */
 #ifndef NEOPIXEL_MAX_VIRTUAL_STRIPS
@@ -63,7 +63,7 @@
 /**
  * Maximum number of segments that can be defined.
  * Segments are ranges within physical strips used by virtual strips or effects.
- * 
+ *
  * Default: 16 (allows multiple segments per strip)
  */
 #ifndef NEOPIXEL_MAX_SEGMENTS
@@ -74,10 +74,10 @@
  * Enable/disable limit enforcement at runtime.
  * When enabled (1): addStrip/addVirtualStrip/addSegment will fail if limits exceeded
  * When disabled (0): Limits are only used for reserve(), exceeding them causes reallocation
- * 
+ *
  * Can be overridden:
  *   #define NEOPIXEL_ENFORCE_LIMITS 0  // Disable enforcement
- * 
+ *
  * Default: 1 (enabled - recommended for stability)
  */
 #ifndef NEOPIXEL_ENFORCE_LIMITS
@@ -116,10 +116,14 @@ class NeoPixelManager
     // ====================================================================
     // Strip Management
     // ====================================================================
-    PhysicalStrip* addStrip( uint32_t pin, uint16_t ledCount, LedProtocol protocol = LedProtocol::WS2812B);
-    PhysicalStrip* addStrip( uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType);
-    PhysicalStrip* addSpiStrip( uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol);
-    PhysicalStrip* addSpiStrip( uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, DriverType driverType);
+    PhysicalStrip* addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol = LedProtocol::WS2812B);
+    PhysicalStrip* addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType);
+    PhysicalStrip* addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder);
+    PhysicalStrip* addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType, ColorOrder colorOrder);
+    PhysicalStrip* addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol);
+    PhysicalStrip* addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, DriverType driverType);
+    PhysicalStrip* addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder);
+    PhysicalStrip* addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, DriverType driverType, ColorOrder colorOrder);
     bool removeStrip(PhysicalStrip* strip);
     PhysicalStrip* getStrip(uint32_t index);
     uint32_t getStripCount() const { return _strips.size(); }
@@ -186,14 +190,14 @@ class NeoPixelManager
     static uint32_t getMaxStrips();
 
   private:
-    std::vector<PhysicalStrip*> _strips;  // Physical strips
+    std::vector<PhysicalStrip*> _strips;       // Physical strips
     std::vector<VirtualStrip*> _virtualStrips; // Virtual strips
-    std::vector<Segment*> _segments;         // Segments
-    bool _initialized; // Initialization state of manager
-    uint32_t _lastUpdateTime; // Last update time in milliseconds
-    uint32_t _updateCount; // Number of updates since start
-    uint32_t _errorCount; // Error counter
+    std::vector<Segment*> _segments;           // Segments
+    bool _initialized;                         // Initialization state of manager
+    uint32_t _lastUpdateTime;                  // Last update time in milliseconds
+    uint32_t _updateCount;                     // Number of updates since start
+    uint32_t _errorCount;                      // Error counter
 
-    bool checkResourcesAvailable(LedProtocol protocol); // Check if resources are available for new strip
+    bool checkResourcesAvailable(LedProtocol protocol);                               // Check if resources are available for new strip
     void countResourceUsage(uint32_t& pioUsed, uint32_t& spiUsed, uint32_t& rmtUsed); // Count current resource usage
 };

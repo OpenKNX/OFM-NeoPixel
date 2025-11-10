@@ -91,6 +91,7 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
     uint8_t* getBuffer() override { return _inst ? _inst->buffer : nullptr; }
     size_t getBufferSize() const override { return _inst ? _inst->bufferSize : 0; }
     bool isInitialized() const override { return _inst ? _inst->initialized : false; }
+    DriverImplementation getDriverType() const override { return DriverImplementation::PIO_SERIAL; }
 
     /**
      * @brief Get active PIO instance (pio0/pio1)

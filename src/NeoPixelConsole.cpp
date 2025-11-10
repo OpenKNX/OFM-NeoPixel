@@ -1,10 +1,10 @@
 /**
  * @file        NeoPixelConsole.cpp
  * @brief       Console command handlers for NeoPixel LED control system
- * 
+ *
  * This file contains all console command processing for the NeoPixel module.
  * Separated from main NeoPixel.cpp for better code organization.
- * 
+ *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 
@@ -40,7 +40,6 @@
 
 // External performance tracker (defined in NeoPixel.cpp)!!
 extern PerformanceTracker g_perfTracker;
-
 
 // ============================================================================
 // Console Command Interface
@@ -108,9 +107,8 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.logger.log("═════════════════════ VirtualStrip Management ═══════════════════════════════════");
         openknx.logger.color(0);
         openknx.console.printHelpLine("neo virt list", "List all virtual strips");
-        openknx.console.printHelpLine("neo virt add <leds> [order]", "Create virtual strip (RGB/RBG/GRB/GBR/BGR/BRG/RGBW/GRBW)");
+        openknx.console.printHelpLine("neo virt add <leds> [type]", "Create virtual strip (RGB or RGBW, default: RGB)");
         openknx.console.printHelpLine("neo virt del <id>", "Delete virtual strip by ID");
-        openknx.console.printHelpLine("neo virt order <id> <order>", "Change color order (RGB/RBG/GRB/GBR/BGR/BRG/RGBW/GRBW)");
         openknx.console.printHelpLine("neo virt attach <virt> <phys>", "Attach physical strip to virtual strip");
         openknx.console.printHelpLine("neo virt detach <virt>", "Detach physical strip from virtual strip");
 
@@ -133,7 +131,8 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("neo effect <seg> <eff>", "Assign effect to segment");
         openknx.console.printHelpLine("neo garage <seg> <phase>", "Set GarageDoor phase (0=OPENING, 1=RUNWAY, 2=COMPLETED, 3=STOPPED)");
         openknx.console.printHelpLine("neo color <seg> <r> <g> <b> [w]", "Set segment color (0-255, w optional for RGBW)");
-        openknx.console.printHelpLine("neo brightness <seg> <val>", "Set segment brightness (0-255)");
+        openknx.console.printHelpLine("neo brightness <seg> <val>", "Set software brightness (0-255, all LED types)");
+        openknx.console.printHelpLine("neo hwbrightness <seg> <val>", "Set hardware brightness (0-255, APA102/SK9822 only)");
 
 #ifdef OPENKNX_NEOPIXEL_TESTS
         openknx.logger.log("");
@@ -238,6 +237,10 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     {
         return processBrightnessCommand(command.substr(15));
     }
+    else if (command.compare(0, 17, "neo hwbrightness ") == 0)
+    {
+        return processHardwareBrightnessCommand(command.substr(17));
+    }
 
 #ifdef OPENKNX_NEOPIXEL_TESTS
     // Animation test commands
@@ -284,7 +287,6 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
 
     return false;
 }
-
 
 // ============================================================================
 // Command Handlers
@@ -380,28 +382,50 @@ bool NeoPixel::processInfoCommand()
             auto strip = _manager->getStrip(i);
             if (strip)
             {
+                // Get protocol name
+                LedProtocol protocol = strip->getProtocol();
+                const char* protocolName = "Unknown";
+                switch (protocol)
+                {
+                    case LedProtocol::WS2812: protocolName = "WS2812"; break;
+                    case LedProtocol::WS2812B: protocolName = "WS2812B"; break;
+                    case LedProtocol::SK6812: protocolName = "SK6812"; break;
+                    case LedProtocol::APA102: protocolName = "APA102"; break;
+                    case LedProtocol::SK9822: protocolName = "SK9822"; break;
+                    case LedProtocol::WS2801: protocolName = "WS2801"; break;
+                    case LedProtocol::LPD8806: protocolName = "LPD8806"; break;
+                    default: protocolName = "Unknown"; break;
+                }
+
+                // Get ColorOrder from PhysicalStrip
+                ColorOrder order = strip->getColorOrder();
+                const char* colorOrder = "???";
+                switch (order)
+                {
+                    case ColorOrder::RGB: colorOrder = "RGB"; break;
+                    case ColorOrder::RBG: colorOrder = "RBG"; break;
+                    case ColorOrder::GRB: colorOrder = "GRB"; break;
+                    case ColorOrder::BGR: colorOrder = "BGR"; break;
+                    case ColorOrder::GBR: colorOrder = "GBR"; break;
+                    case ColorOrder::BRG: colorOrder = "BRG"; break;
+                    case ColorOrder::RGBW: colorOrder = "RGBW"; break;
+                    case ColorOrder::GRBW: colorOrder = "GRBW"; break;
+                }
+
+                // Display strip info (GPIO, LEDs, Status)
+                openknx.logger.logWithValues("  [%d] GPIO%d: %d LEDs - %s",
+                                             i, strip->getDataPin(), strip->getLedCount(),
+                                             strip->isInitialized() ? "OK" : "ERROR");
+
+                // Display protocol and ColorOrder
+                openknx.logger.logWithValues("      Protocol: %s, ColorOrder: %s",
+                                             protocolName, colorOrder);
+
 #ifdef ARDUINO_ARCH_RP2040
                 // RP2040: Show PIO/SM/DMA info
                 auto driver = strip->getDriver();
                 if (driver)
                 {
-                    // Check for SPI driver first (APA102, WS2801, etc.) - needs different pin format
-                    auto spiDriver = dynamic_cast<PIO_NeoPixel_SPI*>(driver);
-                    if (spiDriver)
-                    {
-                        openknx.logger.logWithValues("  [%d] CLK:GPIO%d, MOSI:GPIO%d: %d LEDs - %s",
-                                                     i, spiDriver->getClkPin(), spiDriver->getMosiPin(), 
-                                                     strip->getLedCount(),
-                                                     strip->isInitialized() ? "OK" : "ERROR");
-                    }
-                    else
-                    {
-                        // 1-Wire strips show single data pin
-                        openknx.logger.logWithValues("  [%d] GPIO%d: %d LEDs - %s",
-                                                     i, strip->getDataPin(), strip->getLedCount(),
-                                                     strip->isInitialized() ? "OK" : "ERROR");
-                    }
-                    
                     // Check for 1-Wire Serial driver (WS2812B, SK6812, etc.)
                     auto pioDriver = dynamic_cast<PIO_NeoPixel_Serial*>(driver);
                     if (pioDriver)
@@ -411,46 +435,23 @@ bool NeoPixel::processInfoCommand()
                                                                                      : "PIO2";
                         int dmaChannel = pioDriver->getDmaChannel();
                         uint32_t freq = pioDriver->getFrequency();
-                        uint8_t bpl = pioDriver->getBytesPerLed();
-
-                        // Protocol info
-                        const char* ledType = (bpl == 4) ? "RGBW" : "RGB";
-
-                        // Color order
-                        ColorOrder order = pioDriver->getColorOrder();
-                        const char* colorOrder = "???";
-                        switch (order)
-                        {
-                            case ColorOrder::RGB: colorOrder = "RGB"; break;
-                            case ColorOrder::RBG: colorOrder = "RBG"; break;
-                            case ColorOrder::GRB: colorOrder = "GRB"; break;
-                            case ColorOrder::BGR: colorOrder = "BGR"; break;
-                            case ColorOrder::GBR: colorOrder = "GBR"; break;
-                            case ColorOrder::BRG: colorOrder = "BRG"; break;
-                            case ColorOrder::GRBW: colorOrder = "GRBW"; break;
-                            case ColorOrder::RGBW: colorOrder = "RGBW"; break;
-                        }
 
                         if (dmaChannel >= 0)
                         {
-                            openknx.logger.logWithValues("      Hardware: %s/SM%d, DMA Ch%d",
-                                                         pioName, pioDriver->getStateMachine(), dmaChannel);
-                            openknx.logger.logWithValues("      Protocol: %dkHz %s (%s)",
-                                                         freq / 1000, ledType, colorOrder);
+                            openknx.logger.logWithValues("      Hardware: %s/SM%d, DMA Ch%d, %dkHz",
+                                                         pioName, pioDriver->getStateMachine(),
+                                                         dmaChannel, freq / 1000);
                         }
                         else
                         {
-                            openknx.logger.logWithValues("      Hardware: %s/SM%d (no DMA)",
-                                                         pioName, pioDriver->getStateMachine());
-                            openknx.logger.logWithValues("      Protocol: %dkHz %s (%s)",
-                                                         freq / 1000, ledType, colorOrder);
+                            openknx.logger.logWithValues("      Hardware: %s/SM%d (no DMA), %dkHz",
+                                                         pioName, pioDriver->getStateMachine(),
+                                                         freq / 1000);
                         }
                     }
                     else
                     {
                         // Check for SPI driver (APA102, WS2801, etc.)
-                        // This block is now unreachable since we handle SPI above
-                        // Keeping it for backward compatibility but it won't execute
                         auto spiDriver = dynamic_cast<PIO_NeoPixel_SPI*>(driver);
                         if (spiDriver)
                         {
@@ -458,57 +459,28 @@ bool NeoPixel::processInfoCommand()
                             const char* pioName = (pio == pio0) ? "PIO0" : (pio == pio1) ? "PIO1"
                                                                                          : "PIO2";
                             int dmaChannel = spiDriver->getDmaChannel();
-
-                            // Get protocol name
-                            LedProtocol protocol = strip->getProtocol();
-                            const char* protocolName = "???";
-                            switch (protocol)
-                            {
-                                case LedProtocol::APA102: protocolName = "APA102"; break;
-                                case LedProtocol::SK9822: protocolName = "SK9822"; break;
-                                case LedProtocol::WS2801: protocolName = "WS2801"; break;
-                                case LedProtocol::LPD8806: protocolName = "LPD8806"; break;
-                                default: protocolName = "SPI"; break;
-                            }
-
-                            // Color order
-                            ColorOrder order = spiDriver->getColorOrder();
-                            const char* colorOrder = "???";
-                            switch (order)
-                            {
-                                case ColorOrder::RGB: colorOrder = "RGB"; break;
-                                case ColorOrder::RBG: colorOrder = "RBG"; break;
-                                case ColorOrder::GRB: colorOrder = "GRB"; break;
-                                case ColorOrder::BGR: colorOrder = "BGR"; break;
-                                case ColorOrder::GBR: colorOrder = "GBR"; break;
-                                case ColorOrder::BRG: colorOrder = "BRG"; break;
-                                default: colorOrder = "RGB"; break;
-                            }
-                            
-                            // Get SPI frequency
                             uint32_t spiFreq = spiDriver->getSpiFrequency();
+
+                            openknx.logger.logWithValues("      Pins: CLK=GPIO%d, MOSI=GPIO%d",
+                                                         spiDriver->getClkPin(), spiDriver->getMosiPin());
 
                             if (dmaChannel >= 0)
                             {
-                                openknx.logger.logWithValues("      Hardware: %s/SM%d (SPI), DMA Ch%d",
-                                                             pioName, spiDriver->getStateMachine(), dmaChannel);
+                                openknx.logger.logWithValues("      Hardware: %s/SM%d (SPI), DMA Ch%d, %dMHz",
+                                                             pioName, spiDriver->getStateMachine(),
+                                                             dmaChannel, spiFreq / 1000000);
                             }
                             else
                             {
-                                openknx.logger.logWithValues("      Hardware: %s/SM%d (SPI, no DMA)",
-                                                             pioName, spiDriver->getStateMachine());
+                                openknx.logger.logWithValues("      Hardware: %s/SM%d (SPI, no DMA), %dMHz",
+                                                             pioName, spiDriver->getStateMachine(),
+                                                             spiFreq / 1000000);
                             }
-                            openknx.logger.logWithValues("      Protocol: %s, %dMHz (%s)",
-                                                         protocolName, spiFreq / 1000000, colorOrder);
                         }
                     }
                 }
 #elif defined(ARDUINO_ARCH_ESP32)
                 // ESP32: Show RMT info
-                openknx.logger.logWithValues("  [%d] GPIO%d: %d LEDs - %s",
-                                             i, strip->getDataPin(), strip->getLedCount(),
-                                             strip->isInitialized() ? "OK" : "ERROR");
-                
                 auto driver = strip->getDriver();
                 if (driver)
                 {
@@ -518,11 +490,6 @@ bool NeoPixel::processInfoCommand()
                         openknx.logger.log("      Hardware: RMT Channel");
                     }
                 }
-#else
-                // Other platforms: Just show GPIO pin
-                openknx.logger.logWithValues("  [%d] GPIO%d: %d LEDs - %s",
-                                             i, strip->getDataPin(), strip->getLedCount(),
-                                             strip->isInitialized() ? "OK" : "ERROR");
 #endif
             }
         }
@@ -1005,7 +972,6 @@ bool NeoPixel::processSimpleTestStopCommand()
 }
 #endif // OPENKNX_NEOPIXEL_TESTS
 
-
 // ============================================================================
 // Benchmark Commands
 // ============================================================================
@@ -1124,7 +1090,6 @@ bool NeoPixel::processBenchmarkCommand(const std::string& args)
     return true;
 }
 #endif // OPENKNX_NEOPIXEL_BENCHMARK
-
 
 // ============================================================================
 // Performance Monitoring Command
@@ -1319,7 +1284,6 @@ bool NeoPixel::processPerformanceCommand()
     return true;
 }
 
-
 // ============================================================================
 // PhysicalStrip Management Commands
 // ============================================================================
@@ -1360,51 +1324,116 @@ bool NeoPixel::processPhysListCommand()
 
     openknx.logger.log("");
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("════════════════════════ Physical LED Strips ═══════════════════════");
+    openknx.logger.log("══════════════════════════════════════════════════════════════════════");
+    openknx.logger.log("  Physical Strips");
+    openknx.logger.log("══════════════════════════════════════════════════════════════════════");
     openknx.logger.color(0);
 
     uint32_t stripCount = _manager->getStripCount();
 
     if (stripCount == 0)
     {
-        openknx.logger.log("  No physical strips configured.");
-        openknx.logger.log("  Use 'neo phys add <gpio_pin> <led_count>' to create one.");
+        openknx.logger.log("No physical strips configured.");
+        openknx.logger.log("Use 'neo phys add <gpio> <leds>' to create one.");
     }
     else
     {
-        openknx.logger.log("ID  GPIO  LEDs  Protocol        Driver     Status");
-        openknx.logger.log("────────────────────────────────────────────────────────────────────");
+        openknx.logger.log("ID  │ Pins           │ LEDs │ Protocol │ Order │ Driver      │ Status");
+        openknx.logger.log("────┼────────────────┼──────┼──────────┼───────┼─────────────┼────────");
 
         for (uint32_t i = 0; i < stripCount; i++)
         {
             auto strip = _manager->getStrip(i);
             if (strip)
             {
-                const char* protocol = "UNKNOWN";
-                switch (strip->getProtocol())
+                // Get protocol name
+                const char* protocol = "???";
+                LedProtocol proto = strip->getProtocol();
+                switch (proto)
                 {
+                    case LedProtocol::WS2812: protocol = "WS2812"; break;
                     case LedProtocol::WS2812B: protocol = "WS2812B"; break;
                     case LedProtocol::SK6812: protocol = "SK6812"; break;
                     case LedProtocol::APA102: protocol = "APA102"; break;
+                    case LedProtocol::SK9822: protocol = "SK9822"; break;
+                    case LedProtocol::WS2801: protocol = "WS2801"; break;
+                    case LedProtocol::LPD8806: protocol = "LPD8806"; break;
                     default: break;
                 }
 
-                const char* driver = strip->getDriverName();
-                const char* status = strip->isBusy() ? "BUSY" : "Ready";
+                // Get ColorOrder from PhysicalStrip
+                const char* colorOrder = "???";
+                switch (strip->getColorOrder())
+                {
+                    case ColorOrder::RGB: colorOrder = "RGB"; break;
+                    case ColorOrder::RBG: colorOrder = "RBG"; break;
+                    case ColorOrder::GRB: colorOrder = "GRB"; break;
+                    case ColorOrder::BGR: colorOrder = "BGR"; break;
+                    case ColorOrder::GBR: colorOrder = "GBR"; break;
+                    case ColorOrder::BRG: colorOrder = "BRG"; break;
+                    case ColorOrder::RGBW: colorOrder = "RGBW"; break;
+                    case ColorOrder::GRBW: colorOrder = "GRBW"; break;
+                }
 
-                openknx.logger.logWithValues("[%d] %-4d  %-4d  %-14s  %-9s  %s",
-                                             i,
-                                             strip->getDataPin(),
-                                             strip->getLedCount(),
-                                             protocol,
-                                             driver,
-                                             status);
+                const char* driver = strip->getDriverName();
+                const char* status = strip->isInitialized() ? "READY" : "ERROR";
+
+                // Check if SPI strip (APA102, WS2801, etc.)
+                bool isSpiStrip = (proto == LedProtocol::APA102 ||
+                                   proto == LedProtocol::SK9822 ||
+                                   proto == LedProtocol::WS2801 ||
+                                   proto == LedProtocol::LPD8806);
+
+                if (isSpiStrip)
+                {
+#ifdef ARDUINO_ARCH_RP2040
+                    // Get CLK and MOSI pins from SPI driver
+                    auto driverPtr = strip->getDriver();
+                    auto spiDriver = dynamic_cast<PIO_NeoPixel_SPI*>(driverPtr);
+                    if (spiDriver)
+                    {
+                        openknx.logger.logWithValues("[%d] │ CLK: %d MOSI: %d │ %4d │ %-8s │ %-5s │ %-11s │ %s",
+                                                     i,
+                                                     spiDriver->getClkPin(),
+                                                     spiDriver->getMosiPin(),
+                                                     strip->getLedCount(),
+                                                     protocol,
+                                                     colorOrder,
+                                                     driver,
+                                                     status);
+                    }
+                    else
+#endif
+                    {
+                        // Fallback if driver not available
+                        openknx.logger.logWithValues("[%d] │ GPIO%-2d (SPI)   │ %4d │ %-8s │ %-5s │ %-11s │ %s",
+                                                     i,
+                                                     strip->getDataPin(),
+                                                     strip->getLedCount(),
+                                                     protocol,
+                                                     colorOrder,
+                                                     driver,
+                                                     status);
+                    }
+                }
+                else
+                {
+                    // 1-Wire strip (WS2812B, SK6812, etc.)
+                    openknx.logger.logWithValues("[%d] │ GPIO%-2d         │ %4d │ %-8s │ %-5s │ %-11s │ %s",
+                                                 i,
+                                                 strip->getDataPin(),
+                                                 strip->getLedCount(),
+                                                 protocol,
+                                                 colorOrder,
+                                                 driver,
+                                                 status);
+                }
             }
         }
     }
 
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("════════════════════════════════════════════════════════════════════");
+    openknx.logger.log("══════════════════════════════════════════════════════════════════════");
     openknx.logger.color(0);
     openknx.logger.log("");
 
@@ -1596,7 +1625,6 @@ bool NeoPixel::processPhysDelCommand(const std::string& args)
     return true;
 }
 
-
 // ============================================================================
 // VirtualStrip Management Commands
 // ============================================================================
@@ -1616,10 +1644,6 @@ bool NeoPixel::processVirtCommand(const std::string& args)
     else if (args.compare(0, 4, "del ") == 0)
     {
         return processVirtDelCommand(args.substr(4));
-    }
-    else if (args.compare(0, 6, "order ") == 0)
-    {
-        return processVirtOrderCommand(args.substr(6));
     }
     else if (args.compare(0, 7, "attach ") == 0)
     {
@@ -1670,24 +1694,13 @@ bool NeoPixel::processVirtListCommand()
             auto vstrip = _manager->getVirtualStrip(i);
             if (vstrip)
             {
-                // Get color order name
-                const char* orderName = "???";
-                switch (vstrip->getColorOrder())
-                {
-                    case ColorOrder::RGB: orderName = "RGB"; break;
-                    case ColorOrder::RBG: orderName = "RBG"; break;
-                    case ColorOrder::GRB: orderName = "GRB"; break;
-                    case ColorOrder::GBR: orderName = "GBR"; break;
-                    case ColorOrder::BGR: orderName = "BGR"; break;
-                    case ColorOrder::BRG: orderName = "BRG"; break;
-                    case ColorOrder::RGBW: orderName = "RGBW"; break;
-                    case ColorOrder::GRBW: orderName = "GRBW"; break;
-                }
+                // Display buffer format (RGB vs RGBW)
+                const char* bufferFormat = vstrip->hasWhiteChannel() ? "RGBW" : "RGB";
 
                 openknx.logger.logWithValues("%2d │ %10d │ %5s │ %8s │ %s",
                                              i,
                                              vstrip->getLedCount(),
-                                             orderName,
+                                             bufferFormat,
                                              vstrip->getPhysicalStripCount() > 0 ? "Yes" : "No",
                                              "OK" // TODO: Add proper status check
                 );
@@ -1704,8 +1717,11 @@ bool NeoPixel::processVirtListCommand()
 }
 
 /**
- * @brief Process 'neo virt add <leds> [order]' command
- * ColorOrder: RGB, GRB, BGR, GBR, RGBW, GRBW (default: GRB for WS2812B)
+ * @brief Process 'neo virt add <leds> [type]' command
+ * Type: RGB (3 bytes/LED) or RGBW (4 bytes/LED), default: RGB
+ *
+ * VirtualStrip stores pixels in RGB/RGBW format internally.
+ * ColorOrder conversion (GRB, BGR, etc.) happens in PhysicalStrip!
  */
 bool NeoPixel::processVirtAddCommand(const std::string& args)
 {
@@ -1715,42 +1731,40 @@ bool NeoPixel::processVirtAddCommand(const std::string& args)
         return true;
     }
 
-    // Parse LED count and optional color order
+    // Parse LED count and optional RGBW flag
     int ledCount;
-    char orderStr[10] = "";
-    int parsed = sscanf(args.c_str(), "%d %9s", &ledCount, orderStr);
+    char typeStr[10] = "";
+    int parsed = sscanf(args.c_str(), "%d %9s", &ledCount, typeStr);
 
     if (parsed < 1 || ledCount <= 0 || ledCount > 1000)
     {
-        openknx.logger.log("ERROR: Usage: neo virt add <leds> [order]");
-        openknx.logger.log("       order: RGB, GRB, BGR, GBR, RGBW, GRBW");
-        openknx.logger.log("       WS2812B/SK6812: GRB (default), APA102/SK9822: BGR");
+        openknx.logger.log("ERROR: Usage: neo virt add <leds> [type]");
+        openknx.logger.log("       type: RGB (default) or RGBW");
+        openknx.logger.log("       Note: VirtualStrip stores pixels in RGB/RGBW format");
+        openknx.logger.log("             ColorOrder conversion happens in PhysicalStrip");
         return true;
     }
 
-    // Parse color order (default: GRB for WS2812B)
-    ColorOrder colorOrder = ColorOrder::GRB;
+    // Parse type (default: RGB)
+    ColorOrder colorOrder = ColorOrder::RGB;
+    const char* typeName = "RGB";
+
     if (parsed >= 2)
     {
-        std::string order(orderStr);
-        if (order == "rgb") colorOrder = ColorOrder::RGB;
-        else if (order == "rbg")
-            colorOrder = ColorOrder::RBG;
-        else if (order == "grb")
-            colorOrder = ColorOrder::GRB;
-        else if (order == "gbr")
-            colorOrder = ColorOrder::GBR;
-        else if (order == "bgr")
-            colorOrder = ColorOrder::BGR;
-        else if (order == "brg")
-            colorOrder = ColorOrder::BRG;
-        else if (order == "rgbw")
+        std::string type(typeStr);
+        if (type == "rgb" || type == "RGB")
+        {
+            colorOrder = ColorOrder::RGB;
+            typeName = "RGB";
+        }
+        else if (type == "rgbw" || type == "RGBW")
+        {
             colorOrder = ColorOrder::RGBW;
-        else if (order == "grbw")
-            colorOrder = ColorOrder::GRBW;
+            typeName = "RGBW";
+        }
         else
         {
-            openknx.logger.log("ERROR: Invalid color order! Use: rgb, rbg, grb, gbr, bgr, brg, rgbw, grbw");
+            openknx.logger.log("ERROR: Invalid type! Use: RGB or RGBW");
             return true;
         }
     }
@@ -1765,22 +1779,9 @@ bool NeoPixel::processVirtAddCommand(const std::string& args)
 
     uint32_t id = _manager->getVirtualStripCount() - 1;
 
-    // Get color order name for output
-    const char* orderName = "GBR";
-    switch (colorOrder)
-    {
-        case ColorOrder::RGB: orderName = "RGB"; break;
-        case ColorOrder::RBG: orderName = "RBG"; break;
-        case ColorOrder::GRB: orderName = "GRB"; break;
-        case ColorOrder::GBR: orderName = "GBR"; break;
-        case ColorOrder::BGR: orderName = "BGR"; break;
-        case ColorOrder::BRG: orderName = "BRG"; break;
-        case ColorOrder::RGBW: orderName = "RGBW"; break;
-        case ColorOrder::GRBW: orderName = "GRBW"; break;
-    }
-
-    openknx.logger.logWithValues("Virtual strip [%d] created: %d LEDs, ColorOrder=%s",
-                                 id, ledCount, orderName);
+    openknx.logger.logWithValues("Virtual strip [%d] created: %d LEDs, Type=%s (%d bytes/LED)",
+                                 id, ledCount, typeName, vstrip->getBytesPerLed());
+    openknx.logger.log("NOTE: ColorOrder (GRB, BGR, etc.) is set on PhysicalStrips, not VirtualStrips");
     return true;
 }
 
@@ -1813,70 +1814,6 @@ bool NeoPixel::processVirtDelCommand(const std::string& args)
     }
 
     openknx.logger.logWithValues("Virtual strip [%d] removed (including all segments)", virtId);
-
-    return true;
-}
-
-/**
- * @brief Process 'neo virt order <id> <order>' command
- * Change color order of existing virtual strip (for testing different LED types)
- */
-bool NeoPixel::processVirtOrderCommand(const std::string& args)
-{
-    if (!_initialized || !_manager)
-    {
-        openknx.logger.log("ERROR: NeoPixel module not initialized!");
-        return true;
-    }
-
-    // Parse arguments: <virt_id> <order>
-    int virtId;
-    char orderStr[10] = "";
-    if (sscanf(args.c_str(), "%d %9s", &virtId, orderStr) != 2)
-    {
-        openknx.logger.log("ERROR: Usage: neo virt order <id> <order>");
-        openknx.logger.log("       order: RGB, GRB, BGR, GBR, RGBW, GRBW");
-        return true;
-    }
-
-    // Get virtual strip
-    auto vstrip = _manager->getVirtualStrip(virtId);
-    if (!vstrip)
-    {
-        openknx.logger.logWithValues("ERROR: Virtual strip [%d] not found!", virtId);
-        return true;
-    }
-
-    // Parse color order
-    std::string order(orderStr);
-    ColorOrder colorOrder;
-
-    if (order == "rgb") colorOrder = ColorOrder::RGB;
-    else if (order == "rbg")
-        colorOrder = ColorOrder::RBG;
-    else if (order == "grb")
-        colorOrder = ColorOrder::GRB;
-    else if (order == "gbr")
-        colorOrder = ColorOrder::GBR;
-    else if (order == "bgr")
-        colorOrder = ColorOrder::BGR;
-    else if (order == "brg")
-        colorOrder = ColorOrder::BRG;
-    else if (order == "rgbw")
-        colorOrder = ColorOrder::RGBW;
-    else if (order == "grbw")
-        colorOrder = ColorOrder::GRBW;
-    else
-    {
-        openknx.logger.log("ERROR: Invalid color order! Use: rgb, rbg, grb, gbr, bgr, brg, rgbw, grbw");
-        return true;
-    }
-
-    // Set new color order
-    vstrip->setColorOrder(colorOrder);
-
-    openknx.logger.logWithValues("Virtual strip [%d] ColorOrder changed to %s", virtId, orderStr);
-    openknx.logger.log("NOTE: You may need to re-send colors with 'neo color' or 'show' for changes to take effect");
 
     return true;
 }
@@ -2009,7 +1946,6 @@ bool NeoPixel::processVirtDetachCommand(const std::string& args)
     return true;
 }
 
-
 // ============================================================================
 // Segment Management Commands
 // ============================================================================
@@ -2088,15 +2024,16 @@ bool NeoPixel::processSegListCommand()
                 auto& config = seg->getConfig();
                 const char* state = seg->isPaused() ? "Paused" : "Running";
 
-                openknx.logger.logWithValues("%2d │ %3d - %3d │ %-11s │ %-7s │ R:%3d G:%3d B:%3d",
+                openknx.logger.logWithValues("%2d │ %3d - %3d │ %-11s │ %-7s │ R:%3d G:%3d B:%3d W:%3d",
                                              i,
                                              seg->getStartLed(),
                                              seg->getEndLed(),
                                              effect ? "Active" : "None",
                                              state,
-                                             (config.primaryRGBW >> 16) & 0xFF, // Red from RGBW
-                                             (config.primaryRGBW >> 8) & 0xFF,  // Green from RGBW
-                                             config.primaryRGBW & 0xFF          // Blue from RGBW
+                                             (config.primaryRGBW >> 24) & 0xFF, // Red from RGBW
+                                             (config.primaryRGBW >> 16) & 0xFF, // Green from RGBW
+                                             (config.primaryRGBW >> 8) & 0xFF,  // Blue from RGBW
+                                             config.primaryRGBW & 0xFF          // White from RGBW
                 );
             }
         }
@@ -2270,7 +2207,6 @@ bool NeoPixel::processSegStopCommand(const std::string& args)
 
     return true;
 }
-
 
 // ============================================================================
 // Effect Management Commands
@@ -2509,8 +2445,8 @@ bool NeoPixel::processColorCommand(const std::string& args)
         return true;
     }
 
-    // Store color in logical RGB format: 0xRRGGBBWW
-    // VirtualStrip will convert to physical GRB/GRBW layout based on ColorOrder
+    // Store color in RGBW format: 0xRRGGBBWW
+    // VirtualStrip stores in RGB/RGBW format, PhysicalStrip handles ColorOrder conversion
     // User inputs logical R G B [W], we store as: (R << 24) | (G << 16) | (B << 8) | W
     // For APA102 (SPI), W is brightness (0-255). If not specified, use 255 (max brightness)
     auto& config = seg->getConfig();
@@ -2553,7 +2489,8 @@ bool NeoPixel::processColorCommand(const std::string& args)
 }
 
 /**
- * @brief Process brightness command: neo brightness <seg> <val>
+ * @brief Process software brightness command: neo brightness <seg> <val>
+ * Sets software brightness (RGB multiplication) - works for ALL LED types
  */
 bool NeoPixel::processBrightnessCommand(const std::string& args)
 {
@@ -2572,6 +2509,11 @@ bool NeoPixel::processBrightnessCommand(const std::string& args)
         openknx.logger.log("Usage: neo brightness <segment_id> <brightness>");
         openknx.logger.log("       segment_id: ID of the segment");
         openknx.logger.log("       brightness: 0-255 (0=off, 128=half, 255=max)");
+        openknx.logger.log("");
+        openknx.logger.log("Software brightness: RGB multiplication (all LED types)");
+        openknx.logger.log("  - Works for: WS2812B, APA102, SK6812, etc.");
+        openknx.logger.log("  - Applied in effect calculation");
+        openknx.logger.log("  - May reduce color depth at low values");
         return true;
     }
 
@@ -2590,11 +2532,67 @@ bool NeoPixel::processBrightnessCommand(const std::string& args)
         return true;
     }
 
-    // Set brightness in segment config (applied to all setPixel calls)
+    // Set software brightness
     seg->setBrightness((uint8_t)brightness);
 
-    openknx.logger.logWithValues("Segment [%d] brightness set to %d (0=off, 255=max)",
-                                 segId, brightness);
+    openknx.logger.logWithValues("Segment [%d] SOFTWARE brightness set to %d (%.1f%%)",
+                                 segId, brightness, (brightness * 100.0f / 255.0f));
+    openknx.logger.log("  Applied via RGB multiplication (all LED types)");
+
+    return true;
+}
+
+/**
+ * @brief Process hardware brightness command: neo hwbrightness <seg> <val>
+ * Sets hardware brightness (APA102/SK9822 global brightness) - only for SPI LEDs
+ */
+bool NeoPixel::processHardwareBrightnessCommand(const std::string& args)
+{
+    if (!_manager)
+    {
+        openknx.logger.log("ERROR: NeoPixel manager not initialized");
+        return true;
+    }
+
+    // Parse arguments
+    int segId = -1;
+    int brightness = -1;
+
+    if (sscanf(args.c_str(), "%d %d", &segId, &brightness) != 2)
+    {
+        openknx.logger.log("Usage: neo hwbrightness <segment_id> <brightness>");
+        openknx.logger.log("       segment_id: ID of the segment");
+        openknx.logger.log("       brightness: 0-255 (0=off, 128=half, 255=max)");
+        openknx.logger.log("");
+        openknx.logger.log("Hardware brightness: Global brightness (APA102/SK9822 only)");
+        openknx.logger.log("  - Works ONLY for: APA102, SK9822 (SPI protocols)");
+        openknx.logger.log("  - Silently ignored for: WS2812B, SK6812, etc.");
+        openknx.logger.log("  - Preserves full 8-bit RGB color depth");
+        openknx.logger.log("  - Uses hardware PWM (5-bit: 0-31)");
+        return true;
+    }
+
+    // Validate brightness
+    if (brightness < 0 || brightness > 255)
+    {
+        openknx.logger.log("ERROR: Brightness must be 0-255");
+        return true;
+    }
+
+    // Get segment
+    auto seg = _manager->getSegment(segId);
+    if (!seg)
+    {
+        openknx.logger.logWithValues("ERROR: Segment [%d] not found!", segId);
+        return true;
+    }
+
+    // Set hardware brightness
+    seg->setHardwareBrightness((uint8_t)brightness);
+
+    openknx.logger.logWithValues("Segment [%d] HARDWARE brightness set to %d (%.1f%%, 5-bit: %d/31)",
+                                 segId, brightness, (brightness * 100.0f / 255.0f), brightness >> 3);
+    openknx.logger.log("  Only effective for APA102/SK9822 (ignored for WS2812B, SK6812)");
 
     return true;
 }

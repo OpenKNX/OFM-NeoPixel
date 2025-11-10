@@ -20,7 +20,10 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _clockPin(0xFFFFFFFF),
       _ledCount(ledCount),
       _protocol(protocol),
-      _initialized(false)
+      _initialized(false),
+      _colorOrder(ColorOrder::RGB),
+      _hasColorOrder(false),
+      _hardwareBrightness(255)
 {
     createDriver(driverType);
 }
@@ -40,7 +43,10 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _clockPin(sckPin),
       _ledCount(ledCount),
       _protocol(protocol),
-      _initialized(false)
+      _initialized(false),
+      _colorOrder(ColorOrder::RGB),
+      _hasColorOrder(false),
+      _hardwareBrightness(255)
 {
     createDriver(driverType);
 }
@@ -120,14 +126,82 @@ bool PhysicalStrip::isInitialized() const
 /**
  * @brief Set a single RGB pixel
  * @param index LED index (0-based)
- * @param r Red (0-255)
- * @param g Green (0-255)
- * @param b Blue (0-255)
+ * @param r Red (0-255, logical RGB color)
+ * @param g Green (0-255, logical RGB color)
+ * @param b Blue (0-255, logical RGB color)
  * @return true on success
+ *
+ * This method converts logical RGB to hardware ColorOrder:
+ * - If PhysicalStrip has ColorOrder: Convert RGB → hardware order (e.g., GRB, BGR)
+ * - If no ColorOrder: Pass RGB directly to driver (backward compatibility)
+ * - For APA102/SK9822: Uses _hardwareBrightness for global brightness
+ *
+ * Examples:
+ *   ColorOrder::GRB: RGB(50,0,0) → Driver gets [0,50,0] (G,R,B)
+ *   ColorOrder::BGR: RGB(50,0,0) → Driver gets [0,0,50] (B,G,R)
  */
 bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
     if (!_driver || !isInitialized()) return false;
+
+    // If PhysicalStrip has ColorOrder, convert RGB to hardware order
+    if (_hasColorOrder)
+    {
+        uint8_t byte0, byte1, byte2;
+        switch (_colorOrder)
+        {
+            case ColorOrder::RGB:
+                byte0 = r;
+                byte1 = g;
+                byte2 = b;
+                break;
+            case ColorOrder::RBG:
+                byte0 = r;
+                byte1 = b;
+                byte2 = g;
+                break;
+            case ColorOrder::GRB:
+                byte0 = g;
+                byte1 = r;
+                byte2 = b;
+                break;
+            case ColorOrder::GBR:
+                byte0 = g;
+                byte1 = b;
+                byte2 = r;
+                break;
+            case ColorOrder::BGR:
+                byte0 = b;
+                byte1 = g;
+                byte2 = r;
+                break;
+            case ColorOrder::BRG:
+                byte0 = b;
+                byte1 = r;
+                byte2 = g;
+                break;
+            default:
+                byte0 = r;
+                byte1 = g;
+                byte2 = b;
+                break;
+        }
+
+        // For APA102/SK9822: Use 4-parameter setPixel with hardware brightness
+        if (supportsHardwareBrightness())
+        {
+            return _driver->setPixel(index, byte0, byte1, byte2, _hardwareBrightness);
+        }
+
+        return _driver->setPixel(index, byte0, byte1, byte2);
+    }
+
+    // No ColorOrder: Pass RGB directly (backward compatibility)
+    if (supportsHardwareBrightness())
+    {
+        return _driver->setPixel(index, r, g, b, _hardwareBrightness);
+    }
+
     return _driver->setPixel(index, r, g, b);
 }
 
@@ -143,6 +217,54 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
     if (!_driver || !isInitialized()) return false;
+
+    // If PhysicalStrip has ColorOrder, convert RGB to hardware order
+    if (_hasColorOrder)
+    {
+        uint8_t byte0, byte1, byte2;
+        switch (_colorOrder)
+        {
+            case ColorOrder::RGB:
+            case ColorOrder::RGBW:
+                byte0 = r;
+                byte1 = g;
+                byte2 = b;
+                break;
+            case ColorOrder::RBG:
+                byte0 = r;
+                byte1 = b;
+                byte2 = g;
+                break;
+            case ColorOrder::GRB:
+            case ColorOrder::GRBW:
+                byte0 = g;
+                byte1 = r;
+                byte2 = b;
+                break;
+            case ColorOrder::GBR:
+                byte0 = g;
+                byte1 = b;
+                byte2 = r;
+                break;
+            case ColorOrder::BGR:
+                byte0 = b;
+                byte1 = g;
+                byte2 = r;
+                break;
+            case ColorOrder::BRG:
+                byte0 = b;
+                byte1 = r;
+                byte2 = g;
+                break;
+            default:
+                byte0 = r;
+                byte1 = g;
+                byte2 = b;
+                break;
+        }
+        return _driver->setPixel(index, byte0, byte1, byte2, w);
+    }
+
     return _driver->setPixel(index, r, g, b, w);
 }
 
@@ -295,28 +417,24 @@ const char* PhysicalStrip::getDriverName() const
 {
     if (!_driver) return "None";
 
-// Detect driver type
-#if defined(ARDUINO_ARCH_RP2040)
-    if (ProtocolHelper::is1Wire(_protocol))
-    {
-        return "RP2040 PIO Serial";
-    }
-    else
-    {
-        return "RP2040 PIO SPI";
-    }
-#elif defined(ARDUINO_ARCH_ESP32)
-    if (ProtocolHelper::is1Wire(_protocol))
-    {
-        return "ESP32 RMT Serial";
-    }
-    else
-    {
-        return "ESP32 Hardware SPI";
-    }
-#endif
+    // Get driver type from driver implementation
+    DriverImplementation driverType = _driver->getDriverType();
 
-    return "Unknown";
+    switch (driverType)
+    {
+        case DriverImplementation::PIO_SERIAL:
+            return "PIO Serial";
+        case DriverImplementation::PIO_SPI:
+            return "PIO SPI";
+        case DriverImplementation::RMT_SERIAL:
+            return "RMT Serial";
+        case DriverImplementation::HARDWARE_SPI:
+            return "HW SPI";
+        case DriverImplementation::NATIVE:
+            return "Native";
+        default:
+            return "Unknown";
+    }
 }
 
 /**
@@ -333,4 +451,25 @@ bool PhysicalStrip::setUpdateFrequency(uint32_t frequencyHz)
     // For now: Return false (not supported)
     (void)frequencyHz;
     return false;
+}
+
+/**
+ * @brief Set hardware brightness for APA102/SK9822 (0-255)
+ * Only effective for SPI protocols with global brightness support
+ * Silently ignored for WS2812B, SK6812, etc.
+ *
+ * @param brightness Brightness value (0-255, will be scaled to 5-bit: 0-31 for APA102)
+ */
+void PhysicalStrip::setHardwareBrightness(uint8_t brightness)
+{
+    _hardwareBrightness = brightness;
+}
+
+/**
+ * @brief Check if this strip supports hardware brightness
+ * @return true for APA102/SK9822, false for WS2812B/SK6812/etc.
+ */
+bool PhysicalStrip::supportsHardwareBrightness() const
+{
+    return (_protocol == LedProtocol::APA102 || _protocol == LedProtocol::SK9822);
 }

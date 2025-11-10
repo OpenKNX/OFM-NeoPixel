@@ -89,10 +89,7 @@ bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
     uint16_t virtualIndex = _startLed + index;
     _dirty = true;
 
-    // Set APA102 hardware brightness (VirtualStrip stores it for next setPixel call)
-    _virtualStrip->setBrightness(_config.apa102Brightness);
-
-    // Write pixel (VirtualStrip uses stored brightness for APA102, ignores for RGB strips)
+    // Write pixel to VirtualStrip (hardware brightness is applied later in syncToPhysical())
     return _virtualStrip->setPixel(virtualIndex, r, g, b);
 }
 

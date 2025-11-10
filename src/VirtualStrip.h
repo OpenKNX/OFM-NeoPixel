@@ -1,28 +1,32 @@
 /**
  * @file VirtualStrip.h
- * @brief Virtual LED Strip - Combination of multiple PhysicalStrips
+ * @brief Virtual LED Strip - Unified RGB/RGBW Buffer for Multiple PhysicalStrips
  *
- * A VirtualStrip combines multiple PhysicalStrips into one logical
- * large strip. This enables:
+ * VirtualStrip provides a unified pixel buffer that can be mapped to multiple
+ * PhysicalStrips at different offsets. This enables:
  * - Central animations across multiple physical strips
- * - Unified buffer management
- * - Simplified pixel addressing
- * - Supports different color orders (RGB, GRB, RGBW, etc.)
+ * - Unified RGB/RGBW buffer management (always in RGB format internally)
+ * - Simplified pixel addressing (one logical strip, multiple hardware strips)
+ * - Automatic ColorOrder conversion (happens in PhysicalStrip, not here)
+ *
+ * IMPORTANT: VirtualStrip ALWAYS stores pixels in RGB/RGBW format internally!
+ * ColorOrder parameter is only used to determine bytes per LED (3 vs 4).
+ * ColorOrder conversion to hardware format (GRB, BGR, etc.) happens in PhysicalStrip.
  *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 #pragma once
 /*
  * Example:
- *   PhysicalStrip* strip0 = mgr->addPhysicalStrip(3, 100);   // 100 LEDs
- *   PhysicalStrip* strip1 = mgr->addPhysicalStrip(7, 100);   // 100 LEDs
- *   VirtualStrip* vstrip = new VirtualStrip(200);            // 200 logical LEDs
- *   vstrip->attachPhysicalStrip(strip0, 0);                  // Offset 0
- *   vstrip->attachPhysicalStrip(strip1, 100);                // Offset 100
+ *   PhysicalStrip* strip0 = mgr->addPhysicalStrip(3, 100, ColorOrder::GRB);   // 100 LEDs, GRB hardware
+ *   PhysicalStrip* strip1 = mgr->addPhysicalStrip(7, 100, ColorOrder::RGB);   // 100 LEDs, RGB hardware
+ *   VirtualStrip* vstrip = new VirtualStrip(200, ColorOrder::RGB);            // 200 logical LEDs, RGB buffer
+ *   vstrip->attachPhysicalStrip(strip0, 0);                                   // Offset 0
+ *   vstrip->attachPhysicalStrip(strip1, 100);                                 // Offset 100
  *
- *   vstrip->setPixel(0, 255, 0, 0);       // LED 0 on strip0
- *   vstrip->setPixel(150, 0, 255, 0);     // LED 50 on strip1
- *   vstrip->show();                       // Sends to BOTH
+ *   vstrip->setPixel(0, 255, 0, 0);       // LED 0 on strip0 (auto-converted to GRB)
+ *   vstrip->setPixel(150, 0, 255, 0);     // LED 50 on strip1 (stays RGB)
+ *   vstrip->show();                       // Sends to BOTH with correct ColorOrder
  */
 #include "PhysicalStrip.h"
 #include <stdint.h>
@@ -55,9 +59,6 @@ class VirtualStrip
     // ====================================================================
     // Virtual Pixel API
     // ====================================================================
-    inline void setBrightness(uint8_t brightness) { _brightness = brightness; }; // Set brightness for next setPixel() calls (APA102 hardware brightness)
-    inline uint8_t getBrightness() const { return _brightness; }                 // Get current brightness value
-
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
     void setRange(uint16_t startIndex, uint16_t length, uint8_t r, uint8_t g, uint8_t b);
@@ -78,35 +79,28 @@ class VirtualStrip
     // Sync & Transfer
     // ====================================================================
     inline bool waitForCompletion(uint32_t timeoutMs = 0); // Wait for all physical strips to complete
-    bool syncToPhysical();
+    bool syncToPhysical(uint8_t hardwareBrightness = 255); // Sync buffer to physical strips (with optional hardware brightness)
     bool show();
     bool isAnyBusy() const;
 
     // ====================================================================
     // State & Properties
     // ====================================================================
-    inline uint16_t getLedCount() const { return _totalLeds; }      // Virtual LED count
-    inline ColorOrder getColorOrder() const { return _colorOrder; } // Color order
-    inline void setColorOrder(ColorOrder order)
-    {
-        _colorOrder = order;
-        _dirty = true;
-    }                                              // Set color order
-    inline bool isDirty() const { return _dirty; } // Is buffer modified?
-    inline void markDirty() { _dirty = true; }     // Mark buffer as modified
-    inline void setClean() { _dirty = false; }     // Mark buffer as clean after sync
+    inline uint16_t getLedCount() const { return _totalLeds; }        // Virtual LED count
+    inline bool hasWhiteChannel() const { return _bytesPerLed >= 4; } // True if RGBW buffer
+    inline bool isDirty() const { return _dirty; }                    // Is buffer modified?
+    inline void markDirty() { _dirty = true; }                        // Mark buffer as modified
+    inline void setClean() { _dirty = false; }                        // Mark buffer as clean after sync
     uint16_t getTotalPhysicalLeds() const;
     size_t getMemoryUsage() const { return _bufferSize; } // Memory usage in bytes
 
   private:
     std::vector<VirtualToPhysicalMapping> _physicalStrips; // Attached physical strips
     uint16_t _totalLeds;                                   // Virtual LED count
-    uint8_t* _buffer;                                      // Unified RGB(W) buffer
+    uint8_t* _buffer;                                      // Unified RGB(W) buffer (ALWAYS in RGB/RGBW format!)
     size_t _bufferSize;                                    // Buffer size in bytes
-    ColorOrder _colorOrder;                                // Color order
-    uint8_t _bytesPerLed;                                  // Bytes per LED (3 or 4)
+    uint8_t _bytesPerLed;                                  // Bytes per LED (3 for RGB, 4 for RGBW)
     bool _dirty;                                           // Buffer modified?
-    uint8_t _brightness;                                   // Current brightness for APA102 (0-255, default 255)
 
     PhysicalStrip* findPhysicalAtIndex(uint16_t virtualIndex, uint16_t& outPhysicalIndex) const;
     void writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);

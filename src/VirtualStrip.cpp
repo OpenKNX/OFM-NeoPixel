@@ -1,6 +1,16 @@
 /**
  * @file VirtualStrip.cpp
- * @brief VirtualStrip Implementation
+ * @brief VirtualStrip Implementation - Unified RGB/RGBW Buffer Management
+ *
+ * This class manages a unified pixel buffer that is ALWAYS stored in RGB/RGBW format.
+ * ColorOrder conversion happens in PhysicalStrip, not here!
+ *
+ * Key principles:
+ * - Internal buffer is ALWAYS RGB (3 bytes) or RGBW (4 bytes)
+ * - setPixel() writes RGB(W) directly to buffer (no conversion)
+ * - getPixel() reads RGB(W) directly from buffer (no conversion)
+ * - syncToPhysical() sends RGB(W) to PhysicalStrips
+ * - PhysicalStrip handles ColorOrder conversion (RGB→GRB, RGB→BGR, etc.)
  */
 
 #include "VirtualStrip.h"
@@ -12,26 +22,29 @@
 /**
  * @brief Constructor
  * @param totalLeds Total number of virtual LEDs
- * @param colorOrder Color order for the virtual strip
+ * @param colorOrder Only used to determine RGB (3 bytes) vs RGBW (4 bytes) buffer
+ *
+ * VirtualStrip ALWAYS stores pixels in RGB/RGBW format internally.
+ * ColorOrder conversion (RGB→GRB, RGB→BGR, etc.) happens in PhysicalStrip!
+ *
+ * The colorOrder parameter determines:
+ * - RGB/RBG/GRB/GBR/BGR/BRG → 3 bytes per LED (RGB buffer)
+ * - RGBW/GRBW → 4 bytes per LED (RGBW buffer)
+ *
+ * ColorOrder details (GRB vs RGB etc.) are handled by PhysicalStrip, not here!
  */
 VirtualStrip::VirtualStrip(uint16_t totalLeds, ColorOrder colorOrder)
     : _totalLeds(totalLeds),
-      _colorOrder(colorOrder),
-      _dirty(false),
-      _brightness(255)
+      _bytesPerLed((colorOrder == ColorOrder::RGBW || colorOrder == ColorOrder::GRBW) ? 4 : 3),
+      _dirty(false)
 {
-
-    // Determine bytes per LED based on ColorOrder
-    // BGR also gets 4 bytes for APA102 Brightness (WS2801 ignores 4th byte)
-    _bytesPerLed = (colorOrder == ColorOrder::RGBW || colorOrder == ColorOrder::GRBW || colorOrder == ColorOrder::BGR) ? 4 : 3;
-
-    // Allocate unified buffer
+    // Allocate unified buffer (always RGB/RGBW format)
     _bufferSize = (size_t)totalLeds * _bytesPerLed;
     _buffer = new uint8_t[_bufferSize];
     memset(_buffer, 0, _bufferSize);
 
-    logDebugP("VirtualStrip initialized: %u LEDs, %u Bytes/LED, Buffer=%u Bytes",
-              _totalLeds, _bytesPerLed, (uint32_t)_bufferSize);
+    logDebugP("VirtualStrip initialized: %u LEDs, %u Bytes/LED (%s), Buffer=%u Bytes",
+              _totalLeds, _bytesPerLed, (_bytesPerLed == 4) ? "RGBW" : "RGB", (uint32_t)_bufferSize);
 }
 
 /**
@@ -154,12 +167,15 @@ PhysicalStrip* VirtualStrip::findPhysicalAtIndex(uint16_t virtualIndex, uint16_t
 }
 
 /**
- * @brief Write pixel to buffer
- * @param index Index of the pixel
- * @param r Red component
- * @param g Green component
- * @param b Blue component
- * @param w White component (if applicable)
+ * @brief Write pixel to internal buffer
+ * @param index Pixel index
+ * @param r Red component (0-255)
+ * @param g Green component (0-255)
+ * @param b Blue component (0-255)
+ * @param w White component or brightness (0-255)
+ *
+ * VirtualStrip ALWAYS stores in RGB/RGBW format.
+ * ColorOrder conversion happens later in PhysicalStrip::setPixel().
  */
 void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
@@ -171,96 +187,36 @@ void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
     if (index == 0)
     {
         openknx.logger.logWithPrefixAndValues("VirtualStrip",
-                                              "writePixelToBuffer[0]: R=%d G=%d B=%d W=%d, bytesPerLed=%d, offset=%d, ColorOrder=%d",
-                                              r, g, b, w, _bytesPerLed, offset, (int)_colorOrder);
+                                              "writePixelToBuffer[0]: R=%d G=%d B=%d W=%d",
+                                              r, g, b, w);
     }
 #endif
 
-    // W parameter meaning (AFTER Segment brightness was already applied):
-    // - For RGBW/GRBW (4 bytes): W = White channel (separate LED color)
-    // - For BGR (4 bytes, APA102): W = Hardware brightness (0-255, controlled via Segment.apa102Brightness)
-    // - For RGB/GRB/BRG (3 bytes): W is ignored (no 4th byte allocated)
-
-    switch (_colorOrder)
+    // Store in RGB/RGBW format (no ColorOrder conversion here!)
+    _buffer[offset] = r;     // Red
+    _buffer[offset + 1] = g; // Green
+    _buffer[offset + 2] = b; // Blue
+    if (_bytesPerLed >= 4)
     {
-        case ColorOrder::RGB:
-            _buffer[offset] = r;     // Red
-            _buffer[offset + 1] = g; // Green
-            _buffer[offset + 2] = b; // Blue
-            break;
-
-        case ColorOrder::RBG:
-            _buffer[offset] = r;     // Red
-            _buffer[offset + 1] = b; // Blue
-            _buffer[offset + 2] = g; // Green
-            break;
-
-        case ColorOrder::GRB:
-            _buffer[offset] = g;     // Green
-            _buffer[offset + 1] = r; // Red
-            _buffer[offset + 2] = b; // Blue
-            break;
-
-        case ColorOrder::GBR:
-            _buffer[offset] = g;     // Green
-            _buffer[offset + 1] = b; // Blue
-            _buffer[offset + 2] = r; // Red
-            break;
-
-        case ColorOrder::BGR:
-            _buffer[offset] = b;     // Blue
-            _buffer[offset + 1] = g; // Green
-            _buffer[offset + 2] = r; // Red
-            _buffer[offset + 3] = w; // White / Brightness
-            break;
-
-        case ColorOrder::BRG:
-            _buffer[offset] = b;     // Blue
-            _buffer[offset + 1] = r; // Red
-            _buffer[offset + 2] = g; // Green
-            break;
-
-        case ColorOrder::RGBW:
-            _buffer[offset] = r;     // Red
-            _buffer[offset + 1] = g; // Green
-            _buffer[offset + 2] = b; // Blue
-            _buffer[offset + 3] = w; // White
-            break;
-
-        case ColorOrder::GRBW:
-            _buffer[offset] = g;     // Green
-            _buffer[offset + 1] = r; // Red
-            _buffer[offset + 2] = b; // Blue
-            _buffer[offset + 3] = w; // White
-            break;
-
-        default:
-            // Fallback RGB (3 bytes)
-            _buffer[offset] = r;     // Red
-            _buffer[offset + 1] = g; // Green
-            _buffer[offset + 2] = b; // Blue
-            break;
+        _buffer[offset + 3] = w; // White channel or brightness
     }
 
 #ifdef OPENKNX_TRACE1
-    if (index == 0) // Only log first pixel for brevity
+    if (index == 0)
     {
-        if (_bytesPerLed >= 4) // RGBW or BGR with brightness
+        if (_bytesPerLed >= 4)
         {
             openknx.logger.logWithPrefixAndValues("VirtualStrip",
-                                                  "  Buffer written: [%d]=%02X [%d]=%02X [%d]=%02X [%d]=%02X",
-                                                  offset, _buffer[offset],
-                                                  offset + 1, _buffer[offset + 1],
-                                                  offset + 2, _buffer[offset + 2],
-                                                  offset + 3, _buffer[offset + 3]);
+                                                  "  Buffer[0]: R=%02X G=%02X B=%02X W=%02X",
+                                                  _buffer[offset], _buffer[offset + 1],
+                                                  _buffer[offset + 2], _buffer[offset + 3]);
         }
-        else // RGB (3 bytes)
+        else
         {
             openknx.logger.logWithPrefixAndValues("VirtualStrip",
-                                                  "  Buffer written: [%d]=%02X [%d]=%02X [%d]=%02X",
-                                                  offset, _buffer[offset],
-                                                  offset + 1, _buffer[offset + 1],
-                                                  offset + 2, _buffer[offset + 2]);
+                                                  "  Buffer[0]: R=%02X G=%02X B=%02X",
+                                                  _buffer[offset], _buffer[offset + 1],
+                                                  _buffer[offset + 2]);
         }
     }
 #endif
@@ -270,7 +226,7 @@ void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
 
 /**
  * @brief Set single pixel (RGB)
- * Uses stored _brightness for APA102 hardware brightness control.
+ * VirtualStrip stores pixels in RGB format. No ColorOrder conversion here.
  * @param index Index of the pixel
  * @param r Red component
  * @param g Green component
@@ -279,7 +235,7 @@ void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
 bool VirtualStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
     if (index >= _totalLeds) return false;
-    writePixelToBuffer(index, r, g, b, _brightness);
+    writePixelToBuffer(index, r, g, b, 0);
     _dirty = true;
     return true;
 }
@@ -342,6 +298,9 @@ void VirtualStrip::clear()
  * @param r Output parameter for Red component
  * @param g Output parameter for Green component
  * @param b Output parameter for Blue component
+ *
+ * VirtualStrip ALWAYS stores in RGB format.
+ * No ColorOrder conversion needed here!
  */
 bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) const
 {
@@ -349,48 +308,11 @@ bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) 
 
     size_t offset = (size_t)index * _bytesPerLed;
 
-    switch (_colorOrder)
-    {
-        case ColorOrder::RGB:
-            r = _buffer[offset];     // Red
-            g = _buffer[offset + 1]; // Green
-            b = _buffer[offset + 2]; // Blue
-            break;
+    // Read RGB directly from buffer (always in RGB format)
+    r = _buffer[offset];     // Red
+    g = _buffer[offset + 1]; // Green
+    b = _buffer[offset + 2]; // Blue
 
-        case ColorOrder::RBG:
-            r = _buffer[offset];     // Red
-            b = _buffer[offset + 1]; // Blue
-            g = _buffer[offset + 2]; // Green
-            break;
-
-        case ColorOrder::GRB:
-            g = _buffer[offset];     // Green
-            r = _buffer[offset + 1]; // Red
-            b = _buffer[offset + 2]; // Blue
-            break;
-
-        case ColorOrder::GBR:
-            g = _buffer[offset];     // Green
-            b = _buffer[offset + 1]; // Blue
-            r = _buffer[offset + 2]; // Red
-            break;
-
-        case ColorOrder::BGR:
-            b = _buffer[offset];     // Blue
-            g = _buffer[offset + 1]; // Green
-            r = _buffer[offset + 2]; // Red
-            break;
-
-        case ColorOrder::BRG:
-            b = _buffer[offset];     // Blue
-            r = _buffer[offset + 1]; // Red
-            g = _buffer[offset + 2]; // Green
-            break;
-
-        default:
-            r = g = b = 0; // Default to black if unknown color order
-            return false;
-    }
     return true;
 }
 
@@ -401,6 +323,9 @@ bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) 
  * @param g Output parameter for Green component
  * @param b Output parameter for Blue component
  * @param w Output parameter for White component
+ *
+ * VirtualStrip ALWAYS stores in RGB/RGBW format.
+ * No ColorOrder conversion needed here!
  */
 bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& w) const
 {
@@ -408,150 +333,75 @@ bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, 
 
     size_t offset = (size_t)index * _bytesPerLed;
 
-    switch (_colorOrder)
+    // Read RGBW directly from buffer (always in RGB/RGBW format)
+    r = _buffer[offset];     // Red
+    g = _buffer[offset + 1]; // Green
+    b = _buffer[offset + 2]; // Blue
+
+    if (_bytesPerLed >= 4)
     {
-        case ColorOrder::RGBW:
-            r = _buffer[offset];     // Red
-            g = _buffer[offset + 1]; // Green
-            b = _buffer[offset + 2]; // Blue
-            w = _buffer[offset + 3]; // White
-            break;
-
-        case ColorOrder::GRBW:
-            g = _buffer[offset];     // Green
-            r = _buffer[offset + 1]; // Red
-            b = _buffer[offset + 2]; // Blue
-            w = _buffer[offset + 3]; // White
-            break;
-
-        default:
-            r = g = b = w = 0; // Default to black if unknown color order
-            return false;
+        w = _buffer[offset + 3]; // White or Brightness
+    }
+    else
+    {
+        w = 0; // No white channel in RGB-only strips
     }
 
     return true;
 }
 
 /**
- * @brief Synchronize to Physical Strips
+ * @brief Synchronize VirtualStrip buffer to PhysicalStrips
+ * @param hardwareBrightness Hardware brightness for APA102/SK9822 (0-255, default 255 = max)
  * @return true if synchronization was successful
+ *
+ * This method:
+ * 1. Reads RGB/RGBW data from VirtualStrip buffer (always in RGB format)
+ * 2. Sets hardware brightness on all attached PhysicalStrips (for APA102/SK9822)
+ * 3. Sends RGB data to each attached PhysicalStrip
+ * 4. PhysicalStrip converts RGB to hardware ColorOrder (GRB, BGR, etc.)
+ * 5. Hardware driver writes converted bytes to LED strip
  */
-bool VirtualStrip::syncToPhysical()
+bool VirtualStrip::syncToPhysical(uint8_t hardwareBrightness)
 {
     if (_physicalStrips.empty())
     {
         return true; // Nothing to synchronize
     }
 
-    // For each PhysicalStrip: Copy relevant buffer section
+    // Send RGB data to each attached PhysicalStrip
     for (const auto& mapping : _physicalStrips)
     {
         PhysicalStrip* pstrip = mapping.physicalStrip;
         if (!pstrip) continue;
 
+        // Set hardware brightness (only effective for APA102/SK9822)
+        pstrip->setHardwareBrightness(hardwareBrightness);
+
         uint16_t offset = mapping.virtualOffset;
         uint16_t count = mapping.physicalLedCount;
 
-        // !!!!
-        // IMPORTANT: VirtualStrip buffer stores RGB in _colorOrder format (e.g. BGR).
-        // But PhysicalStrip expects LOGICAL RGB values (not pre-converted),
-        // because the driver will apply the correct protocol format (APA102=BGR, etc.)
-        //
-        // So we must READ from VirtualStrip buffer WITHOUT reverse conversion,
-        // then pass RAW bytes to PhysicalStrip driver.
-        LedProtocol protocol = pstrip->getProtocol();
-        bool isSpi = (protocol == LedProtocol::APA102 || protocol == LedProtocol::SK9822 || protocol == LedProtocol::WS2801);
-
-        if (isSpi)
+        // Read RGB from VirtualStrip buffer, send to PhysicalStrip
+        // PhysicalStrip handles ColorOrder conversion based on its hardware
+        for (uint16_t i = 0; i < count; i++)
         {
-            // For SPI: Copy RAW buffer bytes WITHOUT color order conversion
-            // The physical driver will handle the correct protocol format
-            for (uint16_t i = 0; i < count; i++)
+            uint16_t virtualIdx = offset + i;
+            if (virtualIdx >= _totalLeds) break;
+
+            size_t bufferOffset = (size_t)virtualIdx * _bytesPerLed;
+            uint8_t r = _buffer[bufferOffset];     // Red
+            uint8_t g = _buffer[bufferOffset + 1]; // Green
+            uint8_t b = _buffer[bufferOffset + 2]; // Blue
+
+            if (_bytesPerLed >= 4)
             {
-                uint16_t virtualIdx = offset + i;
-                if (virtualIdx >= _totalLeds) break;
-
-                // Get RAW pixel data from buffer (no ColorOrder reverse conversion!)
-                size_t bufferOffset = (size_t)virtualIdx * _bytesPerLed;
-                uint8_t byte0 = _buffer[bufferOffset];
-                uint8_t byte1 = _buffer[bufferOffset + 1];
-                uint8_t byte2 = _buffer[bufferOffset + 2];
-
-                // Interpret bytes as RGB (VirtualStrip stores in ColorOrder format,
-                // but we pass it as-is because physical driver expects logical RGB)
-                // For BGR ColorOrder: byte0=B, byte1=G, byte2=R
-                // We need to reverse this back to R, G, B for the driver
-                uint8_t r, g, b;
-                switch (_colorOrder)
-                {
-                    case ColorOrder::RGB:
-                        r = byte0; // Red
-                        g = byte1; // Green
-                        b = byte2; // Blue
-                        break;
-                    case ColorOrder::RBG:
-                        r = byte0; // Red
-                        b = byte1; // Blue
-                        g = byte2; // Green
-                        break;
-                    case ColorOrder::GRB:
-                        g = byte0; // Green
-                        r = byte1; // Red
-                        b = byte2; // Blue
-                        break;
-                    case ColorOrder::GBR:
-                        g = byte0; // Green
-                        b = byte1; // Blue
-                        r = byte2; // Red
-                        break;
-                    case ColorOrder::BGR:
-                        b = byte0; // Blue
-                        g = byte1; // Green
-                        r = byte2; // Red
-                        break;
-                    case ColorOrder::BRG:
-                        b = byte0; // Blue
-                        r = byte1; // Red
-                        g = byte2; // Green
-                        break;
-                    case ColorOrder::RGBW:
-                    case ColorOrder::GRBW:
-// ToDo: 4 BIT - Support?!
-#if OPENKNX_DEBUG
-                        logErrorP("VirtualStrip::syncToPhysical - encountered RGBW ColorOrder for SPI strip!");
-#endif
-                        // Should not happen for 3-byte SPI strips
-                        r = g = b = 0; // Not supported here
-                        break;
-                    default:
-                        r = g = b = 0;
-                        break;
-                }
-
-                // Write logical RGB(W) to physical strip (driver converts to protocol format)
-                // For SPI strips (APA102), the 4th byte is brightness (0-31)
-                // For RGBW strips (SK6812), the 4th byte is white channel
-                if (_bytesPerLed >= 4)
-                {
-                    uint8_t w = _buffer[bufferOffset + 3];
-                    pstrip->setPixel(i, r, g, b, w);
-                }
-                else
-                {
-                    pstrip->setPixel(i, r, g, b);
-                }
+                uint8_t w = _buffer[bufferOffset + 3]; // White or Brightness
+                pstrip->setPixel(i, r, g, b, w);
             }
-        }
-        else
-        {
-            // For 1-Wire (WS2812, SK6812): Direct memcpy is OK
-            size_t srcOffset = (size_t)offset * _bytesPerLed;
-            size_t copySize = (size_t)count * _bytesPerLed;
-
-            uint8_t* pstripBuffer = pstrip->getBuffer();
-            if (!pstripBuffer) continue;
-
-            memcpy(pstripBuffer, &_buffer[srcOffset], copySize);
+            else
+            {
+                pstrip->setPixel(i, r, g, b);
+            }
         }
     }
 

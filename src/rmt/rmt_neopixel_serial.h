@@ -80,6 +80,7 @@ class RMT_NeoPixel_Serial : public IHardwareDriver
     uint8_t* getBuffer() override { return _inst ? _inst->buffer : nullptr; }
     size_t getBufferSize() const override { return _inst ? _inst->bufferSize : 0; }
     bool isInitialized() const override { return _inst ? _inst->initialized : false; }
+    DriverImplementation getDriverType() const override { return DriverImplementation::RMT_SERIAL; }
 
     // ESP32-specific getters for status reporting
     inline rmt_channel_handle_t getRmtChannel() const { return _inst ? _inst->channel : nullptr; }

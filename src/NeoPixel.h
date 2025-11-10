@@ -2,15 +2,16 @@
 /**
  * @file        NeoPixel.h
  * @brief       OpenKNX Module wrapper for NeoPixel LED control system
- * 
+ *
  * This module provides integration between the NeoPixel library and OpenKNX ecosystem.
  * It handles initialization, console commands, and lifecycle management.
- * 
+ *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 
 #include "NeoPixelManager.h"
 #include "OpenKNX.h"
+#include "effects/EffectPool.h" // Effect Pool for LED effects
 
 #define NeoPixel_Display_Name "NeoPixel" // Display name
 #define NeoPixel_Display_Version "1.0.0" // Display version
@@ -50,12 +51,12 @@ class NeoPixel : public OpenKNX::Module
     inline const std::string version() override { return NeoPixel_Display_Version; }
 
     // OpenKNX required functions
-    void init();                                                            // Initialize the NeoPixel module
-    void setup(bool configured) override;                                   // Setup LED strips
-    void loop(bool configured) override;                                    // Loop for the NeoPixel module
-    
-    void processInputKo(GroupObject& ko) override;                          // Process GroupObjects
-    
+    void init();                          // Initialize the NeoPixel module
+    void setup(bool configured) override; // Setup LED strips
+    void loop(bool configured) override;  // Loop for the NeoPixel module
+
+    void processInputKo(GroupObject& ko) override; // Process GroupObjects
+
     void showHelp() override;                                               // Show help for console commands
     bool processCommand(const std::string command, bool diagnose) override; // Process console commands
 
@@ -73,6 +74,7 @@ class NeoPixel : public OpenKNX::Module
 
     // Strip Management
     PhysicalStrip* addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol = LedProtocol::WS2812B);
+    PhysicalStrip* addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol = LedProtocol::APA102);
     VirtualStrip* addVirtualStrip(uint16_t totalLeds, ColorOrder colorOrder = ColorOrder::GRB);
 
     // Update Control
@@ -113,7 +115,6 @@ class NeoPixel : public OpenKNX::Module
     bool processVirtCommand(const std::string& args);
     bool processVirtAddCommand(const std::string& args);
     bool processVirtDelCommand(const std::string& args);
-    bool processVirtOrderCommand(const std::string& args);
     bool processVirtListCommand();
     bool processVirtAttachCommand(const std::string& args);
     bool processVirtDetachCommand(const std::string& args);
@@ -133,6 +134,7 @@ class NeoPixel : public OpenKNX::Module
     bool processGarageCommand(const std::string& args);
     bool processColorCommand(const std::string& args);
     bool processBrightnessCommand(const std::string& args);
+    bool processHardwareBrightnessCommand(const std::string& args);
 
 #ifdef OPENKNX_NEOPIXEL_TESTS
     bool processAnimTestStartCommand();

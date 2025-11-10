@@ -7,7 +7,7 @@
  * - PIO (RP2040/RP2350): 1-Wire and SPI
  * - RMT (ESP32-S3): 1-Wire
  * - Hardware SPI (All platforms)
- * 
+ *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 
@@ -49,6 +49,20 @@ enum class DriverType
     SERIAL_1WIRE, // Force 1-Wire driver (PIO or RMT)
     SPI_HARDWARE, // Force Hardware SPI
     SPI_PIO,      // Force PIO-based SPI (RP2040/50 only)
+    NATIVE,       // Force native/software implementation
+};
+
+/**
+ * Driver Implementation Type (for runtime detection)
+ */
+enum class DriverImplementation
+{
+    PIO_SERIAL,   // RP2040 PIO 1-Wire
+    PIO_SPI,      // RP2040 PIO SPI
+    RMT_SERIAL,   // ESP32 RMT 1-Wire
+    HARDWARE_SPI, // Hardware SPI
+    NATIVE,       // Native/Software implementation
+    UNKNOWN,      // Unknown driver type
 };
 
 /**
@@ -101,6 +115,9 @@ class IHardwareDriver
     virtual uint8_t* getBuffer() = 0;
     virtual size_t getBufferSize() const = 0;
     virtual bool isInitialized() const = 0;
+
+    // Get driver implementation type (for runtime detection)
+    virtual DriverImplementation getDriverType() const = 0;
 };
 
 /**
