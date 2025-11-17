@@ -51,15 +51,38 @@ struct EffectConfig
     uint8_t fade;               // Fade amount 0-255
     uint8_t mode;               // Effect-specific mode
 
-    uint32_t option1; // Additional parameter 1
-    uint32_t option2; // Additional parameter 2
+    // OAM Interface Parameters
+    uint8_t option1;            // Effekt Option 1 (0-255) - Effect-specific parameter
+    uint8_t option2;            // Effekt Option 2 (0-255) - Effect-specific parameter  
+    uint8_t option3;            // Effekt Option 3 (0-255) - Effect-specific parameter
+    
+    bool feature1;              // Effekt Feature 1 (true/false) - Effect-specific boolean
+    bool feature2;              // Effekt Feature 2 (true/false) - Effect-specific boolean
+    bool feature3;              // Effekt Feature 3 (true/false) - Effect-specific boolean
+
+    // Legacy 32-bit options for backward compatibility
+    uint32_t legacyOption1;     // Legacy option1 (32-bit)
+    uint32_t legacyOption2;     // Legacy option2 (32-bit)
+
+    // Convenience accessors for color components
+    inline uint8_t r() const { return (primaryRGBW >> 24) & 0xFF; }
+    inline uint8_t g() const { return (primaryRGBW >> 16) & 0xFF; }
+    inline uint8_t b() const { return (primaryRGBW >> 8) & 0xFF; }
+    inline uint8_t w() const { return primaryRGBW & 0xFF; }
+    
+    inline uint8_t r2() const { return (secondaryRGBW >> 24) & 0xFF; }
+    inline uint8_t g2() const { return (secondaryRGBW >> 16) & 0xFF; }
+    inline uint8_t b2() const { return (secondaryRGBW >> 8) & 0xFF; }
+    inline uint8_t w2() const { return secondaryRGBW & 0xFF; }
 
     // Default Constructor
     EffectConfig()
         : speed(128), intensity(128), brightness(255), hardwareBrightness(255),
           primaryRGBW(0xFFFFFFFF), secondaryRGBW(0x00000000),
           reverse(0), count(1), fade(128), mode(0),
-          option1(0), option2(0) {}
+          option1(0), option2(0), option3(0),
+          feature1(false), feature2(false), feature3(false),
+          legacyOption1(0), legacyOption2(0) {}
 };
 
 /**
@@ -104,11 +127,11 @@ class Segment
     // ====================================================================
     // Effect Management
     // ====================================================================
-    void setEffect(Effect* effect, bool initializeDefaults = false);// Set effect (Stateless - no init!)
-    Effect* getEffect() { return _effect; }                         // Get current effect
-    const Effect* getEffect() const { return _effect; }             // Get current effect (const)
-    bool hasEffect() const { return _effect != nullptr; }           // Check if effect is set
-    void clearEffect() { _effect = nullptr; }                       // Remove effect
+    void setEffect(Effect* effect);                       // Set effect (Stateless - no init!)
+    Effect* getEffect() { return _effect; }               // Get current effect
+    const Effect* getEffect() const { return _effect; }   // Get current effect (const)
+    bool hasEffect() const { return _effect != nullptr; } // Check if effect is set
+    void clearEffect() { _effect = nullptr; }             // Remove effect
 
     // ====================================================================
     // Pixel Control
