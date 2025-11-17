@@ -1,9 +1,13 @@
 /**
  * @file ConfettiEffect.h
- * @brief Confetti effect (FastLED port)
+ * @brief Confetti effect - STATELESS
  *
  * Random colored pixels fade in and out. Port of FastLED's Confetti pattern.
  * Based on FastLED library (MIT License) - https://github.com/FastLED/FastLED
+ *
+ * Parameters:
+ *   [0] FadeSpeed (1-50) - How fast pixels fade
+ *   [1] Saturation (0-255) - Color saturation
  *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
@@ -15,44 +19,100 @@
 
 class ConfettiEffect : public Effect
 {
-  private:
-    uint8_t _gHue;
-    uint32_t _lastUpdate;
-
   public:
-    ConfettiEffect() : _gHue(0), _lastUpdate(0) {}
+    ConfettiEffect() = default;
 
-    /**
-     * @brief Update the confetti effect
-     * @param segment The segment to update
-     * @param deltaTime Time since last update in milliseconds
-     */
+    const char* getName() override { return "Confetti"; }
+
+    // ====================================================================
+    // Parameter API
+    // ====================================================================
+    uint8_t getParameterCount() const override { return 2; }
+
+    const char* getParameterName(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return "FadeSpeed";
+            case 1: return "Saturation";
+            default: return nullptr;
+        }
+    }
+
+    ParameterType getParameterType(uint8_t index) const override
+    {
+        return ParameterType::PARAM_UINT8;
+    }
+
+    uint32_t getParameterDefault(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 10;   // FadeSpeed
+            case 1: return 200;  // Saturation
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameter(const Segment* segment, uint8_t index) const override
+    {
+        if (!segment) return 0;
+        auto& state = segment->getState();
+        switch (index)
+        {
+            case 0: return state.aux1;  // FadeSpeed
+            case 1: return state.aux2;  // Saturation
+            default: return 0;
+        }
+    }
+
+    void setParameter(Segment* segment, uint8_t index, uint32_t value) override
+    {
+        if (!segment) return;
+        auto& state = segment->getState();
+        switch (index)
+        {
+            case 0: state.aux1 = value; break;
+            case 1: state.aux2 = value; break;
+        }
+    }
+
+    // ====================================================================
+    // Update
+    // ====================================================================
     void update(Segment* segment, uint32_t deltaTime) override
     {
         if (!segment) return;
 
+        auto& state = segment->getState();
         auto& config = segment->getConfig();
         uint16_t length = segment->getLength();
-        uint8_t brightness = config.intensity; // Global brightness control
 
-        // Fade all LEDs by reading current, dimming, writing back
+        // Get parameters
+        uint8_t fadeSpeed = state.aux1 > 0 ? state.aux1 : 10;
+        uint8_t saturation = state.aux2 > 0 ? state.aux2 : 200;
+        uint8_t brightness = config.intensity;
+
+        // Hue stored in position (lower 8 bits)
+        uint8_t gHue = state.position & 0xFF;
+
+        // Fade all LEDs
         for (uint16_t i = 0; i < length; i++)
         {
             uint8_t r, g, b;
             if (segment->getPixel(i, r, g, b))
             {
-                r = FastLEDMath::fadeToBlackBy(r, 10);
-                g = FastLEDMath::fadeToBlackBy(g, 10);
-                b = FastLEDMath::fadeToBlackBy(b, 10);
+                r = FastLEDMath::fadeToBlackBy(r, fadeSpeed);
+                g = FastLEDMath::fadeToBlackBy(g, fadeSpeed);
+                b = FastLEDMath::fadeToBlackBy(b, fadeSpeed);
                 segment->setPixel(i, r, g, b);
             }
         }
 
-        // Add new random confetti (with brightness scaling)
+        // Add new random confetti
         int pos = FastLEDMath::random8(length);
-        uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_gHue + FastLEDMath::random8(64), 200, brightness);
+        uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(gHue + FastLEDMath::random8(64), saturation, brightness);
 
-        // Add to existing pixel (qadd)
         uint8_t r, g, b;
         if (segment->getPixel(pos, r, g, b))
         {
@@ -62,15 +122,11 @@ class ConfettiEffect : public Effect
             segment->setPixel(pos, r, g, b);
         }
 
-        // Slowly cycle hue
-        uint32_t now = millis();
-        if (now - _lastUpdate > 20)
-        {
-            _gHue++;
-            _lastUpdate = now;
-        }
+        // Cycle hue (every ~20ms)
+        if (deltaTime > 0) gHue++;
+        state.position = (state.position & 0xFF00) | gHue;
     }
 
-    void reset() override { _gHue = 0; _lastUpdate = 0; } // Reset effect state    
-    const char* getName() override { return "Confetti"; } // Effect name
-}; // class ConfettiEffect
+    void reset() override {}
+};
+

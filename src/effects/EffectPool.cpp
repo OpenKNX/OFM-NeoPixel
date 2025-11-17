@@ -8,7 +8,7 @@
 #include "JuggleEffect.h"
 #include "PrideEffect.h"
 #include "RainbowEffect.h"
-#include "SK6812TestEffect.h"
+#include "RGBWTestEffect.h"
 #include "FireEffect.h"
 #include "TheaterChaseEffect.h"
 #include "SinelonEffect.h"
@@ -28,7 +28,7 @@ static ConfettiEffect* s_confetti = nullptr;
 static JuggleEffect* s_juggle = nullptr;
 static BPMEffect* s_bpm = nullptr;
 static CylonEffect* s_cylon = nullptr;
-static SK6812TestEffect* s_sk6812Test = nullptr;
+static RGBWTestEffect* s_rgbwTest = nullptr;
 static GarageDoorEffect* s_garageDoor = nullptr;
 static FireEffect* s_fire = nullptr;
 static TheaterChaseEffect* s_theaterChase = nullptr;
@@ -152,13 +152,13 @@ Effect* EffectPool::getCylon()
  * @brief Get SK6812 Test Effect singleton
  * @return Effect*
  */
-Effect* EffectPool::getSK6812Test()
+Effect* EffectPool::getRGBWTest()
 {
-    if (!s_sk6812Test)
+    if (!s_rgbwTest)
     {
-        s_sk6812Test = new SK6812TestEffect();
+        s_rgbwTest = new RGBWTestEffect();
     }
-    return s_sk6812Test;
+    return s_rgbwTest;
 }
 
 /**

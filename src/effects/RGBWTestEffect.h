@@ -1,5 +1,5 @@
 /**
- * @file SK6812TestEffect.h
+ * @file RGBWTestEffect.h
  * @brief SK6812 RGBW Test Effect - Tests all 4 channels independently
  * 
  * This effect cycles through RGB and White channels to verify proper
@@ -24,7 +24,7 @@
 #include "FastLEDMath.h"
 #include "../Segment.h"
 
-class SK6812TestEffect : public Effect {
+class RGBWTestEffect : public Effect {
 private:
     uint32_t _stateTime;
     uint8_t _testPhase;
@@ -44,7 +44,7 @@ private:
     };
     
 public:
-    SK6812TestEffect() : _stateTime(0), _testPhase(0), _fadeValue(0), _fadeUp(true) {}
+    RGBWTestEffect() : _stateTime(0), _testPhase(0), _fadeValue(0), _fadeUp(true) {}
     
     void update(Segment* segment, uint32_t deltaTime) override {
         if (!segment) return;
@@ -61,7 +61,7 @@ public:
             _fadeValue = 0;
             _fadeUp = true;
 
-            openknx.logger.logWithPrefixAndValues("SK6812 Test","Phase %u - %s", _testPhase, getPhaseName());
+            openknx.logger.logWithPrefixAndValues("RGBW Test","Phase %u - %s", _testPhase, getPhaseName());
         }
         
         // Execute current test phase
@@ -108,7 +108,7 @@ public:
     }
     
     const char* getName() override {
-        return "SK6812_Test";
+        return "RGBW_Test";
     }
     
 private:

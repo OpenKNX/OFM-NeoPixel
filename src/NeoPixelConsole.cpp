@@ -125,10 +125,22 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
 
         openknx.logger.log("");
         openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+        openknx.logger.log("═════════════════════ Power Management ══════════════════════════════════════════");
+        openknx.logger.color(0);
+        openknx.console.printHelpLine("neo power status", "Show current consumption and power limit");
+        openknx.console.printHelpLine("neo power limit <mA>", "Set maximum current limit (e.g., 5000 for 5A)");
+        openknx.console.printHelpLine("neo power profile <type>", "Set LED profile: ws2812b|sk6812|apa102|conservative");
+        openknx.console.printHelpLine("neo power on|off", "Enable/disable current limiting");
+
+        openknx.logger.log("");
+        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
         openknx.logger.log("═════════════════════ Effect Control ════════════════════════════════════════════");
         openknx.logger.color(0);
         openknx.console.printHelpLine("neo effects", "List all available effects");
         openknx.console.printHelpLine("neo effect <seg> <eff>", "Assign effect to segment");
+        openknx.console.printHelpLine("neo effect config <seg>", "Show effect parameters");
+        openknx.console.printHelpLine("neo effect config <seg> get <idx>", "Get parameter value");
+        openknx.console.printHelpLine("neo effect config <seg> set <idx> <val>", "Set parameter value");
         openknx.console.printHelpLine("neo garage <seg> <phase>", "Set GarageDoor phase (0=OPENING, 1=RUNWAY, 2=COMPLETED, 3=STOPPED)");
         openknx.console.printHelpLine("neo color <seg> <r> <g> <b> [w]", "Set segment color (0-255, w optional for RGBW)");
         openknx.console.printHelpLine("neo brightness <seg> <val>", "Set software brightness (0-255, all LED types)");
@@ -217,9 +229,13 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     }
 
     // Effect commands
-    else if (command == "neo effects")
+    else if (command == "neo effect list" || command == "neo effects")
     {
         return processEffectsCommand();
+    }
+    else if (command.compare(0, 18, "neo effect config ") == 0)
+    {
+        return processEffectConfigCommand(command.substr(18));
     }
     else if (command.compare(0, 11, "neo effect ") == 0)
     {
@@ -242,6 +258,12 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         return processHardwareBrightnessCommand(command.substr(17));
     }
 
+    // Power Management commands
+    else if (command.compare(0, 10, "neo power ") == 0 || command == "neo power")
+    {
+        return processPowerCommand(command.length() > 10 ? command.substr(10) : "");
+    }
+
 #ifdef OPENKNX_NEOPIXEL_TESTS
     // Animation test commands
     else if (command == "neo anim start")
@@ -260,6 +282,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     // Simple test commands
     else if (command == "neo simple")
     {
+        SimpleTest::instance().init(22, 64);
         SimpleTest::instance().runOnce();
         return true;
     }
@@ -1979,6 +2002,10 @@ bool NeoPixel::processSegCommand(const std::string& args)
     {
         return processSegStopCommand(args.substr(5));
     }
+    else if (args.compare(0, 13, "clear effect ") == 0)
+    {
+        return processSegClearEffectCommand(args.substr(13));
+    }
     else
     {
         openknx.logger.log("ERROR: Unknown seg command. Use 'neo ?' for help.");
@@ -2012,24 +2039,25 @@ bool NeoPixel::processSegListCommand()
     }
     else
     {
-        openknx.logger.log("ID │ Range     │ Effect      │ State   │ Color");
-        openknx.logger.log("───┼───────────┼─────────────┼─────────┼───────────────");
-
+        openknx.logger.log("ID │ Range     │ State   │ Effect │ Effect Name      │ Color R:G:B (W)");
+        openknx.logger.log("───┼───────────┼─────────┼────────┼──────────────────┼───────────────────");
         for (uint32_t i = 0; i < count; i++)
         {
             auto seg = _manager->getSegment(i);
             if (seg)
             {
                 auto effect = seg->getEffect();
+                auto effectName = effect ? effect->getName() : "None";
                 auto& config = seg->getConfig();
                 const char* state = seg->isPaused() ? "Paused" : "Running";
 
-                openknx.logger.logWithValues("%2d │ %3d - %3d │ %-11s │ %-7s │ R:%3d G:%3d B:%3d W:%3d",
+                openknx.logger.logWithValues("%2d │ %3d - %3d │ %-7s │ %-6s │ %-16s │ %3d:%3d:%3d (%3d)",
                                              i,
                                              seg->getStartLed(),
                                              seg->getEndLed(),
-                                             effect ? "Active" : "None",
                                              state,
+                                             effect ? "Set" : "N/A",
+                                             effect ? effectName : "N/A",
                                              (config.primaryRGBW >> 24) & 0xFF, // Red from RGBW
                                              (config.primaryRGBW >> 16) & 0xFF, // Green from RGBW
                                              (config.primaryRGBW >> 8) & 0xFF,  // Blue from RGBW
@@ -2208,6 +2236,45 @@ bool NeoPixel::processSegStopCommand(const std::string& args)
     return true;
 }
 
+/**
+ * @brief Process 'neo seg clear effect <id>' command
+ */
+bool NeoPixel::processSegClearEffectCommand(const std::string& args)
+{
+    if (!_initialized || !_manager)
+    {
+        openknx.logger.log("ERROR: NeoPixel module not initialized!");
+        return true;
+    }
+    // Parse segment ID
+    int segId = atoi(args.c_str());
+    auto seg = _manager->getSegment(segId);
+
+    if (segId < 0)
+    {
+        openknx.logger.log("ERROR: Segment ID must be set!");
+        return true;
+    }
+
+    if (!seg)
+    {
+        openknx.logger.logWithValues("ERROR: Segment [%d] not found!", segId);
+        return true;
+    }
+
+    if (!seg->hasEffect())
+    {
+        openknx.logger.logWithValues("Segment [%d] has no effect assigned!", segId);
+        return true;
+    }
+
+    seg->stop();
+    seg->clearEffect();
+    openknx.logger.logWithValues("Segment [%d] effect cleared", segId);
+
+    return true;
+}
+
 // ============================================================================
 // Effect Management Commands
 // ============================================================================
@@ -2232,7 +2299,7 @@ bool NeoPixel::processEffectsCommand()
     openknx.logger.log(" 5 │ Juggle               │ FastLED │ Weaving colored dots");
     openknx.logger.log(" 6 │ BPM                  │ FastLED │ Pulsing stripes");
     openknx.logger.log(" 7 │ Cylon                │ FastLED │ Bouncing LED eye");
-    openknx.logger.log(" 8 │ SK6812Test           │ Test    │ RGBW test pattern");
+    openknx.logger.log(" 8 │ RGBW Test            │ Test    │ RGBW test pattern");
     openknx.logger.log(" 9 │ GarageDoor           │ Custom  │ 3-phase garage animation");
     openknx.logger.log("10 │ Fire                 │ FastLED │ Realistic fire simulation");
     openknx.logger.log("11 │ Theater Chase        │ FastLED │ Theater marquee chase");
@@ -2260,7 +2327,102 @@ bool NeoPixel::processEffectsCommand()
 }
 
 /**
- * @brief Process 'neo effect <seg> <eff>' command
+ * @brief Process 'neo effect config <seg> [get/set <idx> [val]]' command
+ */
+bool NeoPixel::processEffectConfigCommand(const std::string& args)
+{
+    if (!_initialized || !_manager)
+    {
+        openknx.logger.log("ERROR: NeoPixel not initialized!");
+        return true;
+    }
+
+    int segId;
+    char cmd[8] = "";
+    int paramIdx;
+    uint32_t value;
+
+    // Parse: <seg> or <seg> get <idx> or <seg> set <idx> <val>
+    int parsed = sscanf(args.c_str(), "%d %7s %d %u", &segId, cmd, &paramIdx, &value);
+
+    if (parsed < 1)
+    {
+        openknx.logger.log("Usage: neo effect config <seg> [get/set <idx> [val]]");
+        return true;
+    }
+
+    auto seg = _manager->getSegment(segId);
+    if (!seg || !seg->hasEffect())
+    {
+        openknx.logger.logWithValues("ERROR: Segment [%d] has no effect!", segId);
+        return true;
+    }
+
+    Effect* effect = seg->getEffect();
+    uint8_t count = effect->getParameterCount();
+
+    // Show all parameters
+    if (parsed == 1)
+    {
+        openknx.logger.logWithValues("Effect: %s (Segment %d)", effect->getName(), segId);
+        openknx.logger.log("Parameters:");
+        for (uint8_t i = 0; i < count; i++)
+        {
+            const char* name = effect->getParameterName(i);
+            uint32_t val = effect->getParameter(seg, i);
+            uint32_t def = effect->getParameterDefault(i);
+            openknx.logger.logWithValues("  [%d] %-15s = %u (default: %u)", i, name, val, def);
+        }
+        return true;
+    }
+
+    // Get single parameter
+    if (strcmp(cmd, "get") == 0 && parsed >= 3)
+    {
+        if (paramIdx >= count)
+        {
+            openknx.logger.logWithValues("ERROR: Index %d out of range (0-%d)", paramIdx, count - 1);
+            return true;
+        }
+        uint32_t val = effect->getParameter(seg, paramIdx);
+        openknx.logger.logWithValues("%s.%s = %u",
+                                      effect->getName(),
+                                      effect->getParameterName(paramIdx),
+                                      val);
+        return true;
+    }
+
+    // Set parameter
+    if (strcmp(cmd, "set") == 0 && parsed >= 4)
+    {
+        if (paramIdx >= count)
+        {
+            openknx.logger.logWithValues("ERROR: Index %d out of range (0-%d)", paramIdx, count - 1);
+            return true;
+        }
+        effect->setParameter(seg, paramIdx, value);
+        openknx.logger.logWithValues("Set %s.%s = %u",
+                                      effect->getName(),
+                                      effect->getParameterName(paramIdx),
+                                      value);
+        return true;
+    }
+
+    openknx.logger.log("Usage: neo effect config <seg> [get/set <idx> [val]]");
+    return true;
+}
+
+/**
+ * @brief Process 'neo effect <str_action> <seg> <eff>' command
+ * Assign or control effects on a specific segment
+ * str_action values: set, stop, clear, pause, resume
+ *     set: assign effect to segment
+ *     stop: stop effect (pauses and clears segment)
+ *     clear: remove effect from segment
+ *     pause: pause effect (freezes current state)
+ *     resume: resume paused effect
+ * seg: segment ID
+ * eff: effect ID
  */
 bool NeoPixel::processEffectCommand(const std::string& args)
 {
@@ -2270,15 +2432,35 @@ bool NeoPixel::processEffectCommand(const std::string& args)
         return true;
     }
 
-    // Parse arguments: <seg_id> <effect_id>
+    // Parse arguments: <str_action> <seg_id> <effect_id>
+    // str_action values: set, stop, clear, pause, resume
+    std::string action;
     int segId, effId;
-    if (sscanf(args.c_str(), "%d %d", &segId, &effId) != 2)
+
+    // ToDo: check if is empty or with argument ?
+    if (args.empty() || args.compare("?") == 0)
     {
         openknx.logger.log("ERROR: Usage: neo effect <seg_id> <effect_id>");
+        openknx.logger.log("Use 'neo effects' to see available effects");
+        openknx.logger.log("");
         return true;
     }
 
-    // Get segment
+    // action and segId are mandatory
+    char _action[7] = "";
+    if (sscanf(args.c_str(), "%s %d", _action, &segId) != 2)
+    {
+        openknx.logger.log("ERROR! Action and Segment ID must be provided!");
+        return true;
+    }
+    action = std::string(_action);
+
+    if (action.compare("set") == 0 && sscanf(args.c_str(), "%*s %d %d", &segId, &effId) != 2)
+    {
+        openknx.logger.log("ERROR! Action 'set' requires Segment ID and Effect ID!");
+        return true;
+    }
+
     auto seg = _manager->getSegment(segId);
     if (!seg)
     {
@@ -2286,10 +2468,14 @@ bool NeoPixel::processEffectCommand(const std::string& args)
         return true;
     }
 
-    // Get effect from pool
-    Effect* effect = nullptr;
-    switch (effId)
+    // we need to check here, if set is the action
+    // if not, we can ignore effId
+    const auto hasEffect = seg->hasEffect();
+    if (action.compare("set") == 0)
     {
+        Effect* effect = nullptr;
+        switch (effId) // Get effect from pool
+        {
         case 0: // Solid
             effect = EffectPool::getSolid();
             break;
@@ -2314,8 +2500,8 @@ bool NeoPixel::processEffectCommand(const std::string& args)
         case 7: // Cylon
             effect = EffectPool::getCylon();
             break;
-        case 8: // SK6812Test
-            effect = EffectPool::getSK6812Test();
+        case 8: // RGBW Test
+            effect = EffectPool::getRGBWTest();
             break;
         case 9: // GarageDoor
             effect = EffectPool::getGarageDoor();
@@ -2357,18 +2543,84 @@ bool NeoPixel::processEffectCommand(const std::string& args)
             openknx.logger.logWithValues("ERROR: Effect ID %d not found!", effId);
             openknx.logger.log("       Use 'neo effects' to see available effects");
             return true;
-    }
+        }
+        if (!effect)
+        {
+            openknx.logger.log("ERROR: Failed to get effect from pool!");
+            return true;
+        }
 
-    if (!effect)
+        // Assign effect to segment, replacing existing one if necessary.
+        if (hasEffect)
+        {
+            openknx.logger.logWithValues("Effect: '%s' is replaced with '%s' to segment [%d]",
+                                         seg->getEffect()->getName(),
+                                         effect->getName(),
+                                         segId);
+            seg->stop();        // Stop current effect
+            seg->clearEffect(); // Clear current effect
+        }
+        else
+        {
+            openknx.logger.logWithValues("Effect: '%s' is assigned to segment [%d]",
+                                         effect->getName(),
+                                         segId);
+        }
+        seg->setEffect(effect, true); // Assign new effect and reset parameters
+        seg->resume(); // Start effect after assignment
+    }
+    else if (action.compare("clear") == 0)
+
     {
-        openknx.logger.log("ERROR: Failed to get effect from pool!");
+        if (!hasEffect)
+        {
+            openknx.logger.logWithValues("Segment [%d] has no effect assigned!", segId);
+            return true;
+        }
+        const auto _effect_name = seg->getEffect()->getName();
+        seg->stop();
+        seg->clearEffect();
+        openknx.logger.logWithValues("Segment [%d] effect '%s' cleared", segId, _effect_name);
+    }
+    else if (action.compare("stop") == 0)
+    {
+        if (!hasEffect)
+        {
+            openknx.logger.logWithValues("Segment [%d] has no effect assigned!", segId);
+            return true;
+        }
+        seg->stop();
+        const auto _effect_name = seg->getEffect()->getName();
+        openknx.logger.logWithValues("Segment [%d] effect '%s' stopped", segId, _effect_name);
+    }
+    else if (action.compare("pause") == 0)
+    {
+        if (!hasEffect)
+        {
+            openknx.logger.logWithValues("Segment [%d] has no effect assigned!", segId);
+            return true;
+        }
+        seg->pause();
+        const auto _effect_name = seg->getEffect()->getName();
+        openknx.logger.logWithValues("Segment [%d] effect '%s' paused", segId, _effect_name);
+    }
+    else if (action.compare("resume") == 0)
+    {
+        if (!hasEffect)
+        {
+            openknx.logger.logWithValues("Segment [%d] has no effect assigned!", segId);
+            return true;
+        }
+        seg->resume();
+        const auto _effect_name = seg->getEffect()->getName();
+        openknx.logger.logWithValues("Segment [%d] effect '%s' resumed", segId, _effect_name);
+    }
+    else
+    {
+        openknx.logger.log("ERROR: Unknown action! Provided action: " + action);
+        openknx.logger.log("       Valid actions: set, stop, clear, pause, resume");
         return true;
     }
-
-    // Assign effect to segment
-    seg->setEffect(effect);
-
-    openknx.logger.logWithValues("Effect assigned to segment [%d]", segId);
 
     return true;
 }
@@ -2641,3 +2893,164 @@ bool NeoPixel::processHardwareBrightnessCommand(const std::string& args)
 
     return true;
 }
+
+// ============================================================================
+// Power Management Commands
+// ============================================================================
+/**
+ * @brief Process power management commands
+ * @param args Command arguments (after "neo power ")
+ * @return true if command was processed
+ */
+bool NeoPixel::processPowerCommand(const std::string& args)
+{
+    openknx.logger.begin();
+
+    // neo power (show status)
+    if (args.empty() || args == "status")
+    {
+        PowerManager* pm = _manager->getPowerManager();
+        if (!pm)
+        {
+            openknx.logger.log("[ERROR] PowerManager not initialized!");
+            openknx.logger.end();
+            return false;
+        }
+
+        openknx.logger.log("");
+        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+        openknx.logger.log("═══════════════════ Power Management Status ═════════════════════════════════");
+        openknx.logger.color(0);
+
+        // Current limiting status
+        openknx.logger.logWithValues("Status:           %s", pm->isEnabled() ? "ENABLED" : "DISABLED");
+        openknx.logger.logWithValues("Max Current:      %u mA (%.2f A)", pm->getMaxCurrent(), pm->getMaxCurrent() / 1000.0f);
+
+        // LED profile
+        const char* profileName = "CUSTOM";
+        LedCurrentProfile profile = pm->getLedProfile();
+        if (profile == LedProfiles::WS2812B) profileName = "WS2812B";
+        else if (profile == LedProfiles::SK6812_RGBW) profileName = "SK6812 RGBW";
+        else if (profile == LedProfiles::APA102) profileName = "APA102";
+        else if (profile == LedProfiles::CONSERVATIVE) profileName = "CONSERVATIVE";
+        
+        openknx.logger.logWithValues("LED Profile:      %s (R:%umA G:%umA B:%umA W:%umA)",
+                            profileName, profile.redMA, profile.greenMA,
+                            profile.blueMA, profile.whiteMA);
+
+        // Current consumption - REQUESTED (before limiting)
+        float totalPower = _manager->getTotalPowerWatts();
+        uint32_t requestedCurrent = pm->getLastCalculatedCurrent();
+        openknx.logger.logWithValues("Requested Power:  %.2f W @ 5V", totalPower);
+        openknx.logger.logWithValues("Requested Current:%u mA", requestedCurrent);
+
+        // Actual consumption - AFTER limiting
+        float actualPower = pm->getActualPowerWatts();
+        uint32_t actualCurrent = pm->getActualCurrent();
+        openknx.logger.logWithValues("Actual Power:     %.2f W @ 5V", actualPower);
+        openknx.logger.logWithValues("Actual Current:   %u mA", actualCurrent);
+
+        // Show if limiting is active
+        if (pm->isEnabled() && requestedCurrent > pm->getMaxCurrent())
+        {
+            float scale = (float)actualCurrent / requestedCurrent;
+            openknx.logger.log("");
+            openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+            openknx.logger.logWithValues("WARNING: CURRENT LIMITING ACTIVE - Brightness scaled to %.1f%%", scale * 100.0f);
+            openknx.logger.color(0);
+        }
+
+        openknx.logger.log("═════════════════════════════════════════════════════════════════════════════");
+        openknx.logger.log("");
+        openknx.logger.end();
+        return true;
+    }
+
+    // neo power limit <mA>
+    else if (args.compare(0, 6, "limit ") == 0)
+    {
+        uint32_t limit = atoi(args.substr(6).c_str());
+        if (limit < 100 || limit > 100000)
+        {
+            openknx.logger.log("[ERROR] Invalid current limit (100-100000 mA)");
+            openknx.logger.end();
+            return false;
+        }
+
+        _manager->setMaxCurrent(limit);
+        openknx.logger.logWithValues("Power limit set to %u mA (%.2f A)", limit, limit / 1000.0f);
+        openknx.logger.end();
+        return true;
+    }
+
+    // neo power profile <type>
+    else if (args.compare(0, 8, "profile ") == 0)
+    {
+        std::string profileStr = args.substr(8);
+        PowerManager* pm = _manager->getPowerManager();
+        if (!pm)
+        {
+            openknx.logger.log("[ERROR] PowerManager not initialized!");
+            openknx.logger.end();
+            return false;
+        }
+
+        LedCurrentProfile profile;
+        bool found = false;
+
+        if (profileStr == "ws2812b")
+        {
+            profile = LedProfiles::WS2812B;
+            found = true;
+        }
+        else if (profileStr == "sk6812" || profileStr == "sk6812_rgbw")
+        {
+            profile = LedProfiles::SK6812_RGBW;
+            found = true;
+        }
+        else if (profileStr == "apa102")
+        {
+            profile = LedProfiles::APA102;
+            found = true;
+        }
+        else if (profileStr == "conservative")
+        {
+            profile = LedProfiles::CONSERVATIVE;
+            found = true;
+        }
+
+        if (!found)
+        {
+            openknx.logger.log("[ERROR] Unknown profile. Use: ws2812b|sk6812|apa102|conservative");
+            openknx.logger.end();
+            return false;
+        }
+
+        pm->setLedProfile(profile);
+        openknx.logger.logWithValues("LED profile set to %s", profileStr.c_str());
+        openknx.logger.end();
+        return true;
+    }
+
+    // neo power on/off
+    else if (args == "on")
+    {
+        _manager->setPowerManagementEnabled(true);
+        openknx.logger.log("Power management ENABLED");
+        openknx.logger.end();
+        return true;
+    }
+    else if (args == "off")
+    {
+        _manager->setPowerManagementEnabled(false);
+        openknx.logger.log("Power management DISABLED");
+        openknx.logger.end();
+        return true;
+    }
+
+    // Unknown command
+    openknx.logger.log("[ERROR] Unknown power command. Use: neo power status|limit|profile|on|off");
+    openknx.logger.end();
+    return false;
+}
+
