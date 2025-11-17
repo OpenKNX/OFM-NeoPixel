@@ -22,6 +22,7 @@
 enum class LedProtocol
 {
     // 1-Wire Protocols (Clock embedded in data)
+    WS2805,  // 12V RGB, 400kHz, RGB order
     WS2812,  // 5V RGB, 800kHz, GRB order
     WS2812B, // Same as WS2812 (common variant)
     WS2813,  // 5V RGB, 800kHz, GRB, data backup

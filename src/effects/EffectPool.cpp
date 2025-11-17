@@ -9,6 +9,12 @@
 #include "PrideEffect.h"
 #include "RainbowEffect.h"
 #include "SK6812TestEffect.h"
+#include "FireEffect.h"
+#include "TheaterChaseEffect.h"
+#include "SinelonEffect.h"
+#include "TwinkleEffect.h"
+#include "BreathingEffect.h"
+#include "CometEffect.h"
 
 // -----------------------------------------------------------
 // Static singleton instances - (Initialized on first use)
@@ -24,6 +30,17 @@ static BPMEffect* s_bpm = nullptr;
 static CylonEffect* s_cylon = nullptr;
 static SK6812TestEffect* s_sk6812Test = nullptr;
 static GarageDoorEffect* s_garageDoor = nullptr;
+static FireEffect* s_fire = nullptr;
+static TheaterChaseEffect* s_theaterChase = nullptr;
+static TheaterChaseRainbowEffect* s_theaterChaseRainbow = nullptr;
+static SinelonEffect* s_sinelon = nullptr;
+static TwinkleEffect* s_twinkle = nullptr;
+static SparkleEffect* s_sparkle = nullptr;
+static BreathingEffect* s_breathing = nullptr;
+static StrobeEffect* s_strobe = nullptr;
+static PulseEffect* s_pulse = nullptr;
+static CometEffect* s_comet = nullptr;
+static MeteorEffect* s_meteor = nullptr;
 //
 // -----------------------------------------------------------
 
@@ -155,4 +172,147 @@ Effect* EffectPool::getGarageDoor()
         s_garageDoor = new GarageDoorEffect();
     }
     return s_garageDoor;
+}
+
+/**
+ * @brief Get Fire Effect singleton (FastLED Fire2012 port)
+ * @return Effect*
+ */
+Effect* EffectPool::getFire()
+{
+    if (!s_fire)
+    {
+        s_fire = new FireEffect();
+    }
+    return s_fire;
+}
+
+/**
+ * @brief Get Theater Chase Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getTheaterChase()
+{
+    if (!s_theaterChase)
+    {
+        s_theaterChase = new TheaterChaseEffect();
+    }
+    return s_theaterChase;
+}
+
+/**
+ * @brief Get Theater Chase Rainbow Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getTheaterChaseRainbow()
+{
+    if (!s_theaterChaseRainbow)
+    {
+        s_theaterChaseRainbow = new TheaterChaseRainbowEffect();
+    }
+    return s_theaterChaseRainbow;
+}
+
+/**
+ * @brief Get Sinelon Effect singleton (FastLED port)
+ * @return Effect*
+ */
+Effect* EffectPool::getSinelon()
+{
+    if (!s_sinelon)
+    {
+        s_sinelon = new SinelonEffect();
+    }
+    return s_sinelon;
+}
+
+/**
+ * @brief Get Twinkle Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getTwinkle()
+{
+    if (!s_twinkle)
+    {
+        s_twinkle = new TwinkleEffect();
+    }
+    return s_twinkle;
+}
+
+/**
+ * @brief Get Sparkle Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getSparkle()
+{
+    if (!s_sparkle)
+    {
+        s_sparkle = new SparkleEffect();
+    }
+    return s_sparkle;
+}
+
+/**
+ * @brief Get Breathing Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getBreathing()
+{
+    if (!s_breathing)
+    {
+        s_breathing = new BreathingEffect();
+    }
+    return s_breathing;
+}
+
+/**
+ * @brief Get Strobe Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getStrobe()
+{
+    if (!s_strobe)
+    {
+        s_strobe = new StrobeEffect();
+    }
+    return s_strobe;
+}
+
+/**
+ * @brief Get Pulse Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getPulse()
+{
+    if (!s_pulse)
+    {
+        s_pulse = new PulseEffect();
+    }
+    return s_pulse;
+}
+
+/**
+ * @brief Get Comet Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getComet()
+{
+    if (!s_comet)
+    {
+        s_comet = new CometEffect();
+    }
+    return s_comet;
+}
+
+/**
+ * @brief Get Meteor Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getMeteor()
+{
+    if (!s_meteor)
+    {
+        s_meteor = new MeteorEffect();
+    }
+    return s_meteor;
 }

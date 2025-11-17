@@ -32,6 +32,17 @@ class BPMEffect;
 class CylonEffect;
 class SK6812TestEffect;
 class GarageDoorEffect;
+class FireEffect;
+class TheaterChaseEffect;
+class TheaterChaseRainbowEffect;
+class SinelonEffect;
+class TwinkleEffect;
+class SparkleEffect;
+class BreathingEffect;
+class StrobeEffect;
+class PulseEffect;
+class CometEffect;
+class MeteorEffect;
 
 /**
  * EffectPool - Singleton Pool for all Effect Instances
@@ -51,6 +62,17 @@ class EffectPool
     static Effect* getCylon();
     static Effect* getSK6812Test();
     static Effect* getGarageDoor();
+    static Effect* getFire();
+    static Effect* getTheaterChase();
+    static Effect* getTheaterChaseRainbow();
+    static Effect* getSinelon();
+    static Effect* getTwinkle();
+    static Effect* getSparkle();
+    static Effect* getBreathing();
+    static Effect* getStrobe();
+    static Effect* getPulse();
+    static Effect* getComet();
+    static Effect* getMeteor();
     //
     // -----------------------------------------------------------
 
