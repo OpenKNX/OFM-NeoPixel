@@ -79,7 +79,7 @@ public:
                 r = (rgb >> 16) & 0xFF;
                 g = (rgb >> 8) & 0xFF;
                 b = rgb & 0xFF;
-            } else if (config.r == 0 && config.g == 0 && config.b == 0) {
+            } else if (config.r() == 0 && config.g() == 0 && config.b() == 0) {
                 // No color configured, use white
                 uint8_t brightness = variableBrightness ? 
                     FastLEDMath::random8(128, 255) : 255;
@@ -91,9 +91,9 @@ public:
                     FastLEDMath::random8(128, 255) : 255;
                 brightness = FastLEDMath::scale8(brightness, config.intensity);
                 
-                r = FastLEDMath::scale8(config.r, brightness);
-                g = FastLEDMath::scale8(config.g, brightness);
-                b = FastLEDMath::scale8(config.b, brightness);
+                r = FastLEDMath::scale8(config.r(), brightness);
+                g = FastLEDMath::scale8(config.g(), brightness);
+                b = FastLEDMath::scale8(config.b(), brightness);
             }
             
             segment->setPixel(pos, r, g, b);
@@ -181,7 +181,7 @@ public:
                     uint8_t brightness = FastLEDMath::random8(64, 255);
                     brightness = FastLEDMath::scale8(brightness, config.intensity);
                     r = g = b = brightness;
-                } else if (config.r == 0 && config.g == 0 && config.b == 0) {
+                } else if (config.r() == 0 && config.g() == 0 && config.b() == 0) {
                     // No color configured, use random rainbow colors
                     uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(
                         FastLEDMath::random8(), 255, config.intensity);
@@ -193,9 +193,9 @@ public:
                     uint8_t brightness = FastLEDMath::random8(64, 255);
                     brightness = FastLEDMath::scale8(brightness, config.intensity);
                     
-                    r = FastLEDMath::scale8(config.r, brightness);
-                    g = FastLEDMath::scale8(config.g, brightness);
-                    b = FastLEDMath::scale8(config.b, brightness);
+                    r = FastLEDMath::scale8(config.r(), brightness);
+                    g = FastLEDMath::scale8(config.g(), brightness);
+                    b = FastLEDMath::scale8(config.b(), brightness);
                 }
                 
                 segment->setPixel(pos, r, g, b);

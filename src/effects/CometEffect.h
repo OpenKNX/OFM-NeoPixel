@@ -93,7 +93,7 @@ public:
                     r = (rgb >> 16) & 0xFF;
                     g = (rgb >> 8) & 0xFF;
                     b = rgb & 0xFF;
-                } else if (config.r == 0 && config.g == 0 && config.b == 0) {
+                } else if (config.r() == 0 && config.g() == 0 && config.b() == 0) {
                     // Default cycling rainbow
                     uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(
                         _hue, 255, 
@@ -104,9 +104,9 @@ public:
                 } else {
                     // Use configured color
                     brightness = FastLEDMath::scale8(brightness, config.intensity);
-                    r = FastLEDMath::scale8(config.r, brightness);
-                    g = FastLEDMath::scale8(config.g, brightness);
-                    b = FastLEDMath::scale8(config.b, brightness);
+                    r = FastLEDMath::scale8(config.r(), brightness);
+                    g = FastLEDMath::scale8(config.g(), brightness);
+                    b = FastLEDMath::scale8(config.b(), brightness);
                 }
                 
                 segment->setPixel(tailPos, r, g, b);
@@ -117,7 +117,7 @@ public:
         if (_position >= 0 && _position < length) {
             uint8_t r, g, b;
             
-            if (rainbowMode || (config.r == 0 && config.g == 0 && config.b == 0)) {
+            if (rainbowMode || (config.r() == 0 && config.g() == 0 && config.b() == 0)) {
                 // Rainbow or no color configured
                 uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, config.intensity);
                 r = (rgb >> 16) & 0xFF;
@@ -126,9 +126,9 @@ public:
                 _hue += 2; // Slow hue cycling
             } else {
                 // Use configured color
-                r = FastLEDMath::scale8(config.r, config.intensity);
-                g = FastLEDMath::scale8(config.g, config.intensity);
-                b = FastLEDMath::scale8(config.b, config.intensity);
+                r = FastLEDMath::scale8(config.r(), config.intensity);
+                g = FastLEDMath::scale8(config.g(), config.intensity);
+                b = FastLEDMath::scale8(config.b(), config.intensity);
             }
             
             segment->setPixel(_position, r, g, b);
@@ -224,7 +224,7 @@ public:
             
             if (randomColors) {
                 _hue = FastLEDMath::random8(); // Random color
-            } else if (config.r == 0 && config.g == 0 && config.b == 0) {
+            } else if (config.r() == 0 && config.g() == 0 && config.b() == 0) {
                 _hue = FastLEDMath::random8(); // Default to random if no color set
             }
             
@@ -265,7 +265,7 @@ public:
                     uint8_t brightness = 255 - (i * 255 / _meteorSize); // Fade along body
                     
                     uint8_t r, g, b;
-                    if (randomColors || (config.r == 0 && config.g == 0 && config.b == 0)) {
+                    if (randomColors || (config.r() == 0 && config.g() == 0 && config.b() == 0)) {
                         // Use random/rainbow hue
                         uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, 
                             FastLEDMath::scale8(brightness, config.intensity));
@@ -275,9 +275,9 @@ public:
                     } else {
                         // Use configured color
                         brightness = FastLEDMath::scale8(brightness, config.intensity);
-                        r = FastLEDMath::scale8(config.r, brightness);
-                        g = FastLEDMath::scale8(config.g, brightness);
-                        b = FastLEDMath::scale8(config.b, brightness);
+                        r = FastLEDMath::scale8(config.r(), brightness);
+                        g = FastLEDMath::scale8(config.g(), brightness);
+                        b = FastLEDMath::scale8(config.b(), brightness);
                     }
                     
                     segment->setPixel(pos, r, g, b);
