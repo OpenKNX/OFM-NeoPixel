@@ -4,6 +4,8 @@
  *
  * Simplest effect: Set all pixels in segment to one color
  *
+ * Note: Uses segment's primaryRGBW color, no additional parameters
+ *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 
@@ -15,8 +17,19 @@
 class EffectSolid : public Effect
 {
   public:
-    EffectSolid() = default;                                    // Constructor
-    virtual ~EffectSolid() = default;                           // Destructor
-    void update(Segment* segment, uint32_t deltaTime) override; // Update method
-    const char* getName() override { return "Solid"; }          // Effect name
+    EffectSolid() = default;
+    virtual ~EffectSolid() = default;
+    
+    void update(Segment* segment, uint32_t deltaTime) override;
+    const char* getName() override { return "Solid"; }
+
+    // ====================================================================
+    // Parameter API (Solid has no params - uses primaryRGBW)
+    // ====================================================================
+    uint8_t getParameterCount() const override { return 0; }
+    const char* getParameterName(uint8_t index) const override { return nullptr; }
+    ParameterType getParameterType(uint8_t index) const override { return ParameterType::PARAM_UINT8; }
+    uint32_t getParameterDefault(uint8_t index) const override { return 0; }
+    uint32_t getParameter(const Segment* segment, uint8_t index) const override { return 0; }
+    void setParameter(Segment* segment, uint8_t index, uint32_t value) override {}
 };

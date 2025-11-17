@@ -2,7 +2,7 @@
 
 **Complete guide for porting FastLED effects to OFM-NeoPixel**
 
-**Version:** 0.0.1  
+**Version:** 0.0.2  
 **Date:** 2025-11-06  
 **Author:** Copyright (c) 2025 Erkan Çolak - OpenKNX
 
@@ -12,6 +12,7 @@
 
 - [Overview](#overview)
 - [Architecture Comparison](#architecture-comparison)
+- [Parameter System](#parameter-system)
 - [Ported Effects](#ported-effects)
 - [FastLED Math Library](#fastled-math-library)
 - [Step-by-Step Porting Guide](#step-by-step-porting-guide)
@@ -36,7 +37,8 @@ OFM-NeoPixel includes a **stateless effect system** inspired by FastLED but opti
 - Active community
 
 **OFM-NeoPixel Advantages:**
-- Stateless design (99% memory savings)
+- Stateless design (96% memory savings)
+- Self-describing parameter API
 - Hardware acceleration (PIO/DMA/RMT)
 - Segment-based architecture
 - OpenKNX integration
@@ -46,6 +48,93 @@ OFM-NeoPixel includes a **stateless effect system** inspired by FastLED but opti
 - Run on OFM-NeoPixel's efficient platform
 - Keep FastLED's math functions
 - Add OpenKNX integration
+
+---
+
+## Architecture Comparison
+
+### FastLED (Global State)
+
+```cpp
+CRGB leds[NUM_LEDS];
+uint8_t gHue = 0;
+
+void loop() {
+    fill_rainbow(leds, NUM_LEDS, gHue, 7);
+    FastLED.show();
+    gHue++;
+}
+```
+
+### OFM-NeoPixel (Stateless Singleton)
+
+```cpp
+class RainbowEffect : public Effect {
+public:
+    void update(Segment* seg, uint32_t dt) override {
+        auto& state = seg->getState();  // State in segment!
+        for (uint16_t i = 0; i < seg->getLength(); i++) {
+            uint8_t hue = state.aux1 + (i * 255 / seg->getLength());
+            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, 255);
+            seg->setPixel(i, (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+        }
+        state.aux1++;
+    }
+};
+// 1 instance for 100 segments = 8 bytes (vs 100 instances = 800 bytes)
+```
+
+---
+
+## Parameter System
+
+**NEW in v0.0.2:** Self-describing effects via parameter introspection API.
+
+### Why?
+
+**Before:** Adding new effect -> modify Segment.h, Console, UI  
+**After:** Effect describes its own parameters -> zero code changes
+
+### API
+
+```cpp
+virtual uint8_t getParameterCount() const;
+virtual const char* getParameterName(uint8_t idx) const;
+virtual ParameterType getParameterType(uint8_t idx) const;
+virtual uint32_t getParameter(const Segment* seg, uint8_t idx) const;
+virtual void setParameter(Segment* seg, uint8_t idx, uint32_t val);
+```
+
+### Types
+
+| Type | Range | UI |
+|------|-------|-----|
+| PARAM_UINT8 | 0-255 | Slider |
+| PARAM_BOOL | 0/1 | Checkbox |
+| PARAM_COLOR_RGB | 0xRRGGBB | Color Picker |
+| PARAM_PERCENT | 0-100 | Slider % |
+| PARAM_ENUM | Custom | Dropdown |
+
+### Example
+
+```cpp
+class BPMEffect : public Effect {
+    uint8_t getParameterCount() const override { return 2; }
+    const char* getParameterName(uint8_t i) const override {
+        return i == 0 ? "BPM" : "Hue";
+    }
+    uint32_t getParameter(const Segment* s, uint8_t i) const override {
+        auto& st = s->getState();
+        return i == 0 ? st.aux1 : st.aux2;
+    }
+    void setParameter(Segment* s, uint8_t i, uint32_t v) override {
+        auto& st = s->getState();
+        if (i == 0) st.aux1 = v; else st.aux2 = v;
+    }
+};
+```
+
+**Result:** Console/UI auto-generate controls for BPM and Hue.
 
 ---
 
@@ -696,6 +785,7 @@ void testPortedEffects() {
         EffectPool::getEffect(3),  // Confetti
         EffectPool::getEffect(4),  // Juggle
         EffectPool::getEffect(5),  // BPM
+        //....
     };
     
     for (auto* effect : effects) {

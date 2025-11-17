@@ -28,6 +28,7 @@
 #pragma once
 #include "OpenKNX.h"
 #include "PhysicalStrip.h"
+#include "PowerManager.h"
 #include "Segment.h"
 #include "VirtualStrip.h"
 
@@ -189,6 +190,34 @@ class NeoPixelManager
     uint32_t getTotalLedCount() const;
     static uint32_t getMaxStrips();
 
+    // ====================================================================
+    // Power Management (NEW!)
+    // ====================================================================
+    
+    /**
+     * @brief Get power manager
+     * @return Pointer to PowerManager
+     */
+    PowerManager* getPowerManager() { return &_powerManager; }
+
+    /**
+     * @brief Set maximum current limit
+     * @param maxCurrentMA Maximum current in milliamps
+     */
+    void setMaxCurrent(uint32_t maxCurrentMA) { _powerManager.setMaxCurrent(maxCurrentMA); }
+
+    /**
+     * @brief Enable/disable power management
+     * @param enabled true = limit current, false = no limiting
+     */
+    void setPowerManagementEnabled(bool enabled) { _powerManager.setEnabled(enabled); }
+
+    /**
+     * @brief Get estimated total power consumption
+     * @return Power in Watts
+     */
+    float getTotalPowerWatts() const;
+
   private:
     std::vector<PhysicalStrip*> _strips;       // Physical strips
     std::vector<VirtualStrip*> _virtualStrips; // Virtual strips
@@ -197,6 +226,7 @@ class NeoPixelManager
     uint32_t _lastUpdateTime;                  // Last update time in milliseconds
     uint32_t _updateCount;                     // Number of updates since start
     uint32_t _errorCount;                      // Error counter
+    PowerManager _powerManager;                // Power/Current management
 
     bool checkResourcesAvailable(LedProtocol protocol);                               // Check if resources are available for new strip
     void countResourceUsage(uint32_t& pioUsed, uint32_t& spiUsed, uint32_t& rmtUsed); // Count current resource usage

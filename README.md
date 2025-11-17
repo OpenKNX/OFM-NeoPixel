@@ -1,11 +1,11 @@
 # OFM-NeoPixel
 
-**Version:** 0.0.1  
+**Version:** 0.0.2  
 **Platform:** OpenKNX (RP2040, RP2350, ESP32-S3)  
 **License:** GNU GPL v3.0  
-**Author:** Erkan Colak
+**Author:** Erkan Çolak
 
-A high-performance, hardware-optimized LED control library for addressable RGB/RGBW strips on OpenKNX devices.
+A high-performance, hardware-optimized LED control library for addressable RGB/RGBW strips on OpenKNX devices with **self-describing effects** and **stateless architecture**.
 
 ---
 
@@ -15,14 +15,35 @@ A high-performance, hardware-optimized LED control library for addressable RGB/R
 - [Key Features](#key-features)
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
+  - [System Overview](#system-overview)
+  - [Data Flow with Global Power Management](#data-flow-with-global-power-management)
+  - [Memory Layout](#memory-layout)
+  - [ColorOrder Architecture](#colororder-architecture)
 - [Installation](#installation)
 - [Hardware Support](#hardware-support)
+  - [Supported Microcontrollers](#supported-microcontrollers)
+  - [Supported LED Protocols](#supported-led-protocols)
+  - [Wiring](#wiring)
+  - [Power Considerations](#power-considerations)
 - [Console Commands](#console-commands)
+  - [Core Commands](#core-commands)
+  - [Physical Strip Commands](#physical-strip-commands)
+  - [Virtual Strip Commands](#virtual-strip-commands)
+  - [Segment Commands](#segment-commands)
+  - [Effect Commands](#effect-commands)
 - [API Reference](#api-reference)
 - [Examples](#examples)
 - [Performance](#performance)
+- [Power Management & Current Limiting](#power-management--current-limiting)
+  - [How It Works](#how-it-works)
+  - [LED Current Profiles](#led-current-profiles)
+  - [Configuration](#configuration)
+  - [Monitoring Power Consumption](#monitoring-power-consumption)
+  - [Practical Examples](#practical-examples)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
+- [License](#license)
+- [Credits](#credits)
 
 ---
 
@@ -39,14 +60,22 @@ This design enables complex LED configurations with minimal CPU overhead through
 ### What Makes This Library Different?
 
 - **Hardware Accelerated**: Zero CPU overhead during LED updates (DMA/PIO/RMT)
+- **Stateless Effects**: 96% memory savings - single effect instance for all segments
+- **Self-Describing Effects**: Auto-generated UI, console commands, and documentation
 - **Multi-Strip Composition**: Combine multiple physical strips into one logical strip
-- **Segment-Based Effects**: Apply different animations to different LED ranges
-- **Stateless Effect System**: Single effect instance shared by multiple segments
 - **Platform Optimized**: RP2040 (PIO/DMA), RP2350 (PIO/DMA), ESP32-S3 (RMT)
 
 ---
 
 ## Key Features
+
+### Effect System (NEW)
+
+- **Parameter Introspection API**: Effects describe their own parameters
+- **Auto-Generated UI**: Console and web UI generate automatically
+- **12 Parameter Types**: UINT8, BOOL, COLOR_RGB, PERCENT, ENUM, etc.
+- **Zero Code Changes**: Add new effects without modifying Segment/Console/UI
+- **Type-Safe**: ParameterType enum for validation
 
 ### Hardware Layer
 
@@ -189,7 +218,7 @@ neo perf                # Show CPU usage and frame rate
 ┌─────────────────────────────────────────────────────────┐
 │                    NeoPixel Module                      │
 │              (OpenKNX Integration Layer)                │
-│  - Console commands                                     │
+│  - Console commands (with parameter API)                │
 │  - GroupObject handling (planned)                       │
 │  - Lifecycle management                                 │
 └────────────────────────┬────────────────────────────────┘
@@ -200,41 +229,73 @@ neo perf                # Show CPU usage and frame rate
 │  - Virtual strip composition                            │
 │  - Segment orchestration                                │
 │  - Effect update scheduling                             │
+│  - GLOBAL Power Management (NEW!)                       │
+│    └─> PowerManager: Current limiting across ALL strips │
 └────┬────────────┬─────────────┬─────────────────────────┘
      |            |             |
 ┌────▼───────┐  ┌─▼────────┐  ┌─▼────────┐
 │ Physical   │  │ Virtual  │  │ Segment  │
-│ Strip      │  │ Strip    │  │          │
+│ Strip      │  │ Strip    │  │ + State  │
+│+ColorOrder │  │(RGB only)│  │ +Config  │
 └────┬───────┘  └──────────┘  └─────┬────┘
      |                              |
-┌────▼───────────────┐        ┌─────▼─────┐
-│ IHardwareDriver    │        │  Effect   │
-│  - PIO (RP2040)    │        │           │
-│  - RMT (ESP32)     │        └───────────┘
-│  - SPI (All)       │
-└────────────────────┘
+┌────▼───────────────┐        ┌─────▼─────────────────┐
+│ IHardwareDriver    │        │  Effect (Singleton)   │
+│  - PIO (RP2040)    │        │  - Stateless          │
+│  - RMT (ESP32)     │        │  - Parameter API      │
+│  - SPI (All)       │        │  - Self-describing    │
+└────────────────────┘        └───────────────────────┘
 ```
 
-### Data Flow
+**Effect System (NEW):**
+```
+┌──────────────────────────────────────────────────────┐
+│          Effect Pool (Singletons, ~80 bytes)         │
+│  Solid │ Rainbow │ BPM │ Pride │ ... (10 effects)    │
+└────┬─────────┬──────┬─────┬──────────────────────────┘
+     │         │      │     │
+     └─────────┴──────┴─────┴────► Shared by 100 segments
+                                   = 8 bytes per effect
+                                   vs 800+ bytes with state
+```
+
+### Data Flow with Global Power Management
 
 ```
-1. Application -> Segment.setPixel()
-            |
-            ▼
-2. VirtualStrip buffer update
-            |
-            ▼
-3. Effect.update() -> Modify segment pixels
-            |
-            ▼
-4. VirtualStrip.mapToPhysical() -> Copy to physical buffers
-            |
-            ▼
-5. PhysicalStrip.show() -> Hardware transfer (DMA/RMT/SPI)
-            |
-            ▼
-6. GPIO -> LED Strip
+┌──────────────────────────────────────────────────────────┐
+│ PHASE 1: Effect Updates                                  │
+│ Effect.update() -> Segment.setPixel() -> VirtualStrip    │
+│ Calculates ideal pixel colors (RGB/RGBW)                 │
+└───────────────────────┬──────────────────────────────────┘
+                        ▼
+┌──────────────────────────────────────────────────────────┐
+│ PHASE 2: GLOBAL POWER MANAGEMENT (NEW!)                  │
+│ NeoPixelManager::updateAll()                             │
+│ ├─ Calculate total current across ALL VirtualStrips      │
+│ ├─ PowerManager: Sum(I_strip1 + I_strip2 + ...)          │
+│ ├─ If total > limit: globalScale = limit / total         │
+│ └─ Scale ALL VirtualStrip buffers: pixel *= globalScale  │
+└───────────────────────┬──────────────────────────────────┘
+                        ▼
+┌──────────────────────────────────────────────────────────┐
+│ PHASE 3: Sync Virtual→Physical                           │
+│ VirtualStrip.syncToPhysical()                            │
+│ Copy SCALED buffer to PhysicalStrips with ColorOrder     │
+│ conversion (RGB→GRB/BGR/etc.)                            │
+└───────────────────────┬──────────────────────────────────┘
+                        ▼
+┌──────────────────────────────────────────────────────────┐
+│ PHASE 4: Hardware Transfer                               │
+│ PhysicalStrip.show() → DMA/PIO/RMT/SPI                   │
+│ Non-blocking hardware transfer to GPIO                   │
+└───────────────────────┬──────────────────────────────────┘
+                        ▼
+┌──────────────────────────────────────────────────────────┐
+│ LED Hardware: Displays scaled, safe output               │
+│ Power consumption ≤ configured limit                     │
+└──────────────────────────────────────────────────────────┘
 ```
+
 
 ### Memory Layout
 
@@ -712,34 +773,66 @@ neo seg list
 
 ```bash
 neo effects
-    # List all available effects
+    # List all available effects with IDs and parameter counts
 
 neo effect <segIndex> <effectId>
-    # Assign effect to segment
+    # Assign effect to segment (with default parameters)
     # Effect IDs:
     #   0 = Solid Color
-    #   1 = Rainbow
-    #   2 = Pride2015
-    #   3 = Confetti
-    #   4 = Juggle
-    #   5 = BPM
-    #   6 = Cylon
-    #   7 = Wipe
+    #   1 = Wipe (Direction)
+    #   2 = Rainbow (Speed, Delta)
+    #   3 = Pride2015 (no parameters)
+    #   4 = Confetti (FadeSpeed, Saturation)
+    #   5 = Juggle (NumDots, FadeSpeed)
+    #   6 = BPM (BPM, Hue)
+    #   7 = Cylon (Speed, Hue, EyeSize, FadeAmount)
+    # │ 8 = RGBW Test ( Rotating RGBW test pattern)
+    #   9 = GarageDoor (special effect)
     # Examples:
     neo effect 0 0                 # Solid color on Segment 0
-    neo effect 1 1                 # Rainbow on Segment 1
-    neo effect 2 6                 # Cylon on Segment 2
+    neo effect 1 2                 # Rainbow on Segment 1
+    neo effect 2 7                 # Cylon on Segment 2
+
+neo effect config <segIndex>
+    # Show all effect parameters for segment
+    # Displays parameter names, types, and current values
+    neo effect config 0            # Show parameters for Segment 0
+
+neo effect config <segIndex> get <paramIndex>
+    # Get specific parameter value
+    neo effect config 0 get 0      # Get parameter 0 (e.g., Speed)
+    neo effect config 1 get 1      # Get parameter 1 (e.g., Hue)
+
+neo effect config <segIndex> set <paramIndex> <value>
+    # Set specific parameter value
+    # Examples:
+    neo effect config 0 set 0 150  # Set Speed to 150
+    neo effect config 1 set 1 128  # Set Hue to 128
+    neo effect config 2 set 2 8    # Set EyeSize to 8
+
+neo garage <segIndex> <phase>
+    # Control GarageDoor effect (ID 8)
+    # Phases: 0=OPENING, 1=RUNWAY, 2=COMPLETED, 3=STOPPED
+    neo garage 0 0                 # Start opening animation
+    neo garage 0 1                 # Runway lights
+    neo garage 0 2                 # Completed (green)
+    neo garage 0 3                 # Stop/pause
 
 neo color <segIndex> <r> <g> <b> [w]
-    # Set color for segment (Solid effect only)
+    # Set primary color for segment
     neo color 0 255 0 0            # Red
     neo color 1 0 255 0            # Green
     neo color 2 0 0 255 128        # Blue + 50% white (RGBW)
 
 neo brightness <segIndex> <value>
-    # Set brightness (0-255)
+    # Set software brightness (0-255, all LED types)
     neo brightness 0 128           # 50% brightness
     neo brightness 1 255           # 100% brightness
+
+neo hwbrightness <segIndex> <value>
+    # Set hardware brightness (0-255, APA102/SK9822 only)
+    # Does not reduce color depth like software brightness
+    neo hwbrightness 0 200         # 78% hardware brightness
 ```
 
 ### Testing Commands
@@ -1186,6 +1279,271 @@ build_flags =
 ### Q: How do I control LEDs from KNX?
 **A:** Not yet implemented. Planned for future release via GroupObjects.
 
+### Q: My power supply is getting hot / voltage drops
+**A:** Enable power management to limit current draw:
+```cpp
+mgr->setMaxCurrent(3000);  // Limit to 3A
+mgr->getPowerManager()->setLedProfile(LedProfiles::WS2812B);
+```
+See the **Power Management** section below for details.
+
+---
+
+## Power Management & Current Limiting
+
+**IMPORTANT:** High-power LED installations can exceed your power supply's capacity, causing:
+- Voltage drops (LEDs flicker or change color)
+- Overheating power supplies
+- Damaged hardware or fire hazards
+- Unexpected behavior (brownouts, resets)
+
+OFM-NeoPixel includes **software-based current limiting** to prevent these issues.
+
+### How It Works
+
+#### 1. Current Calculation
+
+Each LED color channel draws current proportional to its brightness:
+
+```
+Current(channel) = MaxCurrent(channel) × (Brightness / 255)
+Current(LED) = Current(R) + Current(G) + Current(B) + Current(W)
+```
+
+**Example:** WS2812B at full white (R=255, G=255, B=255)
+```
+Current = (20mA × 255/255) + (20mA × 255/255) + (20mA × 255/255)
+        = 20mA + 20mA + 20mA
+        = 60mA per LED
+```
+
+For 100 LEDs at full brightness: **100 × 60mA = 6000mA (6A)**
+
+#### 2. Automatic Brightness Scaling
+
+When total current exceeds the configured limit, **all pixel values are proportionally reduced**:
+
+```
+Scale = MaxCurrent / CalculatedCurrent
+ScaledBrightness = OriginalBrightness × Scale
+```
+
+**Example:** 100 LEDs drawing 6A with 5A limit
+```
+Scale = 5000mA / 6000mA = 0.833 (83.3%)
+All pixel values multiplied by 0.833
+Result: Max current = 5A ✓
+```
+
+#### 3. Architecture Flow
+
+```
+┌─────────────────┐
+│  Effect Update  │  -> Calculates ideal pixel colors
+└────────┬────────┘
+         ↓
+┌─────────────────┐
+│ Segment Buffer  │  -> Stores RGB/RGBW values (0-255)
+└────────┬────────┘
+         ↓
+┌─────────────────┐
+│ PowerManager    │  -> Calculates total current
+│ ├─ Calculate    │       Sum all pixel currents
+│ ├─ Compare      │       vs. MaxCurrent limit
+│ └─ Scale        │       Reduce if exceeded
+└────────┬────────┘
+         ↓
+┌─────────────────┐
+│ Physical Strip  │  -> Send scaled values to LEDs
+│     show()      │
+└─────────────────┘
+```
+
+### LED Current Profiles
+
+Different LED types have different current consumption:
+
+| LED Type | R (mA) | G (mA) | B (mA) | W (mA) | Total @ White |
+|----------|--------|--------|--------|--------|---------------|
+| WS2812B  | 20     | 20     | 20     | -      | 60mA          |
+| SK6812 RGBW | 20  | 20     | 20     | 20     | 80mA          |
+| APA102   | 15     | 15     | 15     | -      | 45mA          |
+
+**Predefined Profiles:**
+```cpp
+LedProfiles::WS2812B       // 20mA per channel
+LedProfiles::SK6812_RGBW   // 20mA per channel + W
+LedProfiles::APA102        // 15mA per channel
+LedProfiles::CONSERVATIVE  // 20mA all channels (safe default)
+```
+
+### Configuration
+
+#### Global Power Limit (Recommended)
+
+Set at manager level - applies to ALL strips:
+
+```cpp
+void setup() {
+    NeoPixelManager* mgr = neoPixelModule.getManager();
+    
+    // Set 5A maximum (5V × 5A = 25W max)
+    mgr->setMaxCurrent(5000);
+    
+    // Choose LED profile
+    mgr->getPowerManager()->setLedProfile(LedProfiles::WS2812B);
+    
+    // Enable/disable at runtime
+    mgr->setPowerManagementEnabled(true);
+}
+```
+
+#### Custom LED Profile
+
+For non-standard LEDs with different current draws:
+
+```cpp
+LedCurrentProfile customProfile(18, 22, 18, 0);  // R, G, B, W in mA
+mgr->getPowerManager()->setLedProfile(customProfile);
+```
+
+#### Per-Strip Manual Limiting (Advanced)
+
+For fine-grained control over individual strips:
+
+```cpp
+PowerManager pm(3000);  // 3A limit
+pm.setLedProfile(LedProfiles::SK6812_RGBW);
+
+// Before show()
+pm.applyCurrentLimit(strip->getBuffer(), strip->getLedCount(), 4); // 4 = RGBW
+strip->show();
+```
+
+### Monitoring Power Consumption
+
+#### Real-Time Current/Power Display
+
+```cpp
+void loop() {
+    // Get estimated power consumption
+    float watts = mgr->getTotalPowerWatts();
+    
+    // Calculate current at 5V
+    float amps = watts / 5.0f;
+    
+    Serial.printf("Power: %.2fW (%.2fA @ 5V)\n", watts, amps);
+}
+```
+
+#### Via Console
+
+```bash
+neo power status     # Show current consumption
+neo power limit 3000 # Set 3A limit
+neo power profile ws2812b  # Set LED profile
+neo power on/off     # Enable/disable limiting
+```
+
+### Practical Examples
+
+#### Example 1: Small Installation (100 LEDs)
+
+```cpp
+// 100 WS2812B LEDs
+// Max: 100 × 60mA = 6A
+// Available: 5A USB power supply
+
+mgr->setMaxCurrent(4500);  // Leave 10% safety margin (5A × 0.9)
+mgr->getPowerManager()->setLedProfile(LedProfiles::WS2812B);
+
+// Auto-scales: Full white → 75% brightness
+```
+
+#### Example 2: Large Installation (500 LEDs)
+
+```cpp
+// 500 SK6812 RGBW LEDs
+// Max: 500 × 80mA = 40A
+// Available: 15A @ 5V power supply
+
+mgr->setMaxCurrent(14000);  // 15A - 1A safety margin
+mgr->getPowerManager()->setLedProfile(LedProfiles::SK6812_RGBW);
+
+// Auto-scales: Full white → 35% brightness
+```
+
+#### Example 3: Multiple Power Supplies
+
+```cpp
+// Split into two independent managers
+NeoPixelManager mgr1, mgr2;
+
+// Power supply 1: 5A
+mgr1.setMaxCurrent(5000);
+auto strip1 = mgr1.addStrip(22, 100, WS2812B);
+
+// Power supply 2: 3A  
+mgr2.setMaxCurrent(3000);
+auto strip2 = mgr2.addStrip(23, 50, WS2812B);
+```
+
+### Brightness Interaction (Important!)
+
+**Segment Brightness vs. Power Limiting:**
+
+The library applies brightness in this order:
+1. **Segment Brightness** (`segment->setBrightness(128)`) - Applied when Effect writes pixels
+2. **Power Limiting** - Applied globally in `NeoPixelManager::updateAll()`
+
+**Example:**
+```cpp
+segment->setBrightness(128);  // 50% brightness
+segment->setColor(255, 255, 255);  // White
+
+// Actual values in buffer: (127, 127, 127)
+// Power calculation sees: 127 × 3 × 20mA = 7.6mA per LED (not 60mA!)
+```
+
+**Result:** Power consumption shown in `neo power` reflects **actual** current after segment brightness is applied.
+
+**Why this is correct:**
+- Segment brightness is **user intent** ("I want 50% brightness")
+- User **wants** reduced power consumption in this case
+- Power limiting protects against **unintentional** overload
+- Shown power values = real hardware consumption ✓
+
+**Note:** Hardware brightness (APA102/SK9822) is separately tracked and included in power calculation.
+
+### Important Notes
+
+**Software limiting does NOT replace proper hardware design!**
+
+**You MUST still:**
+- [x] Use adequate power supply (calculate: LEDs × 60mA minimum)
+- [x] Use proper gauge wiring (5V: 18AWG for <2m, 16AWG for >2m)
+- [x] Inject power every 50-100 LEDs for long strips
+- [x] Add 1000µF capacitor near LED strip power input
+- [x] Add 470Ω resistor on data line
+- [x] Use fuse/circuit breaker for safety
+
+**Software limiting:**
+- [x] Prevents overload from code/effects
+- [x] Protects against unexpected full-brightness scenarios
+- [x] Allows headroom for animations/transitions
+- [ ] Does NOT protect against hardware shorts
+- [ ] Does NOT compensate for inadequate wiring
+- [ ] Does NOT eliminate need for proper PSU sizing
+
+### Performance Impact
+
+Current calculation overhead:
+- **Per pixel:** ~5-10 CPU cycles
+- **100 LEDs:** ~0.05ms on RP2040 @ 133MHz
+- **500 LEDs:** ~0.25ms on RP2040 @ 133MHz
+
+**Recommendation:** Enable power management always - the safety benefit far outweighs the minimal performance cost.
+
 ---
 
 ## Contributing
@@ -1216,7 +1574,7 @@ See [LICENSE](LICENSE) file for details.
 
 ## Credits
 
-**Author:** Erkan Colak  
+**Author:** Erkan Çolak  
 **Project:** OpenKNX  
 **Repository:** https://github.com/OpenKNX/OFM-NeoPixel
 
