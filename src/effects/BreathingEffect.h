@@ -88,9 +88,9 @@ public:
             b = rgb & 0xFF;
         } else {
             // Use configured color
-            r = FastLEDMath::scale8(config.r, currentBrightness);
-            g = FastLEDMath::scale8(config.g, currentBrightness);
-            b = FastLEDMath::scale8(config.b, currentBrightness);
+            r = FastLEDMath::scale8(config.r(), currentBrightness);
+            g = FastLEDMath::scale8(config.g(), currentBrightness);
+            b = FastLEDMath::scale8(config.b(), currentBrightness);
         }
         
         for (uint16_t i = 0; i < length; i++) {
@@ -172,9 +172,9 @@ public:
                 g = (rgb >> 8) & 0xFF;
                 b = rgb & 0xFF;
             } else {
-                r = FastLEDMath::scale8(config.r, config.intensity);
-                g = FastLEDMath::scale8(config.g, config.intensity);
-                b = FastLEDMath::scale8(config.b, config.intensity);
+                r = FastLEDMath::scale8(config.r(), config.intensity);
+                g = FastLEDMath::scale8(config.g(), config.intensity);
+                b = FastLEDMath::scale8(config.b(), config.intensity);
             }
         } else {
             // Off or dim
@@ -186,9 +186,9 @@ public:
                 g = (rgb >> 8) & 0xFF;
                 b = rgb & 0xFF;
             } else {
-                r = FastLEDMath::scale8(config.r, dimBrightness);
-                g = FastLEDMath::scale8(config.g, dimBrightness);
-                b = FastLEDMath::scale8(config.b, dimBrightness);
+                r = FastLEDMath::scale8(config.r(), dimBrightness);
+                g = FastLEDMath::scale8(config.g(), dimBrightness);
+                b = FastLEDMath::scale8(config.b(), dimBrightness);
             }
         }
         
@@ -277,9 +277,9 @@ public:
             b = rgb & 0xFF;
         } else {
             // Use configured color
-            r = FastLEDMath::scale8(config.r, currentBrightness);
-            g = FastLEDMath::scale8(config.g, currentBrightness);
-            b = FastLEDMath::scale8(config.b, currentBrightness);
+            r = FastLEDMath::scale8(config.r(), currentBrightness);
+            g = FastLEDMath::scale8(config.g(), currentBrightness);
+            b = FastLEDMath::scale8(config.b(), currentBrightness);
         }
         
         for (uint16_t i = 0; i < length; i++) {

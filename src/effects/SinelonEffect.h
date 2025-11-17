@@ -96,7 +96,7 @@ public:
         
         // Determine color
         uint8_t r, g, b;
-        if (rainbowMode || (config.r == 0 && config.g == 0 && config.b == 0)) {
+        if (rainbowMode || (config.r() == 0 && config.g() == 0 && config.b() == 0)) {
             // Rainbow mode or no color configured
             uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, config.intensity);
             r = (rgb >> 16) & 0xFF;
@@ -105,9 +105,9 @@ public:
             _hue++; // Slowly change hue
         } else {
             // Use configured color
-            r = FastLEDMath::scale8(config.r, config.intensity);
-            g = FastLEDMath::scale8(config.g, config.intensity);
-            b = FastLEDMath::scale8(config.b, config.intensity);
+            r = FastLEDMath::scale8(config.r(), config.intensity);
+            g = FastLEDMath::scale8(config.g(), config.intensity);
+            b = FastLEDMath::scale8(config.b(), config.intensity);
         }
         
         // Add bright pixel(s) at current position

@@ -62,10 +62,11 @@ public:
         for (uint16_t i = 0; i < length; i++) {
             if (trailMode) {
                 // Fade existing pixels for trail effect
-                uint32_t color = segment->getPixel(i);
-                uint8_t r = ((color >> 16) & 0xFF) * 0.85; // 15% fade
-                uint8_t g = ((color >> 8) & 0xFF) * 0.85;
-                uint8_t b = (color & 0xFF) * 0.85;
+                uint8_t r, g, b;
+                segment->getPixel(i, r, g, b);
+                r = r * 0.85; // 15% fade
+                g = g * 0.85;
+                b = b * 0.85;
                 segment->setPixel(i, r, g, b);
             } else {
                 segment->setPixel(i, 0, 0, 0);
@@ -75,9 +76,9 @@ public:
         // Light pixels starting from current position with dot size
         for (uint16_t i = _position; i < length; i += spacing) {
             // Apply master brightness to configured color
-            uint8_t r = FastLEDMath::scale8(config.r, config.intensity);
-            uint8_t g = FastLEDMath::scale8(config.g, config.intensity);
-            uint8_t b = FastLEDMath::scale8(config.b, config.intensity);
+            uint8_t r = FastLEDMath::scale8(config.r(), config.intensity);
+            uint8_t g = FastLEDMath::scale8(config.g(), config.intensity);
+            uint8_t b = FastLEDMath::scale8(config.b(), config.intensity);
             
             // Set multiple pixels for larger dot size
             for (uint8_t d = 0; d < dotSize && (i + d) < length; d++) {
@@ -157,10 +158,11 @@ public:
         for (uint16_t i = 0; i < length; i++) {
             if (trailMode) {
                 // Fade existing pixels for trail effect
-                uint32_t color = segment->getPixel(i);
-                uint8_t r = ((color >> 16) & 0xFF) * 0.85; // 15% fade
-                uint8_t g = ((color >> 8) & 0xFF) * 0.85;
-                uint8_t b = (color & 0xFF) * 0.85;
+                uint8_t r, g, b;
+                segment->getPixel(i, r, g, b);
+                r = r * 0.85; // 15% fade
+                g = g * 0.85;
+                b = b * 0.85;
                 segment->setPixel(i, r, g, b);
             } else {
                 segment->setPixel(i, 0, 0, 0);

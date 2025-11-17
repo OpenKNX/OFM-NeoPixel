@@ -368,6 +368,48 @@ namespace FastLEDMath
         return r;
     }
 
+    /**
+     * @brief 16-bit random number generator
+     */
+    inline uint16_t random16()
+    {
+        return (uint16_t(random8()) << 8) | random8();
+    }
+
+    /**
+     * @brief 16-bit random in range [0, lim)
+     */
+    inline uint16_t random16(uint16_t lim)
+    {
+        uint32_t r = random16();
+        r = (r * uint32_t(lim)) >> 16;
+        return uint16_t(r);
+    }
+
+    /**
+     * @brief Linear interpolation between a and b by amount
+     * @param a First value
+     * @param b Second value  
+     * @param frac Amount (0-255, where 0=all a, 255=all b)
+     */
+    inline uint8_t lerp8by8(uint8_t a, uint8_t b, uint8_t frac)
+    {
+        if (frac == 0) return a;
+        if (frac == 255) return b;
+        
+        uint8_t result;
+        if (b > a) {
+            uint8_t delta = b - a;
+            uint8_t scaled = scale8(delta, frac);
+            result = a + scaled;
+        } else {
+            uint8_t delta = a - b;
+            uint8_t scaled = scale8(delta, frac);
+            result = a - scaled;
+        }
+        return result;
+    }
+
     // ============================================================================
     // Dimming & Fading
     // ============================================================================
