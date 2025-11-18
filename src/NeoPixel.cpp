@@ -168,6 +168,39 @@ PhysicalStrip* NeoPixel::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol p
     return _manager->addStrip(pin, ledCount, protocol);
 }
 
+PhysicalStrip* NeoPixel::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType)
+{
+    if (!_manager)
+    {
+        logErrorP("NeoPixel manager not initialized!");
+        return nullptr;
+    }
+
+    return _manager->addStrip(pin, ledCount, protocol, driverType);
+}
+
+PhysicalStrip* NeoPixel::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder)
+{
+    if (!_manager)
+    {
+        logErrorP("NeoPixel manager not initialized!");
+        return nullptr;
+    }
+
+    return _manager->addStrip(pin, ledCount, protocol, colorOrder);
+}
+
+PhysicalStrip* NeoPixel::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType, ColorOrder colorOrder)
+{
+    if (!_manager)
+    {
+        logErrorP("NeoPixel manager not initialized!");
+        return nullptr;
+    }
+
+    return _manager->addStrip(pin, ledCount, protocol, driverType, colorOrder);
+}
+
 /**
  * @brief Add a new SPI LED strip
  * @param mosiPin MOSI pin number (Data pin of the strip)
@@ -184,6 +217,39 @@ PhysicalStrip* NeoPixel::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t
     }
 
     return _manager->addSpiStrip(mosiPin, sckPin, ledCount, protocol);
+}
+
+PhysicalStrip* NeoPixel::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, DriverType driverType)
+{
+    if (!_manager)
+    {
+        logErrorP("NeoPixel manager not initialized!");
+        return nullptr;
+    }
+
+    return _manager->addSpiStrip(mosiPin, sckPin, ledCount, protocol, driverType);
+}
+
+PhysicalStrip* NeoPixel::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder)
+{
+    if (!_manager)
+    {
+        logErrorP("NeoPixel manager not initialized!");
+        return nullptr;
+    }
+
+    return _manager->addSpiStrip(mosiPin, sckPin, ledCount, protocol, colorOrder);
+}
+
+PhysicalStrip* NeoPixel::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, DriverType driverType, ColorOrder colorOrder)
+{
+    if (!_manager)
+    {
+        logErrorP("NeoPixel manager not initialized!");
+        return nullptr;
+    }
+
+    return _manager->addSpiStrip(mosiPin, sckPin, ledCount, protocol, driverType, colorOrder);
 }
 
 /**
