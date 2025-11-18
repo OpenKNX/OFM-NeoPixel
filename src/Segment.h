@@ -127,7 +127,7 @@ class Segment
     // ====================================================================
     // Effect Management
     // ====================================================================
-    void setEffect(Effect* effect);                       // Set effect (Stateless - no init!)
+    void setEffect(Effect* effect , bool initializeDefaults = false);                       // Set effect (Stateless - no init!)
     Effect* getEffect() { return _effect; }               // Get current effect
     const Effect* getEffect() const { return _effect; }   // Get current effect (const)
     bool hasEffect() const { return _effect != nullptr; } // Check if effect is set
