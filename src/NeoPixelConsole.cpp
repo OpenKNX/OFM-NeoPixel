@@ -2289,20 +2289,6 @@ bool NeoPixel::processEffectsCommand()
     openknx.logger.log("  Available Effects");
     openknx.logger.log("══════════════════════════════════════════════════════════");
     openknx.logger.color(0);
-<<<<<<< HEAD
-    openknx.logger.log("ID │ Name         │ Type    │ Description");
-    openknx.logger.log("───┼──────────────┼─────────┼─────────────────────────────");
-    openknx.logger.log(" 0 │ Solid        │ Basic   │ Static color");
-    openknx.logger.log(" 1 │ Wipe         │ Basic   │ Color wipe animation");
-    openknx.logger.log(" 2 │ Rainbow      │ FastLED │ Smooth rainbow gradient");
-    openknx.logger.log(" 3 │ Pride2015    │ FastLED │ Moving rainbow waves");
-    openknx.logger.log(" 4 │ Confetti     │ FastLED │ Random colored pixels");
-    openknx.logger.log(" 5 │ Juggle       │ FastLED │ Weaving colored dots");
-    openknx.logger.log(" 6 │ BPM          │ FastLED │ Pulsing stripes");
-    openknx.logger.log(" 7 │ Cylon        │ FastLED │ Bouncing LED eye");
-    openknx.logger.log(" 8 │ RGBW Test    │ Test    │ RGBW test pattern");
-    openknx.logger.log(" 9 │ GarageDoor   │ Custom  │ 3-phase garage animation");
-=======
     openknx.logger.log("ID │ Name                 │ Type    │ Description");
     openknx.logger.log("───┼──────────────────────┼─────────┼─────────────────────────────");
     openknx.logger.log(" 0 │ Solid                │ Basic   │ Static color");
@@ -2313,7 +2299,7 @@ bool NeoPixel::processEffectsCommand()
     openknx.logger.log(" 5 │ Juggle               │ FastLED │ Weaving colored dots");
     openknx.logger.log(" 6 │ BPM                  │ FastLED │ Pulsing stripes");
     openknx.logger.log(" 7 │ Cylon                │ FastLED │ Bouncing LED eye");
-    openknx.logger.log(" 8 │ SK6812Test           │ Test    │ RGBW test pattern");
+    openknx.logger.log(" 8 │ RGBW Test            │ Test    │ RGBW test pattern");
     openknx.logger.log(" 9 │ GarageDoor           │ Custom  │ 3-phase garage animation");
     openknx.logger.log("10 │ Fire                 │ FastLED │ Realistic fire simulation");
     openknx.logger.log("11 │ Theater Chase        │ FastLED │ Theater marquee chase");
@@ -2326,8 +2312,6 @@ bool NeoPixel::processEffectsCommand()
     openknx.logger.log("18 │ Pulse                │ Basic   │ Dramatic pulsing");
     openknx.logger.log("19 │ Comet                │ FastLED │ Comet with trailing tail");
     openknx.logger.log("20 │ Meteor               │ FastLED │ Falling meteor");
-    
->>>>>>> 83dbd9c (feat: Add 11 new effects)
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
     openknx.logger.log("══════════════════════════════════════════════════════════");
     openknx.logger.color(0);
@@ -2488,20 +2472,72 @@ bool NeoPixel::processEffectCommand(const std::string& args)
     const auto hasEffect = seg->hasEffect();
     if (action.compare("set") == 0)
     {
-<<<<<<< HEAD
         Effect* effect = nullptr;
         switch (effId) // Get effect from pool
         {
-            case 0: effect = EffectPool::getSolid(); break;      // Effect
-            case 1: effect = EffectPool::getWipe(); break;       // Effect
-            case 2: effect = EffectPool::getRainbow(); break;    // Effect
-            case 3: effect = EffectPool::getPride(); break;      // Effect
-            case 4: effect = EffectPool::getConfetti(); break;   // Effect
-            case 5: effect = EffectPool::getJuggle(); break;     // Effect
-            case 6: effect = EffectPool::getBPM(); break;        // Effect
-            case 7: effect = EffectPool::getCylon(); break;      // Effect
-            case 8: effect = EffectPool::getRGBWTest(); break;   // Effect
-            case 9: effect = EffectPool::getGarageDoor(); break; // Effect
+            case 0: // Solid
+                effect = EffectPool::getSolid();
+                break;
+            case 1: // Wipe
+                effect = EffectPool::getWipe();
+                break;
+            case 2: // Rainbow
+                effect = EffectPool::getRainbow();
+                break;
+            case 3: // Pride2015
+                effect = EffectPool::getPride();
+                break;
+            case 4: // Confetti
+                effect = EffectPool::getConfetti();
+                break;
+            case 5: // Juggle
+                effect = EffectPool::getJuggle();
+                break;
+            case 6: // BPM
+                effect = EffectPool::getBPM();
+                break;
+            case 7: // Cylon
+                effect = EffectPool::getCylon();
+                break;
+            case 8: // SK6812Test
+                effect = EffectPool::getRGBWTest(); // Corrected method name
+                break;
+            case 9: // GarageDoor
+                effect = EffectPool::getGarageDoor();
+                break;
+            case 10: // Fire
+                effect = EffectPool::getFire();
+                break;
+            case 11: // Theater Chase
+                effect = EffectPool::getTheaterChase();
+                break;
+            case 12: // Theater Chase Rainbow
+                effect = EffectPool::getTheaterChaseRainbow();
+                break;
+            case 13: // Sinelon
+                effect = EffectPool::getSinelon();
+                break;
+            case 14: // Twinkle
+                effect = EffectPool::getTwinkle();
+                break;
+            case 15: // Sparkle
+                effect = EffectPool::getSparkle();
+                break;
+            case 16: // Breathing
+                effect = EffectPool::getBreathing();
+                break;
+            case 17: // Strobe
+                effect = EffectPool::getStrobe();
+                break;
+            case 18: // Pulse
+                effect = EffectPool::getPulse();
+                break;
+            case 19: // Comet
+                effect = EffectPool::getComet();
+                break;
+            case 20: // Meteor
+                effect = EffectPool::getMeteor();
+                break;
             default:
                 openknx.logger.logWithValues("ERROR: Effect ID %d not found!", effId);
                 openknx.logger.log("       Use 'neo effects' to see available effects");
@@ -2510,74 +2546,6 @@ bool NeoPixel::processEffectCommand(const std::string& args)
         if (!effect)
         {
             openknx.logger.log("ERROR: Failed to get effect from pool!");
-=======
-        case 0: // Solid
-            effect = EffectPool::getSolid();
-            break;
-        case 1: // Wipe
-            effect = EffectPool::getWipe();
-            break;
-        case 2: // Rainbow
-            effect = EffectPool::getRainbow();
-            break;
-        case 3: // Pride2015
-            effect = EffectPool::getPride();
-            break;
-        case 4: // Confetti
-            effect = EffectPool::getConfetti();
-            break;
-        case 5: // Juggle
-            effect = EffectPool::getJuggle();
-            break;
-        case 6: // BPM
-            effect = EffectPool::getBPM();
-            break;
-        case 7: // Cylon
-            effect = EffectPool::getCylon();
-            break;
-        case 8: // SK6812Test
-            effect = EffectPool::getSK6812Test();
-            break;
-        case 9: // GarageDoor
-            effect = EffectPool::getGarageDoor();
-            break;
-        case 10: // Fire
-            effect = EffectPool::getFire();
-            break;
-        case 11: // Theater Chase
-            effect = EffectPool::getTheaterChase();
-            break;
-        case 12: // Theater Chase Rainbow
-            effect = EffectPool::getTheaterChaseRainbow();
-            break;
-        case 13: // Sinelon
-            effect = EffectPool::getSinelon();
-            break;
-        case 14: // Twinkle
-            effect = EffectPool::getTwinkle();
-            break;
-        case 15: // Sparkle
-            effect = EffectPool::getSparkle();
-            break;
-        case 16: // Breathing
-            effect = EffectPool::getBreathing();
-            break;
-        case 17: // Strobe
-            effect = EffectPool::getStrobe();
-            break;
-        case 18: // Pulse
-            effect = EffectPool::getPulse();
-            break;
-        case 19: // Comet
-            effect = EffectPool::getComet();
-            break;
-        case 20: // Meteor
-            effect = EffectPool::getMeteor();
-            break;
-        default:
-            openknx.logger.logWithValues("ERROR: Effect ID %d not found!", effId);
-            openknx.logger.log("       Use 'neo effects' to see available effects");
->>>>>>> 83dbd9c (feat: Add 11 new effects)
             return true;
         }
 
