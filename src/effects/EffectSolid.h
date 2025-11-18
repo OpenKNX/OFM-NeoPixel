@@ -4,7 +4,7 @@
  *
  * Simplest effect: Set all pixels in segment to one color
  *
- * Note: Uses segment's primaryRGBW color, no additional parameters
+ * Note: Uses segment's config color components, no additional parameters
  *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
@@ -24,7 +24,7 @@ class EffectSolid : public Effect
     const char* getName() override { return "Solid"; }
 
     // ====================================================================
-    // Parameter API (Solid has no params - uses primaryRGBW)
+    // Parameter API (Solid has no params - uses config color components)
     // ====================================================================
     uint8_t getParameterCount() const override { return 0; }
     const char* getParameterName(uint8_t index) const override { return nullptr; }
