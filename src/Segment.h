@@ -44,8 +44,19 @@ struct EffectConfig
     uint8_t intensity;          // Intensity 1-255
     uint8_t brightness;         // Software brightness 0-255 (255 = no dimming, ALL LED types)
     uint8_t hardwareBrightness; // Hardware brightness 0-255 (255 = max, only for APA102/SK9822)
-    uint32_t primaryRGBW;       // Primary color (RGBW packed)
-    uint32_t secondaryRGBW;     // Secondary color (RGBW packed)
+    
+    // Primary color components (individual fields)
+    uint8_t primaryR;           // Primary Red (0-255)
+    uint8_t primaryG;           // Primary Green (0-255)
+    uint8_t primaryB;           // Primary Blue (0-255)
+    uint8_t primaryW;           // Primary White (0-255)
+    
+    // Secondary color components (individual fields)
+    uint8_t secondaryR;         // Secondary Red (0-255)
+    uint8_t secondaryG;         // Secondary Green (0-255)
+    uint8_t secondaryB;         // Secondary Blue (0-255)
+    uint8_t secondaryW;         // Secondary White (0-255)
+    
     uint8_t reverse;            // Reverse direction (0/1)
     uint8_t count;              // Count (e.g. dots, drops)
     uint8_t fade;               // Fade amount 0-255
@@ -65,20 +76,21 @@ struct EffectConfig
     uint32_t legacyOption2;     // Legacy option2 (32-bit)
 
     // Convenience accessors for color components
-    inline uint8_t r() const { return (primaryRGBW >> 24) & 0xFF; }
-    inline uint8_t g() const { return (primaryRGBW >> 16) & 0xFF; }
-    inline uint8_t b() const { return (primaryRGBW >> 8) & 0xFF; }
-    inline uint8_t w() const { return primaryRGBW & 0xFF; }
+    inline uint8_t r() const { return primaryR; }
+    inline uint8_t g() const { return primaryG; }
+    inline uint8_t b() const { return primaryB; }
+    inline uint8_t w() const { return primaryW; }
     
-    inline uint8_t r2() const { return (secondaryRGBW >> 24) & 0xFF; }
-    inline uint8_t g2() const { return (secondaryRGBW >> 16) & 0xFF; }
-    inline uint8_t b2() const { return (secondaryRGBW >> 8) & 0xFF; }
-    inline uint8_t w2() const { return secondaryRGBW & 0xFF; }
+    inline uint8_t r2() const { return secondaryR; }
+    inline uint8_t g2() const { return secondaryG; }
+    inline uint8_t b2() const { return secondaryB; }
+    inline uint8_t w2() const { return secondaryW; }
 
     // Default Constructor
     EffectConfig()
         : speed(128), intensity(128), brightness(255), hardwareBrightness(255),
-          primaryRGBW(0xFFFFFFFF), secondaryRGBW(0x00000000),
+          primaryR(255), primaryG(255), primaryB(255), primaryW(255),
+          secondaryR(0), secondaryG(0), secondaryB(0), secondaryW(0),
           reverse(0), count(1), fade(128), mode(0),
           option1(0), option2(0), option3(0),
           feature1(false), feature2(false), feature3(false),
@@ -144,16 +156,28 @@ class Segment
     void clearAll();
     bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) const;
     bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& w) const;
-    inline uint32_t getPrimaryColor() const { return _config.primaryRGBW; }     // Get primary color
-    inline uint32_t getSecondaryColor() const { return _config.secondaryRGBW; } // Get secondary color
+    inline uint32_t getPrimaryColor() const { 
+        return ((uint32_t)_config.primaryR << 24) | ((uint32_t)_config.primaryG << 16) | 
+               ((uint32_t)_config.primaryB << 8) | (uint32_t)_config.primaryW; 
+    }     // Get primary color
+    inline uint32_t getSecondaryColor() const { 
+        return ((uint32_t)_config.secondaryR << 24) | ((uint32_t)_config.secondaryG << 16) | 
+               ((uint32_t)_config.secondaryB << 8) | (uint32_t)_config.secondaryW; 
+    } // Get secondary color
     inline bool setPrimaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t w)
     {
-        _config.primaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)w;
+        _config.primaryR = r & 0xFF;
+        _config.primaryG = g & 0xFF;
+        _config.primaryB = b & 0xFF;
+        _config.primaryW = w & 0xFF;
         return true;
     } // Set primary color
     inline bool setSecondaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t w)
     {
-        _config.secondaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)w;
+        _config.secondaryR = r & 0xFF;
+        _config.secondaryG = g & 0xFF;
+        _config.secondaryB = b & 0xFF;
+        _config.secondaryW = w & 0xFF;
         return true;
     } // Set secondary color
 

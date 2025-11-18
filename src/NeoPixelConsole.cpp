@@ -2058,10 +2058,10 @@ bool NeoPixel::processSegListCommand()
                                              state,
                                              effect ? "Set" : "N/A",
                                              effect ? effectName : "N/A",
-                                             (config.primaryRGBW >> 24) & 0xFF, // Red from RGBW
-                                             (config.primaryRGBW >> 16) & 0xFF, // Green from RGBW
-                                             (config.primaryRGBW >> 8) & 0xFF,  // Blue from RGBW
-                                             config.primaryRGBW & 0xFF          // White from RGBW
+                                             config.primaryR,  // Red
+                                             config.primaryG,  // Green
+                                             config.primaryB,  // Blue
+                                             config.primaryW   // White
                 );
             }
         }
@@ -2769,7 +2769,10 @@ bool NeoPixel::processColorCommand(const std::string& args)
         }
     }
 
-    config.primaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)w;
+    config.primaryR = r;
+    config.primaryG = g;
+    config.primaryB = b;
+    config.primaryW = w;
 
     if (parsed == 5)
     {
