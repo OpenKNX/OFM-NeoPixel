@@ -13,11 +13,11 @@ void EffectSolid::update(Segment* segment, uint32_t deltaTime)
     // Read the effect configuration from the segment
     const EffectConfig& config = segment->getConfig();
 
-    // Unpack RGBW from 32-bit value (0xRRGGBBWW)
-    uint8_t r = (config.primaryRGBW >> 24) & 0xFF;
-    uint8_t g = (config.primaryRGBW >> 16) & 0xFF;
-    uint8_t b = (config.primaryRGBW >> 8) & 0xFF;
-    uint8_t w = config.primaryRGBW & 0xFF;
+    // Use config getter methods for RGBW components
+    uint8_t r = config.r();
+    uint8_t g = config.g();
+    uint8_t b = config.b();
+    uint8_t w = config.w();
 
     // Set all pixels in the segment to this color
     for (uint16_t i = 0; i < segment->getLength(); i++)

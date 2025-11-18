@@ -14,15 +14,17 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
 
     EffectState& state = segment->getState(); // Get state (read/write)
 
-    uint8_t r = (config.primaryRGBW >> 24) & 0xFF; // Unpack primaryRGBW (wipe color)
-    uint8_t g = (config.primaryRGBW >> 16) & 0xFF;
-    uint8_t b = (config.primaryRGBW >> 8) & 0xFF;
-    uint8_t w = config.primaryRGBW & 0xFF;
+    // Use config getter methods for primary color (wipe color)
+    uint8_t r = config.r();
+    uint8_t g = config.g();
+    uint8_t b = config.b();
+    uint8_t w = config.w();
 
-    uint8_t bgR = (config.secondaryRGBW >> 24) & 0xFF; // Unpack secondaryRGBW (background color)
-    uint8_t bgG = (config.secondaryRGBW >> 16) & 0xFF;
-    uint8_t bgB = (config.secondaryRGBW >> 8) & 0xFF;
-    uint8_t bgW = config.secondaryRGBW & 0xFF;
+    // Use config getter methods for secondary color (background color)
+    uint8_t bgR = config.r2();
+    uint8_t bgG = config.g2();
+    uint8_t bgB = config.b2();
+    uint8_t bgW = config.w2();
 
     state.lastUpdate += deltaTime; // Speed control: accumulate time
 
