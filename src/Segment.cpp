@@ -58,9 +58,16 @@ Segment::~Segment()
  * @brief Set effect (Stateless - no init()!)
  * @param effect Pointer to the effect
  */
-void Segment::setEffect(Effect* effect)
+void Segment::setEffect(Effect* effect, bool initializeDefaults)
 {
-    _effect = effect; // // The config and state remain in the segment
+    _effect = effect;
+
+    // Initialize parameters with defaults and reset state
+    if (_effect && initializeDefaults)
+    {
+        _effect->initializeDefaults(this);
+        _effect->reset();
+    }
 }
 
 /**

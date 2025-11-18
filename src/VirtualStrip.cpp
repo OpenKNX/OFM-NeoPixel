@@ -14,6 +14,7 @@
  */
 
 #include "VirtualStrip.h"
+#include "PowerManager.h"
 #include "OpenKNX.h"
 #include <Arduino.h>
 #include <algorithm>
@@ -36,7 +37,9 @@
 VirtualStrip::VirtualStrip(uint16_t totalLeds, ColorOrder colorOrder)
     : _totalLeds(totalLeds),
       _bytesPerLed((colorOrder == ColorOrder::RGBW || colorOrder == ColorOrder::GRBW) ? 4 : 3),
-      _dirty(false)
+      _dirty(false),
+      _powerManager(nullptr),
+      _hardwareBrightness(255)
 {
     // Allocate unified buffer (always RGB/RGBW format)
     _bufferSize = (size_t)totalLeds * _bytesPerLed;
@@ -369,6 +372,9 @@ bool VirtualStrip::syncToPhysical(uint8_t hardwareBrightness)
         return true; // Nothing to synchronize
     }
 
+    // Store hardware brightness for power calculation
+    _hardwareBrightness = hardwareBrightness;
+
     // Send RGB data to each attached PhysicalStrip
     for (const auto& mapping : _physicalStrips)
     {
@@ -412,10 +418,14 @@ bool VirtualStrip::syncToPhysical(uint8_t hardwareBrightness)
 /**
  * @brief Send to all PhysicalStrips
  * @return true if all sends were successful
+ * 
+ * NOTE: Power management (current limiting) is now handled centrally
+ *       in NeoPixelManager::updateAll() BEFORE this is called.
+ *       This ensures global current limiting across all VirtualStrips.
  */
 bool VirtualStrip::show()
 {
-    // 1. Synchronisiere Buffer
+    // 1. Synchronisiere Buffer (if not already done)
     if (!syncToPhysical())
     {
         logErrorP("show - syncToPhysical failed!");

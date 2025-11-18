@@ -1,3 +1,4 @@
+#ifdef OPENKNX_NEOPIXEL_TESTS
 /**
  * @file SimpleTest.cpp
  * @brief Simple Hardware Test Implementation
@@ -259,3 +260,4 @@ void SimpleTest::setAllColor(uint8_t r, uint8_t g, uint8_t b)
     }
     sendReset();
 }
+#endif // OPENKNX_NEOPIXEL_TESTS

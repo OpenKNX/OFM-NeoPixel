@@ -133,6 +133,7 @@ class NeoPixel : public OpenKNX::Module
     bool processSegPauseCommand(const std::string& args);
     bool processSegResumeCommand(const std::string& args);
     bool processSegStopCommand(const std::string& args);
+    bool processSegClearEffectCommand(const std::string& args);
 
     // Effect management commands
     bool processEffectsCommand();
@@ -141,6 +142,8 @@ class NeoPixel : public OpenKNX::Module
     bool processColorCommand(const std::string& args);
     bool processBrightnessCommand(const std::string& args);
     bool processHardwareBrightnessCommand(const std::string& args);
+    bool processEffectConfigCommand(const std::string& args);
+    bool processPowerCommand(const std::string& args);
 
 #ifdef OPENKNX_NEOPIXEL_TESTS
     bool processAnimTestStartCommand();

@@ -1,3 +1,4 @@
+#ifdef OPENKNX_NEOPIXEL_TESTS
 /**
  * @file SimpleTest.h
  * @brief Simple Hardware Test for WS2812B (No Library!)
@@ -52,8 +53,8 @@ class SimpleTest
     SimpleTest(const SimpleTest&) = delete;
     SimpleTest& operator=(const SimpleTest&) = delete;
 
-    uint8_t _pin = 9;
-    uint8_t _ledCount = 8;
+    uint8_t _pin = 22;
+    uint8_t _ledCount = 64;
     bool _running = false;
     uint8_t _testPhase = 0;
     uint32_t _lastPhaseChange = 0;
@@ -66,3 +67,4 @@ class SimpleTest
     void sendReset();
     void setAllColor(uint8_t r, uint8_t g, uint8_t b);
 };
+#endif // OPENKNX_NEOPIXEL_TESTS
