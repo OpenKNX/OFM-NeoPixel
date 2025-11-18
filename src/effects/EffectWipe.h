@@ -19,8 +19,8 @@
  *
  * Config from Segment's EffectConfig:
  *   - speed: ms per step
- *   - primaryRGBW: Wipe color (RGB packed in upper 24 bits)
- *   - secondaryRGBW: Background color (RGB packed in upper 24 bits)
+ *   - r(), g(), b(), w(): Wipe color components
+ *   - r2(), g2(), b2(), w2(): Background color components
  */
 
 #include "../Segment.h"

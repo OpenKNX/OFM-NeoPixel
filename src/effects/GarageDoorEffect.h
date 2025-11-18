@@ -387,11 +387,10 @@ class GarageDoorEffect : public Effect
         // Fallback to segment color if effect color is black
         if (arrowR == 0 && arrowG == 0 && arrowB == 0 && arrowW == 0)
         {
-            uint32_t segColor = segment->getConfig().primaryRGBW;
-            arrowR = (segColor >> 24) & 0xFF;
-            arrowG = (segColor >> 16) & 0xFF;
-            arrowB = (segColor >> 8) & 0xFF;
-            arrowW = segColor & 0xFF;
+            arrowR = segment->getConfig().r();
+            arrowG = segment->getConfig().g();
+            arrowB = segment->getConfig().b();
+            arrowW = segment->getConfig().w();
         }
 
         // Current arrow positions: both start at center, move outward
@@ -512,11 +511,10 @@ class GarageDoorEffect : public Effect
         // Fallback to segment color if effect color is black
         if (runwayR == 0 && runwayG == 0 && runwayB == 0 && runwayW == 0)
         {
-            uint32_t segColor = segment->getConfig().primaryRGBW;
-            runwayR = (segColor >> 24) & 0xFF;
-            runwayG = (segColor >> 16) & 0xFF;
-            runwayB = (segColor >> 8) & 0xFF;
-            runwayW = segColor & 0xFF;
+            runwayR = segment->getConfig().r();
+            runwayG = segment->getConfig().g();
+            runwayB = segment->getConfig().b();
+            runwayW = segment->getConfig().w();
         }
 
         // Draw runway wave
@@ -585,11 +583,10 @@ class GarageDoorEffect : public Effect
         // Fallback to segment color if effect color is black
         if (successR == 0 && successG == 0 && successB == 0 && successW == 0)
         {
-            uint32_t segColor = segment->getConfig().primaryRGBW;
-            successR = (segColor >> 24) & 0xFF;
-            successG = (segColor >> 16) & 0xFF;
-            successB = (segColor >> 8) & 0xFF;
-            successW = segColor & 0xFF;
+            successR = segment->getConfig().r();
+            successG = segment->getConfig().g();
+            successB = segment->getConfig().b();
+            successW = segment->getConfig().w();
         }
 
         // Calculate breathing brightness (sine wave)
