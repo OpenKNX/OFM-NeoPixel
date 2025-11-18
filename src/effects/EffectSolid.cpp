@@ -2,7 +2,7 @@
 #include "../Segment.h"
 
 /**
- * @brief Update - Fills all pixels with primaryRGBW color
+ * @brief Update - Fills all pixels with config color components
  * @param segment The segment to update
  * @param deltaTime Time since last update (ms) - unused
  */
