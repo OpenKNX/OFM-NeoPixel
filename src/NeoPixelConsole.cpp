@@ -20,6 +20,7 @@
 
 // Platform-specific driver includes for hardware info
 #ifdef ARDUINO_ARCH_RP2040
+    #include "hardware/clocks.h" // For clock_get_hz()
     #include "pio/pio_neopixel_serial.h"
     #include "pio/pio_neopixel_spi.h"
 #endif
@@ -101,6 +102,10 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("neo phys add <gpio> <count> [type]", "1-Wire: ws2812b|sk6812 (default: ws2812b)");
         openknx.console.printHelpLine("neo phys add <clk> <count> apa102 <data>", "SPI: APA102 (CLK + DATA pins)");
         openknx.console.printHelpLine("neo phys del <id>", "Delete physical strip by ID");
+        openknx.console.printHelpLine("neo phys timings", "List all available timing modes");
+        openknx.console.printHelpLine("neo phys timing <id>", "Show current timing mode for strip");
+        openknx.console.printHelpLine("neo phys timing <id> <mode>", "Set timing mode (auto|legacy|slow5-20|fast5-25)");
+        openknx.console.printHelpLine("neo phys timing <id> info", "Show detailed timing information");
 
         openknx.logger.log("");
         openknx.logger.color(CONSOLE_HEADLINE_COLOR);
@@ -471,6 +476,11 @@ bool NeoPixel::processInfoCommand()
                                                          pioName, pioDriver->getStateMachine(),
                                                          freq / 1000);
                         }
+                        
+                        // Show TimingMode
+                        TimingMode mode = strip->getTimingMode();
+                        const char* modeName = getTimingModeName(mode);
+                        openknx.logger.logWithValues("      Timing: %s", modeName);
                     }
                     else
                     {
@@ -1319,6 +1329,14 @@ bool NeoPixel::processPhysCommand(const std::string& args)
     {
         return processPhysListCommand();
     }
+    else if (args == "timings")
+    {
+        return processPhysTimingsCommand();
+    }
+    else if (args.compare(0, 7, "timing ") == 0)
+    {
+        return processPhysTimingCommand(args.substr(7));
+    }
     else if (args.compare(0, 4, "add ") == 0)
     {
         return processPhysAddCommand(args.substr(4));
@@ -1347,9 +1365,9 @@ bool NeoPixel::processPhysListCommand()
 
     openknx.logger.log("");
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("══════════════════════════════════════════════════════════════════════");
+    openknx.logger.log("══════════════════════════════════════════════════════════════════════════════════════");
     openknx.logger.log("  Physical Strips");
-    openknx.logger.log("══════════════════════════════════════════════════════════════════════");
+    openknx.logger.log("══════════════════════════════════════════════════════════════════════════════════════");
     openknx.logger.color(0);
 
     uint32_t stripCount = _manager->getStripCount();
@@ -1361,8 +1379,8 @@ bool NeoPixel::processPhysListCommand()
     }
     else
     {
-        openknx.logger.log("ID  │ Pins           │ LEDs │ Protocol │ Order │ Driver      │ Status");
-        openknx.logger.log("────┼────────────────┼──────┼──────────┼───────┼─────────────┼────────");
+        openknx.logger.log("ID  │ Pins           │ LEDs │ Protocol │ Order │ Driver      │ Timing        │ Status");
+        openknx.logger.log("────┼────────────────┼──────┼──────────┼───────┼─────────────┼───────────────┼────────");
 
         for (uint32_t i = 0; i < stripCount; i++)
         {
@@ -1400,6 +1418,13 @@ bool NeoPixel::processPhysListCommand()
 
                 const char* driver = strip->getDriverName();
                 const char* status = strip->isInitialized() ? "READY" : "ERROR";
+                
+                // Get timing mode name
+                const char* timingName = "N/A";
+#ifdef ARDUINO_ARCH_RP2040
+                TimingMode mode = strip->getTimingMode();
+                timingName = getTimingModeName(mode);
+#endif
 
                 // Check if SPI strip (APA102, WS2801, etc.)
                 bool isSpiStrip = (proto == LedProtocol::APA102 ||
@@ -1415,7 +1440,7 @@ bool NeoPixel::processPhysListCommand()
                     auto spiDriver = dynamic_cast<PIO_NeoPixel_SPI*>(driverPtr);
                     if (spiDriver)
                     {
-                        openknx.logger.logWithValues("[%d] │ CLK: %d MOSI: %d │ %4d │ %-8s │ %-5s │ %-11s │ %s",
+                        openknx.logger.logWithValues("[%d] │ CLK: %d MOSI: %d │ %4d │ %-8s │ %-5s │ %-11s │ %-13s │ %s",
                                                      i,
                                                      spiDriver->getClkPin(),
                                                      spiDriver->getMosiPin(),
@@ -1423,32 +1448,35 @@ bool NeoPixel::processPhysListCommand()
                                                      protocol,
                                                      colorOrder,
                                                      driver,
+                                                     timingName,
                                                      status);
                     }
                     else
 #endif
                     {
                         // Fallback if driver not available
-                        openknx.logger.logWithValues("[%d] │ GPIO%-2d (SPI)   │ %4d │ %-8s │ %-5s │ %-11s │ %s",
+                        openknx.logger.logWithValues("[%d] │ GPIO%-2d (SPI)   │ %4d │ %-8s │ %-5s │ %-11s │ %-13s │ %s",
                                                      i,
                                                      strip->getDataPin(),
                                                      strip->getLedCount(),
                                                      protocol,
                                                      colorOrder,
                                                      driver,
+                                                     timingName,
                                                      status);
                     }
                 }
                 else
                 {
                     // 1-Wire strip (WS2812B, SK6812, etc.)
-                    openknx.logger.logWithValues("[%d] │ GPIO%-2d         │ %4d │ %-8s │ %-5s │ %-11s │ %s",
+                    openknx.logger.logWithValues("[%d] │ GPIO%-2d         │ %4d │ %-8s │ %-5s │ %-11s │ %-13s │ %s",
                                                  i,
                                                  strip->getDataPin(),
                                                  strip->getLedCount(),
                                                  protocol,
                                                  colorOrder,
                                                  driver,
+                                                 timingName,
                                                  status);
                 }
             }
@@ -1456,7 +1484,7 @@ bool NeoPixel::processPhysListCommand()
     }
 
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("══════════════════════════════════════════════════════════════════════");
+    openknx.logger.log("══════════════════════════════════════════════════════════════════════════════════════");
     openknx.logger.color(0);
     openknx.logger.log("");
 
@@ -2385,9 +2413,9 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
         }
         uint32_t val = effect->getParameter(seg, paramIdx);
         openknx.logger.logWithValues("%s.%s = %u",
-                                      effect->getName(),
-                                      effect->getParameterName(paramIdx),
-                                      val);
+                                     effect->getName(),
+                                     effect->getParameterName(paramIdx),
+                                     val);
         return true;
     }
 
@@ -2401,9 +2429,9 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
         }
         effect->setParameter(seg, paramIdx, value);
         openknx.logger.logWithValues("Set %s.%s = %u",
-                                      effect->getName(),
-                                      effect->getParameterName(paramIdx),
-                                      value);
+                                     effect->getName(),
+                                     effect->getParameterName(paramIdx),
+                                     value);
         return true;
     }
 
@@ -2500,7 +2528,7 @@ bool NeoPixel::processEffectCommand(const std::string& args)
                 effect = EffectPool::getCylon();
                 break;
             case 8: // SK6812Test
-                effect = EffectPool::getRGBWTest(); // Corrected method name
+                effect = EffectPool::getRGBWTest();
                 break;
             case 9: // GarageDoor
                 effect = EffectPool::getGarageDoor();
@@ -2566,7 +2594,7 @@ bool NeoPixel::processEffectCommand(const std::string& args)
                                          segId);
         }
         seg->setEffect(effect, true); // Assign new effect and reset parameters
-        seg->resume(); // Start effect after assignment
+        seg->resume();                // Start effect after assignment
     }
     else if (action.compare("clear") == 0)
 
@@ -2929,13 +2957,16 @@ bool NeoPixel::processPowerCommand(const std::string& args)
         const char* profileName = "CUSTOM";
         LedCurrentProfile profile = pm->getLedProfile();
         if (profile == LedProfiles::WS2812B) profileName = "WS2812B";
-        else if (profile == LedProfiles::SK6812_RGBW) profileName = "SK6812 RGBW";
-        else if (profile == LedProfiles::APA102) profileName = "APA102";
-        else if (profile == LedProfiles::CONSERVATIVE) profileName = "CONSERVATIVE";
-        
+        else if (profile == LedProfiles::SK6812_RGBW)
+            profileName = "SK6812 RGBW";
+        else if (profile == LedProfiles::APA102)
+            profileName = "APA102";
+        else if (profile == LedProfiles::CONSERVATIVE)
+            profileName = "CONSERVATIVE";
+
         openknx.logger.logWithValues("LED Profile:      %s (R:%umA G:%umA B:%umA W:%umA)",
-                            profileName, profile.redMA, profile.greenMA,
-                            profile.blueMA, profile.whiteMA);
+                                     profileName, profile.redMA, profile.greenMA,
+                                     profile.blueMA, profile.whiteMA);
 
         // Current consumption - REQUESTED (before limiting)
         float totalPower = _manager->getTotalPowerWatts();
@@ -3053,3 +3084,294 @@ bool NeoPixel::processPowerCommand(const std::string& args)
     return false;
 }
 
+// ============================================================================
+// Timing Helper Functions
+// ============================================================================
+/**
+ * @brief Get human-readable name for TimingMode
+ */
+const char* NeoPixel::getTimingModeName(TimingMode mode)
+{
+    switch (mode)
+    {
+        case TimingMode::AUTO: return "AUTO";
+        case TimingMode::LEGACY_125MHZ: return "LEGACY_125MHZ";
+        case TimingMode::SLOW_20PCT: return "SLOW_20PCT";
+        case TimingMode::SLOW_15PCT: return "SLOW_15PCT";
+        case TimingMode::SLOW_10PCT: return "SLOW_10PCT";
+        case TimingMode::SLOW_5PCT: return "SLOW_5PCT";
+        case TimingMode::FAST_5PCT: return "FAST_5PCT";
+        case TimingMode::FAST_10PCT: return "FAST_10PCT";
+        case TimingMode::FAST_15PCT: return "FAST_15PCT";
+        case TimingMode::FAST_20PCT: return "FAST_20PCT";
+        case TimingMode::FAST_25PCT: return "FAST_25PCT";
+        default: return "UNKNOWN";
+    }
+}
+
+/**
+ * @brief Parse TimingMode from string
+ */
+TimingMode NeoPixel::parseTimingMode(const char* str)
+{
+    if (!str) return TimingMode::AUTO;
+
+    // Convert to lowercase for comparison
+    std::string mode = str;
+    for (auto& c : mode)
+        c = tolower(c);
+
+    if (mode == "auto") return TimingMode::AUTO;
+    if (mode == "legacy" || mode == "legacy_125mhz") return TimingMode::LEGACY_125MHZ;
+    if (mode == "slow20" || mode == "slow_20pct") return TimingMode::SLOW_20PCT;
+    if (mode == "slow15" || mode == "slow_15pct") return TimingMode::SLOW_15PCT;
+    if (mode == "slow10" || mode == "slow_10pct") return TimingMode::SLOW_10PCT;
+    if (mode == "slow5" || mode == "slow_5pct") return TimingMode::SLOW_5PCT;
+    if (mode == "fast5" || mode == "fast_5pct") return TimingMode::FAST_5PCT;
+    if (mode == "fast10" || mode == "fast_10pct") return TimingMode::FAST_10PCT;
+    if (mode == "fast15" || mode == "fast_15pct") return TimingMode::FAST_15PCT;
+    if (mode == "fast20" || mode == "fast_20pct") return TimingMode::FAST_20PCT;
+    if (mode == "fast25" || mode == "fast_25pct") return TimingMode::FAST_25PCT;
+
+    return TimingMode::AUTO; // Default fallback
+}
+
+// ============================================================================
+// Timing Management Commands
+// ============================================================================
+/**
+ * @brief Process 'neo phys timings' command - List all TimingMode options
+ */
+bool NeoPixel::processPhysTimingsCommand()
+{
+    openknx.logger.log("");
+    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+    openknx.logger.log("═══════════════════════════════════════════════════════════");
+    openknx.logger.log("  Available Timing Modes");
+    openknx.logger.log("═══════════════════════════════════════════════════════════");
+    openknx.logger.color(0);
+    openknx.logger.log("");
+
+    openknx.logger.log("ID │ Mode Name       │ Target Bitrate │ Description");
+    openknx.logger.log("───┼─────────────────┼────────────────┼───────────────────────────");
+    openknx.logger.log(" 0 │ AUTO            │ 800 kHz        │ Auto-detect (default)");
+    openknx.logger.log(" 1 │ LEGACY_125MHZ   │ ~960 kHz*      │ Onboard LED workaround");
+    openknx.logger.log(" 2 │ SLOW_20PCT      │ 640 kHz        │ -20% for signal issues");
+    openknx.logger.log(" 3 │ SLOW_15PCT      │ 680 kHz        │ -15%");
+    openknx.logger.log(" 4 │ SLOW_10PCT      │ 720 kHz        │ -10%");
+    openknx.logger.log(" 5 │ SLOW_5PCT       │ 760 kHz        │ -5%");
+    openknx.logger.log(" 6 │ FAST_5PCT       │ 840 kHz        │ +5% performance boost");
+    openknx.logger.log(" 7 │ FAST_10PCT      │ 880 kHz        │ +10%");
+    openknx.logger.log(" 8 │ FAST_15PCT      │ 920 kHz        │ +15%");
+    openknx.logger.log(" 9 │ FAST_20PCT      │ 960 kHz        │ +20%");
+    openknx.logger.log("10 │ FAST_25PCT      │ 1000 kHz       │ +25% maximum");
+    openknx.logger.log("");
+    openknx.logger.log("* LEGACY mode uses fixed clkdiv, actual bitrate depends on CPU frequency");
+    openknx.logger.log("");
+
+    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+    openknx.logger.log("Usage Examples:");
+    openknx.logger.color(0);
+    openknx.logger.log("  neo phys timing 0              → Show current timing for strip 0");
+    openknx.logger.log("  neo phys timing 0 auto         → Set to AUTO mode");
+    openknx.logger.log("  neo phys timing 0 legacy       → Set to LEGACY_125MHZ");
+    openknx.logger.log("  neo phys timing 0 fast25       → Set to FAST_25PCT (1 MHz)");
+    openknx.logger.log("  neo phys timing 0 info         → Detailed timing information");
+
+    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+    openknx.logger.log("═══════════════════════════════════════════════════════════");
+    openknx.logger.color(0);
+    openknx.logger.log("");
+
+    return true;
+}
+
+/**
+ * @brief Process 'neo phys timing <id> [mode|info]' command
+ */
+bool NeoPixel::processPhysTimingCommand(const std::string& args)
+{
+    if (!_initialized || !_manager)
+    {
+        openknx.logger.log("ERROR: NeoPixel module not initialized!");
+        return true;
+    }
+
+    // Parse arguments
+    int stripId;
+    char modeStr[32] = "";
+    int parsed = sscanf(args.c_str(), "%d %31s", &stripId, modeStr);
+
+    if (parsed < 1)
+    {
+        openknx.logger.log("ERROR: Usage: neo phys timing <id> [mode|info]");
+        return true;
+    }
+
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.logWithValues("ERROR: Strip [%d] not found!", stripId);
+        return true;
+    }
+
+    // Get current timing mode (need to add getter to PhysicalStrip!)
+    auto driver = strip->getDriver();
+    if (!driver)
+    {
+        openknx.logger.log("ERROR: Strip has no driver!");
+        return true;
+    }
+
+    // neo phys timing <id> info → Detailed information
+    if (parsed == 2 && strcmp(modeStr, "info") == 0)
+    {
+#ifdef ARDUINO_ARCH_RP2040
+        auto pioDriver = dynamic_cast<PIO_NeoPixel_Serial*>(driver);
+        if (!pioDriver)
+        {
+            openknx.logger.log("ERROR: Timing info only available for PIO Serial drivers");
+            return true;
+        }
+
+        openknx.logger.log("");
+        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+        openknx.logger.log("═══════════════════════════════════════════════════════════");
+        openknx.logger.logWithValues("  Timing Information - Strip [%d]", stripId);
+        openknx.logger.log("═══════════════════════════════════════════════════════════");
+        openknx.logger.color(0);
+        openknx.logger.log("");
+
+        // System info
+        float sys_clk = (float)clock_get_hz(clk_sys);
+        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+        openknx.logger.log("System:");
+        openknx.logger.color(0);
+        openknx.logger.logWithValues("  CPU Frequency:   %.1f MHz", sys_clk / 1e6f);
+
+    #ifdef PICO_RP2350
+        openknx.logger.log("  Platform:        RP2350");
+    #else
+        openknx.logger.log("  Platform:        RP2040");
+    #endif
+        openknx.logger.log("");
+
+        // Strip info
+        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+        openknx.logger.log("Strip Configuration:");
+        openknx.logger.color(0);
+        openknx.logger.logWithValues("  GPIO Pin:        %d", strip->getDataPin());
+        openknx.logger.logWithValues("  LED Count:       %d", strip->getLedCount());
+
+        LedProtocol protocol = strip->getProtocol();
+        const char* protocolName = "Unknown";
+        switch (protocol)
+        {
+            case LedProtocol::WS2812B: protocolName = "WS2812B"; break;
+            case LedProtocol::SK6812: protocolName = "SK6812"; break;
+            case LedProtocol::WS2812: protocolName = "WS2812"; break;
+            default: break;
+        }
+        openknx.logger.logWithValues("  Protocol:        %s", protocolName);
+
+        // Current timing mode
+        TimingMode currentMode = strip->getTimingMode();
+        const char* modeName = getTimingModeName(currentMode);
+        openknx.logger.logWithValues("  Timing Mode:     %s", modeName);
+        openknx.logger.log("");
+
+        // PIO details
+        PIO pio = pioDriver->getPio();
+        const char* pioName = (pio == pio0) ? "PIO0" : (pio == pio1) ? "PIO1"
+                                                                     : "PIO2";
+
+        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+        openknx.logger.log("PIO Timing:");
+        openknx.logger.color(0);
+        openknx.logger.logWithValues("  PIO Instance:    %s", pioName);
+        openknx.logger.logWithValues("  State Machine:   SM%d", pioDriver->getStateMachine());
+
+        uint32_t freq = pioDriver->getFrequency();
+        openknx.logger.logWithValues("  Target Freq:     %d kHz", freq / 1000);
+
+        // Calculate actual clkdiv (would need getter)
+        float theoretical_clkdiv = sys_clk / (freq * 10.0f);
+        openknx.logger.logWithValues("  Calc. ClkDiv:    %.3f", theoretical_clkdiv);
+
+        float actual_bitrate = (sys_clk / theoretical_clkdiv) / 10.0f;
+        openknx.logger.logWithValues("  Actual Bitrate:  %.0f kHz", actual_bitrate / 1000.0f);
+
+        // Timing tolerance
+        float deviation = ((actual_bitrate - freq) / freq) * 100.0f;
+        openknx.logger.logWithValues("  Deviation:       %.1f%%", deviation);
+
+        if (fabs(deviation) < 1.0f)
+        {
+            openknx.logger.log("  Status:          Optimal");
+        }
+        else if (fabs(deviation) < 5.0f)
+        {
+            openknx.logger.log("  Status:          Acceptable");
+        }
+        else
+        {
+            openknx.logger.log("  Status:          Out of spec");
+        }
+
+        openknx.logger.log("");
+        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+        openknx.logger.log("═══════════════════════════════════════════════════════════");
+        openknx.logger.color(0);
+        openknx.logger.log("");
+#else
+        openknx.logger.log("ERROR: Timing info only available on RP2040/RP2350");
+#endif
+        return true;
+    }
+
+    // neo phys timing <id> → Show current mode
+    if (parsed == 1)
+    {
+        TimingMode currentMode = strip->getTimingMode();
+        const char* modeName = getTimingModeName(currentMode);
+
+        openknx.logger.logWithValues("Strip [%d] current timing mode:", stripId);
+        openknx.logger.logWithValues("  Mode: %s (ID: %d)", modeName, (int)currentMode);
+
+#ifdef ARDUINO_ARCH_RP2040
+        auto pioDriver = dynamic_cast<PIO_NeoPixel_Serial*>(driver);
+        if (pioDriver)
+        {
+            uint32_t freq = pioDriver->getFrequency();
+            openknx.logger.logWithValues("  Target Frequency: %d kHz", freq / 1000);
+
+            float sys_clk = (float)clock_get_hz(clk_sys);
+            openknx.logger.logWithValues("  System Clock: %.0f MHz", sys_clk / 1e6f);
+        }
+#endif
+        openknx.logger.log("");
+        openknx.logger.log("Use 'neo phys timing <id> info' for detailed information");
+        return true;
+    }
+
+    // neo phys timing <id> <mode> → Set timing mode
+    TimingMode newMode = parseTimingMode(modeStr);
+
+    openknx.logger.logWithValues("Setting timing mode for strip [%d] to %s...", stripId, modeStr);
+
+    if (!strip->setTimingMode(newMode))
+    {
+        openknx.logger.log("ERROR: Failed to set timing mode!");
+        openknx.logger.log("  Timing mode change only supported for PIO Serial drivers (WS2812B, SK6812)");
+        return true;
+    }
+
+    openknx.logger.log("Timing mode changed successfully!");
+    openknx.logger.log("  Note: LEDs will be cleared after timing change");
+
+    // Clear LEDs after timing change to ensure clean state
+    strip->clear();
+    strip->show();
+
+    return true;
+}

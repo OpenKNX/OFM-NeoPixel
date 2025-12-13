@@ -31,6 +31,7 @@
 #include "PowerManager.h"
 #include "Segment.h"
 #include "VirtualStrip.h"
+#include "TimingMode.h"
 
 #include <stdint.h>
 #include <string>
@@ -121,6 +122,8 @@ class NeoPixelManager
     PhysicalStrip* addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType);
     PhysicalStrip* addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder);
     PhysicalStrip* addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType, ColorOrder colorOrder);
+    PhysicalStrip* addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder, TimingMode timingMode);
+    PhysicalStrip* addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType, ColorOrder colorOrder, TimingMode timingMode);
     PhysicalStrip* addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol);
     PhysicalStrip* addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, DriverType driverType);
     PhysicalStrip* addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder);

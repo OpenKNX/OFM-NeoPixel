@@ -25,6 +25,7 @@ A high-performance, hardware-optimized LED control library for addressable RGB/R
   - [Supported LED Protocols](#supported-led-protocols)
   - [Wiring](#wiring)
   - [Power Considerations](#power-considerations)
+  - [Timing Modes](#timing-modes)
 - [Console Commands](#console-commands)
   - [Core Commands](#core-commands)
   - [Physical Strip Commands](#physical-strip-commands)
@@ -64,12 +65,23 @@ This design enables complex LED configurations with minimal CPU overhead through
 - **Self-Describing Effects**: Auto-generated UI, console commands, and documentation
 - **Multi-Strip Composition**: Combine multiple physical strips into one logical strip
 - **Platform Optimized**: RP2040 (PIO/DMA), RP2350 (PIO/DMA), ESP32-S3 (RMT)
+- **Fine-Grained Timing Control**: 11 timing modes for compatibility (640-1000 kHz)
+- **Overclock Safe**: Automatic clock detection, works at any CPU frequency
 
 ---
 
 ## Key Features
 
-### Effect System (NEW)
+### Timing Modes (NEW)
+
+- **11 Timing Modes**: AUTO, LEGACY_125MHZ, SLOW_5-20%, FAST_5-25%
+- **RP2350/RP2040 Compatible**: Legacy mode for onboard LEDs on XIAO RP2350/RP2040
+- **Runtime Adjustable**: Change timing without restart via console or API
+- **Overclock Safe**: Automatic CPU frequency detection (125-300+ MHz)
+- **Console Commands**: Inspect and modify timing with `neo phys timing`
+- **Bitrate Range**: 640 kHz (SLOW_20PCT) to 1000 kHz (FAST_25PCT)
+
+### Effect System
 
 - **Parameter Introspection API**: Effects describe their own parameters
 - **Auto-Generated UI**: Console and web UI generate automatically
@@ -237,13 +249,15 @@ neo perf                # Show CPU usage and frame rate
 │ Physical   │  │ Virtual  │  │ Segment  │
 │ Strip      │  │ Strip    │  │ + State  │
 │+ColorOrder │  │(RGB only)│  │ +Config  │
+│+TimingMode │  │          │  │          │
 └────┬───────┘  └──────────┘  └─────┬────┘
      |                              |
 ┌────▼───────────────┐        ┌─────▼─────────────────┐
 │ IHardwareDriver    │        │  Effect (Singleton)   │
 │  - PIO (RP2040)    │        │  - Stateless          │
-│  - RMT (ESP32)     │        │  - Parameter API      │
-│  - SPI (All)       │        │  - Self-describing    │
+│    + 11 Timings    │        │  - Parameter API      │
+│  - RMT (ESP32)     │        │  - Self-describing    │
+│  - SPI (All)       │        │                       │
 └────────────────────┘        └───────────────────────┘
 ```
 
@@ -665,6 +679,165 @@ GND         ────────► GND
   - Required for long cable runs (>30cm)
   - See wiring section above for recommended ICs and tutorials
 
+### Timing Modes
+
+Fine-grained bitrate control for compatibility with different LED chips and RP2350/RP2040 timings.
+
+#### Overview
+
+LED strips like WS2812B expect data at **800 kHz** (±5% tolerance). The library calculates PIO clock dividers based on the CPU frequency:
+
+```
+PIO Clock Divider = CPU Frequency / (Target Frequency × 10 cycles/bit)
+```
+
+| Platform | CPU Frequency | Default Divider | Bitrate |
+|----------|--------------|----------------|---------|
+| RP2040   | 125 MHz      | 15.625         | 800 kHz |
+| RP2350   | 150 MHz      | 18.750         | 800 kHz |
+
+#### Why Timing Modes?
+
+Some scenarios require non-standard timing:
+
+1. **RP2350/Rp2040 Onboard LEDs** (XIAO RP2350/RP2040): Require legacy 125MHz-based timing even at 150MHz
+2. **Overclocked Systems**: Automatic recalculation at 200/300 MHz
+3. **Timing-Sensitive Chips**: Some clones need slower/faster bitrates
+4. **Cable Length**: Long wires may need slower speeds for reliability
+
+#### Available Modes
+
+| Mode | Bitrate | Multiplier | Use Case |
+|------|---------|------------|----------|
+| `AUTO` | 800 kHz | 1.0× | **Default** - WS2812B specification |
+| `LEGACY_125MHZ` | 800 kHz* | Fixed | RP2350/RP2040 onboard LEDs (clkdiv=15.625) |
+| `SLOW_20PCT` | 640 kHz | 0.80× | Long cables, timing-sensitive chips |
+| `SLOW_15PCT` | 680 kHz | 0.85× | Moderate slowdown |
+| `SLOW_10PCT` | 720 kHz | 0.90× | Minor adjustment |
+| `SLOW_5PCT` | 760 kHz | 0.95× | Fine-tuning |
+| `FAST_5PCT` | 840 kHz | 1.05× | Faster refresh |
+| `FAST_10PCT` | 880 kHz | 1.10× | Above spec |
+| `FAST_15PCT` | 920 kHz | 1.15× | High-speed strips |
+| `FAST_20PCT` | 960 kHz | 1.20× | Maximum speed |
+| `FAST_25PCT` | 1000 kHz | 1.25× | Extreme (may cause glitches) |
+
+\* LEGACY_125MHZ always uses `clkdiv = 15.625` regardless of CPU frequency
+
+#### API Usage
+
+**Creating Strips with Timing Modes:**
+
+```cpp
+// Auto mode (default)
+auto strip0 = npxmgr->addStrip(22, 64, LedProtocol::WS2812B, ColorOrder::RGB);
+
+// Legacy mode for RP2350 onboard LED
+auto strip1 = npxmgr->addStrip(12, 1, LedProtocol::WS2812B, ColorOrder::RGB, 
+                               TimingMode::LEGACY_125MHZ);
+
+// Slow mode for long cables
+auto strip2 = npxmgr->addStrip(9, 100, LedProtocol::WS2812B, ColorOrder::RGB, 
+                               TimingMode::SLOW_10PCT);
+```
+
+**Runtime Timing Changes:**
+
+```cpp
+// Get current timing mode
+TimingMode mode = strip->getTimingMode();
+
+// Change timing mode (recreates driver, waits for DMA completion)
+strip->setTimingMode(TimingMode::FAST_5PCT);
+```
+
+#### Console Commands
+
+**List all timing modes:**
+```bash
+neo phys timings
+# Output:
+# Available Timing Modes:
+# ┌────┬────────────────┬──────────┬────────────┐
+# │ ID │ Mode           │ Bitrate  │ Multiplier │
+# ├────┼────────────────┼──────────┼────────────┤
+# │ 0  │ AUTO           │ 800 kHz  │ 1.00×      │
+# │ 1  │ LEGACY_125MHZ  │ 800 kHz* │ Fixed      │
+# │ 2  │ SLOW_20PCT     │ 640 kHz  │ 0.80×      │
+# ...
+```
+
+**Show current timing for a strip:**
+```bash
+neo phys timing 0
+# Output:
+# PhysicalStrip[0] Timing Mode: LEGACY_125MHZ
+#   System Clock: 150000000 Hz (150.00 MHz)
+#   Target Frequency: 800000 Hz (800 kHz)
+```
+
+**Change timing mode:**
+```bash
+neo phys timing 0 fast10        # Set to FAST_10PCT
+neo phys timing 1 auto          # Set to AUTO
+neo phys timing 2 slow_20pct    # Set to SLOW_20PCT (flexible parsing)
+```
+
+**Show detailed timing information:**
+```bash
+neo phys timing 0 info
+# Output:
+# PhysicalStrip[0] - Detailed Timing Information
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# System Information:
+#   CPU Frequency: 150000000 Hz (150.00 MHz)
+#   Platform: RP2350
+# 
+# Strip Configuration:
+#   GPIO: 12
+#   LED Count: 1
+#   Protocol: WS2812B
+#   ColorOrder: RGB
+# 
+# Timing Configuration:
+#   Mode: LEGACY_125MHZ
+#   Target Frequency: 800000 Hz (800 kHz)
+# 
+# PIO Details:
+#   PIO Instance: 0
+#   State Machine: 0
+#   Clock Divider: 15.62
+#   Actual Bitrate: 800000 Hz (800 kHz)
+#   Deviation: 0.00%
+```
+
+#### Timing Mode Parsing
+
+The console accepts flexible input formats:
+- Uppercase: `AUTO`, `LEGACY_125MHZ`, `SLOW_10PCT`
+- Lowercase: `auto`, `legacy`, `slow10`, `fast25`
+- With/without underscore: `fast_20pct`, `fast20`
+- Short forms: `legacy`, `slow5`, `fast10`
+
+#### Implementation Notes
+
+- **Overclock Safe**: Automatically detects CPU frequency via `clock_get_hz(clk_sys)`
+- **Works at any frequency**: 125, 150, 200, 300 MHz tested
+- **Driver Recreation**: Changing timing mode recreates the PIO driver
+  - Waits for DMA transfer completion
+  - Clears LED buffer for clean state
+  - Reassigns PIO/SM/DMA resources
+- **No Effect on VirtualStrip**: Timing is per-PhysicalStrip only
+
+#### Troubleshooting Timing Issues
+
+| Symptom | Possible Cause | Solution |
+|---------|---------------|----------|
+| First LED flickers | Wrong timing, no level shifter | Try `SLOW_10PCT`, add level shifter |
+| Random colors | Timing too fast | Use `SLOW_5PCT` or `SLOW_10PCT` |
+| RP2350 onboard LED not working | Needs legacy timing | Use `LEGACY_125MHZ` |
+| Works on RP2040, fails on RP2350 | Different default clkdiv | Try `SLOW_5PCT` or `LEGACY_125MHZ` |
+| All LEDs off | Timing too slow | Try `FAST_5PCT` or check wiring |
+
 ---
 
 ## Console Commands
@@ -720,6 +893,30 @@ neo phys del <index>
 
 neo phys list
     # List all physical strips with details
+
+neo phys timings
+    # List all available timing modes
+    # Shows: ID, Mode name, Bitrate, Multiplier
+
+neo phys timing <index>
+    # Show current timing mode for a physical strip
+    # Example:
+    neo phys timing 0              # Show timing for strip 0
+
+neo phys timing <index> <mode>
+    # Set timing mode for a physical strip
+    # Recreates driver with new timing (waits for DMA completion)
+    # Examples:
+    neo phys timing 0 auto         # Default 800 kHz
+    neo phys timing 1 legacy       # Legacy 125MHz timing
+    neo phys timing 0 slow10       # 10% slower (720 kHz)
+    neo phys timing 2 fast_25pct   # 25% faster (1000 kHz)
+
+neo phys timing <index> info
+    # Show detailed timing information
+    # Includes: CPU frequency, PIO details, clock divider, actual bitrate
+    # Example:
+    neo phys timing 0 info
 ```
 
 ### Virtual Strip Commands
@@ -896,6 +1093,10 @@ public:
     // Physical Strip Management
     PhysicalStrip* addPhysicalStrip(uint8_t pin, uint16_t ledCount,
                                    LedProtocol protocol);
+    PhysicalStrip* addStrip(uint8_t pin, uint16_t ledCount, 
+                           LedProtocol protocol = LedProtocol::WS2812B,
+                           ColorOrder order = ColorOrder::RGB,
+                           TimingMode timingMode = TimingMode::AUTO);
     bool removePhysicalStrip(uint8_t index);
     PhysicalStrip* getPhysicalStrip(uint8_t index);
     uint8_t getPhysicalStripCount() const;
@@ -940,6 +1141,10 @@ public:
     // Display Control
     void show();
     void setBrightness(uint8_t brightness);
+    
+    // Timing Control (NEW)
+    TimingMode getTimingMode() const;
+    void setTimingMode(TimingMode mode);  // Recreates driver with new timing
     
     // Properties
     uint16_t getLedCount() const;
@@ -1014,6 +1219,48 @@ public:
     LedState& getState();             // Access state (for effects)
 };
 ```
+
+### TimingMode Enum
+
+```cpp
+enum class TimingMode : uint8_t {
+    AUTO = 0,           // 800 kHz (default, auto-calculated from CPU freq)
+    LEGACY_125MHZ = 1,  // Fixed clkdiv=15.625 (for RP2350 onboard LEDs)
+    SLOW_20PCT = 2,     // 640 kHz (0.80× multiplier)
+    SLOW_15PCT = 3,     // 680 kHz (0.85× multiplier)
+    SLOW_10PCT = 4,     // 720 kHz (0.90× multiplier)
+    SLOW_5PCT = 5,      // 760 kHz (0.95× multiplier)
+    FAST_5PCT = 6,      // 840 kHz (1.05× multiplier)
+    FAST_10PCT = 7,     // 880 kHz (1.10× multiplier)
+    FAST_15PCT = 8,     // 920 kHz (1.15× multiplier)
+    FAST_20PCT = 9,     // 960 kHz (1.20× multiplier)
+    FAST_25PCT = 10     // 1000 kHz (1.25× multiplier)
+};
+```
+
+**Usage Examples:**
+
+```cpp
+// Default AUTO mode (800 kHz)
+auto strip = npxmgr->addStrip(9, 64, LedProtocol::WS2812B);
+
+// Legacy mode for RP2350 onboard LED
+auto onboardLed = npxmgr->addStrip(12, 1, LedProtocol::WS2812B, 
+                                   ColorOrder::RGB, TimingMode::LEGACY_125MHZ);
+
+// Runtime timing change
+strip->setTimingMode(TimingMode::FAST_10PCT);
+
+// Get current timing
+TimingMode currentMode = strip->getTimingMode();
+```
+
+**When to Use Each Mode:**
+
+- **AUTO**: Default for external LED strips
+- **LEGACY_125MHZ**: RP2350/RP2040 onboard LEDs (XIAO RP2350/RP2040)
+- **SLOW_***: Long cable runs, timing-sensitive clones, signal integrity issues
+- **FAST_***: High-speed refresh, overclocked systems, fast-compatible strips
 
 ### Effect System
 
@@ -1203,6 +1450,96 @@ void loop() {
 }
 ```
 
+### Example 6: RP2350 with Onboard and External LEDs
+
+```cpp
+void setup() {
+    openknx.init(0);
+    openknx.addModule(13, neoPixelModule);
+    openknx.setup();
+    
+    NeoPixelManager* mgr = neoPixelModule.getManager();
+    
+    // Onboard LED on XIAO RP2350 (requires legacy timing)
+    auto onboardStrip = mgr->addStrip(OKNXHW_OPENKNXIAO_NEOPIXEL, 1, LedProtocol::WS2812B, 
+                                      ColorOrder::RGB, 
+                                      TimingMode::LEGACY_125MHZ);
+    onboardStrip->init();
+    
+    // External LED strip (auto timing)
+    auto externalStrip = mgr->addStrip(OKNXHW_OPENKNXIAO_D4, 64, LedProtocol::WS2812B, 
+                                       ColorOrder::RGB); // Default is auto timing
+    externalStrip->init();
+    
+    // Create virtual strips for each
+    auto virtOnboard = mgr->addVirtualStrip(1, ColorOrder::RGB);
+    auto virtExternal = mgr->addVirtualStrip(64, ColorOrder::RGB);
+    
+    mgr->attachPhysicalToVirtual(virtOnboard, onboardStrip, 0);
+    mgr->attachPhysicalToVirtual(virtExternal, externalStrip, 0);
+    
+    // Segments with different effects
+    auto segOnboard = mgr->addSegment(virtOnboard, 0, 0);
+    segOnboard->setEffect(EffectPool::getSolid());
+    segOnboard->setPrimaryColor(0, 50, 0, 255);  // Green
+    
+    auto segExternal = mgr->addSegment(virtExternal, 0, 63);
+    segExternal->setEffect(EffectPool::getRainbow());
+    
+    // Check current timing modes
+    openknx.logger.logWithPrefixAndValues("Onboard LED timing", 
+        (uint8_t)onboardStrip->getTimingMode());
+    openknx.logger.logWithPrefixAndValues("External strip timing", 
+        (uint8_t)externalStrip->getTimingMode());
+    
+    // Enable auto-update
+    mgr->setAutoUpdate(true);
+}
+```
+
+### Example 7: Runtime Timing Adjustment
+
+```cpp
+PhysicalStrip* strip = nullptr;
+
+void setup() {
+    openknx.init(0);
+    openknx.addModule(13, neoPixelModule);
+    openknx.setup();
+    
+    NeoPixelManager* mgr = neoPixelModule.getManager();
+    
+    // Create strip with default timing
+    strip = mgr->addStrip(9, 64, LedProtocol::WS2812B);
+    strip->init();
+    
+    auto virt = mgr->addVirtualStrip(64, ColorOrder::RGB);
+    mgr->attachPhysicalToVirtual(virt, strip, 0);
+    
+    auto seg = mgr->addSegment(virt, 0, 63);
+    seg->setEffect(EffectPool::getSolid());
+    seg->setPrimaryColor(255, 0, 0, 255);  // Red
+    
+    mgr->setAutoUpdate(true);
+}
+
+void loop() {
+    openknx.loop();
+    
+    // Example: Adjust timing if flickering detected
+    static bool adjusted = false;
+    if (!adjusted && millis() > 5000) {
+        // Try slower timing after 5 seconds
+        openknx.logger.log("Adjusting timing to SLOW_10PCT...");
+        strip->setTimingMode(TimingMode::SLOW_10PCT);
+        adjusted = true;
+    }
+    
+    // Console command can also change timing:
+    // neo phys timing 0 slow10
+}
+```
+
 ---
 
 ## Performance
@@ -1252,6 +1589,38 @@ auto virt = neoPixelModule.addVirtualStrip(64, ColorOrder::RGB);  // Try differe
 
 ### Q: First LED always wrong color
 **A:** Common with WS2812B. Add a dummy LED at the start or use a level shifter.
+
+### Q: RP2350 onboard LED not working
+**A:** Onboard LEDs (XIAO RP2350) require legacy 125MHz-based timing:
+
+```cpp
+auto strip = mgr->addStrip(OKNXHW_OPENKNXIAO_NEOPIXEL, 1, LedProtocol::WS2812B, ColorOrder::RGB, 
+                          TimingMode::LEGACY_125MHZ);
+```
+
+Or via console:
+```bash
+neo phys timing 0 legacy
+```
+
+### Q: LEDs work on RP2040 but not on RP2350
+**A:** Different CPU frequencies (125 MHz vs 150 MHz) affect timing. Try:
+
+1. Legacy timing mode: `TimingMode::LEGACY_125MHZ`
+2. Slightly slower timing: `TimingMode::SLOW_5PCT` or `SLOW_10PCT`
+3. Check actual bitrate with: `neo phys timing 0 info`
+
+```cpp
+// If flickering on RP2350, try slower timing
+strip->setTimingMode(TimingMode::SLOW_10PCT);
+```
+
+### Q: Flickering or glitches only on RP2350
+**A:**
+1. **Try LEGACY_125MHZ mode first** (especially for onboard LEDs)
+2. Use level shifter for 5V data signal
+3. Adjust timing via console: `neo phys timing 0 slow5`
+4. Check console for timing details: `neo phys timing 0 info`
 
 ### Q: Performance issues / low FPS
 **A:**

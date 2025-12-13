@@ -33,7 +33,8 @@ IHardwareDriver* DriverFactory::create(uint pin,              // Data pin (for 1
                                        LedProtocol protocol,  // LED protocol (WS2812, APA102, etc.)
                                        DriverType driverType, // Driver type (AUTO, SERIAL_1WIRE, SPI_HARDWARE, SPI_PIO)
                                        uint mosiPin,          // For SPI: MOSI pin (optional)
-                                       uint sckPin)           // For SPI: SCK pin (optional)
+                                       uint sckPin,           // For SPI: SCK pin (optional)
+                                       TimingMode timingMode) // Timing mode for clock divider
 {
     if (ledCount == 0) // Check for valid LED count
     {
@@ -62,8 +63,8 @@ IHardwareDriver* DriverFactory::create(uint pin,              // Data pin (for 1
 #if defined(ARDUINO_ARCH_RP2040)
     if (driverType == DriverType::SERIAL_1WIRE && isSerial)
     {
-        // 1-Wire: Nutze PIO mit DMA
-        return new PIO_NeoPixel_Serial(pin, ledCount, protocol, true);
+        // 1-Wire: Use PIO with DMA, pass timingMode parameter
+        return new PIO_NeoPixel_Serial(pin, ledCount, protocol, true, timingMode);
     }
     else if (driverType == DriverType::SPI_HARDWARE && isSpi)
     {

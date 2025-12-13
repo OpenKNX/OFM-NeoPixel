@@ -277,6 +277,80 @@ PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedPro
 }
 
 /**
+ * Add PhysicalStrip with ColorOrder and TimingMode
+ */
+PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder, TimingMode timingMode)
+{
+#if NEOPIXEL_ENFORCE_LIMITS
+    if (_strips.size() >= NEOPIXEL_MAX_PHYSICAL_STRIPS)
+    {
+        logDebugP("NeoPixelManager: Maximum physical strips limit reached (%d/%d)",
+                  _strips.size(), NEOPIXEL_MAX_PHYSICAL_STRIPS);
+        _errorCount++;
+        return nullptr;
+    }
+#endif
+
+    if (!checkResourcesAvailable(protocol))
+    {
+        logDebugP("NeoPixelManager: No resources available for protocol %d", (int)protocol);
+        _errorCount++;
+        return nullptr;
+    }
+
+    PhysicalStrip* strip = new PhysicalStrip(pin, ledCount, protocol, DriverType::AUTO, timingMode);
+    if (!strip)
+    {
+        _errorCount++;
+        return nullptr;
+    }
+
+    strip->setColorOrder(colorOrder);
+    _strips.push_back(strip);
+    logDebugP("NeoPixelManager: Added strip at pin %d with %d LEDs (ColorOrder: %d, TimingMode: %d)",
+              pin, ledCount, (int)colorOrder, (int)timingMode);
+    return strip;
+}
+
+/**
+ * Add PhysicalStrip with ColorOrder, DriverType and TimingMode
+ */
+PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType, ColorOrder colorOrder, TimingMode timingMode)
+{
+#if NEOPIXEL_ENFORCE_LIMITS
+    if (_strips.size() >= NEOPIXEL_MAX_PHYSICAL_STRIPS)
+    {
+        logDebugP("NeoPixelManager: Maximum physical strips limit reached (%d/%d)",
+                  _strips.size(), NEOPIXEL_MAX_PHYSICAL_STRIPS);
+        _errorCount++;
+        return nullptr;
+    }
+#endif
+
+    if (!checkResourcesAvailable(protocol))
+    {
+        logDebugP("NeoPixelManager: No resources available for protocol %d", (int)protocol);
+        _errorCount++;
+        return nullptr;
+    }
+
+    PhysicalStrip* strip = new PhysicalStrip(pin, ledCount, protocol, driverType, timingMode);
+    if (!strip)
+    {
+        logDebugP("NeoPixelManager: Could not create strip (Pin %d, Driver %d)",
+                  pin, (int)driverType);
+        _errorCount++;
+        return nullptr;
+    }
+
+    strip->setColorOrder(colorOrder);
+    _strips.push_back(strip);
+    logDebugP("NeoPixelManager: Added strip at pin %d with %d LEDs (Driver: %d, ColorOrder: %d, TimingMode: %d)",
+              pin, ledCount, (int)driverType, (int)colorOrder, (int)timingMode);
+    return strip;
+}
+
+/**
  * Add SPI PhysicalStrip with ColorOrder
  */
 PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder)

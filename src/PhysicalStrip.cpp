@@ -1,5 +1,10 @@
 #include "PhysicalStrip.h"
 #include "hal/DriverFactory.h"
+
+#ifdef ARDUINO_ARCH_RP2040
+#include "pio/pio_neopixel_serial.h"
+#endif
+
 #include <Arduino.h>
 
 /**
@@ -14,7 +19,7 @@
  * @param protocol LED protocol (WS2812B, SK6812, APA102, etc.)
  * @param driverType Driver type (AUTO = automatically selected)
  */
-PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType)
+PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType, TimingMode timingMode)
     : _driver(nullptr),
       _dataPin(pin),
       _clockPin(0xFFFFFFFF),
@@ -23,7 +28,8 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _initialized(false),
       _colorOrder(ColorOrder::RGB),
       _hasColorOrder(false),
-      _hardwareBrightness(255)
+      _hardwareBrightness(255),
+      _timingMode(timingMode)
 {
     createDriver(driverType);
 }
@@ -37,7 +43,7 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
  * @param sckPin Clock pin (SPI only)
  * @param driverType Driver type (AUTO = automatic)
  */
-PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, uint32_t sckPin, DriverType driverType)
+PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, uint32_t sckPin, DriverType driverType, TimingMode timingMode)
     : _driver(nullptr),
       _dataPin(pin),
       _clockPin(sckPin),
@@ -46,7 +52,8 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _initialized(false),
       _colorOrder(ColorOrder::RGB),
       _hasColorOrder(false),
-      _hardwareBrightness(255)
+      _hardwareBrightness(255),
+      _timingMode(timingMode)
 {
     createDriver(driverType);
 }
@@ -76,14 +83,15 @@ bool PhysicalStrip::createDriver(DriverType driverType)
         _driver = nullptr;
     }
 
-    // Use DriverFactory for creation
+    // Use DriverFactory for creation, pass timingMode parameter
     _driver = DriverFactory::create(
         _dataPin,
         _ledCount,
         _protocol,
         driverType,
         _dataPin, // MOSI = dataPin
-        _clockPin // SCK = clockPin
+        _clockPin, // SCK = clockPin
+        _timingMode // Pass through
     );
 
     return _driver != nullptr;
@@ -450,6 +458,76 @@ bool PhysicalStrip::setUpdateFrequency(uint32_t frequencyHz)
     // This function would need driver-specific implementations
     // For now: Return false (not supported)
     (void)frequencyHz;
+    return false;
+}
+
+/**
+ * @brief Set timing mode and reinitialize PIO (RP2040/RP2350 only)
+ * @param mode New timing mode
+ * @return true if mode was changed and driver reinitialized successfully
+ */
+bool PhysicalStrip::setTimingMode(TimingMode mode)
+{
+    if (_timingMode == mode)
+    {
+        return true; // Already set, no change needed
+    }
+
+    _timingMode = mode;
+
+    // Reinitialize driver with new timing mode
+    if (!_driver)
+    {
+        return false;
+    }
+
+#ifdef ARDUINO_ARCH_RP2040
+    // For PIO Serial driver, we need to recreate it
+    auto pioDriver = dynamic_cast<PIO_NeoPixel_Serial*>(_driver);
+    if (pioDriver)
+    {
+        // Save current state
+        bool wasBusy = pioDriver->isBusy();
+        if (wasBusy)
+        {
+            // Wait for current transfer to complete
+            uint32_t timeout = millis() + 100;
+            while (pioDriver->isBusy() && millis() < timeout)
+            {
+                delay(1);
+            }
+        }
+
+        // Delete old driver and create new one with new timing mode
+        delete _driver;
+        _driver = DriverFactory::create(
+            _dataPin,
+            _ledCount,
+            _protocol,
+            DriverType::SERIAL_1WIRE,
+            _dataPin,
+            _clockPin,
+            _timingMode);
+
+        if (!_driver)
+        {
+            _initialized = false;
+            return false;
+        }
+
+        // Reinitialize
+        if (!_driver->init())
+        {
+            _initialized = false;
+            return false;
+        }
+
+        _initialized = true;
+        return true;
+    }
+#endif
+
+    // For non-PIO drivers or other platforms, timing mode has no effect
     return false;
 }
 

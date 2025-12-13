@@ -151,7 +151,7 @@ uint PIO_NeoPixel_Serial::getAvailableDmaChannels()
  * @note Constructor only allocates memory, call init() to
  *       configure hardware resources.
  */
-PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtocol protocol, bool useDMA)
+PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtocol protocol, bool useDMA, TimingMode timingMode)
     : _inst(nullptr)
 {
     _inst = new pio_neopixel_serial_inst_t();
@@ -163,6 +163,7 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     _inst->ledCount = ledCount; // Set number of LEDs
     _inst->protocol = protocol; // Set LED protocol
     _inst->useDMA = useDMA;     // Set DMA usage
+    _inst->timingMode = timingMode; // Set timing mode for clock divider calculation
     _inst->dmaChannel = -1;     // No DMA channel yet
     _inst->dmaIrqNum = -1;      // Will be claimed dynamically if DMA is used
     _inst->initialized = false; // Set initialization state
@@ -313,14 +314,87 @@ bool PIO_NeoPixel_Serial::initPIO()
 
     bool rgbw = (_inst->bytesPerLed == 4);
 
-    // Calculate clock divider based on frequency
-    // Timing: 10 PIO cycles per bit
+    // Calculate clock divider based on frequency and timing mode
+    // Timing: 10 PIO cycles per bit (fixed in PIO program)
     // PIO clock = sys_clock / clkdiv
     // Need: frequency * 10 cycles = PIO clock
     // clkdiv = sys_clock / (frequency * 10)
-    float sys_clk = 125000000.0f;
-    float pio_freq = (float)_inst->frequency * 10.0f;
-    float clkdiv = sys_clk / pio_freq;
+    //
+    // NOTE: RP2040 runs at 125 MHz, RP2350 at 150 MHz by default
+    // The timing modes are overclock-safe: they work at any system clock speed
+    // 
+    // LEGACY_125MHZ: Workaround for onboard NeoPixels designed for 125MHz systems
+    // Some onboard LEDs only work with clkdiv=15.625 (the 125MHz calculation)
+    // This results in faster bit rate on RP2350/overclocked systems but LED tolerates it
+    float actual_sys_clk = (float)clock_get_hz(clk_sys);
+    float clkdiv;
+    float actual_bitrate;
+    float bitrate_multiplier = 1.0f;
+    const char* mode_name = "AUTO";
+    
+    switch (_inst->timingMode) {
+        case TimingMode::LEGACY_125MHZ:
+            clkdiv = 15.625f;
+            actual_bitrate = (actual_sys_clk / clkdiv) / 10.0f;
+            mode_name = "LEGACY_125MHZ";
+            break;
+        
+        case TimingMode::SLOW_20PCT:
+            bitrate_multiplier = 0.80f;
+            mode_name = "SLOW_20PCT";
+            break;
+        case TimingMode::SLOW_15PCT:
+            bitrate_multiplier = 0.85f;
+            mode_name = "SLOW_15PCT";
+            break;
+        case TimingMode::SLOW_10PCT:
+            bitrate_multiplier = 0.90f;
+            mode_name = "SLOW_10PCT";
+            break;
+        case TimingMode::SLOW_5PCT:
+            bitrate_multiplier = 0.95f;
+            mode_name = "SLOW_5PCT";
+            break;
+        
+        case TimingMode::FAST_5PCT:
+            bitrate_multiplier = 1.05f;
+            mode_name = "FAST_5PCT";
+            break;
+        case TimingMode::FAST_10PCT:
+            bitrate_multiplier = 1.10f;
+            mode_name = "FAST_10PCT";
+            break;
+        case TimingMode::FAST_15PCT:
+            bitrate_multiplier = 1.15f;
+            mode_name = "FAST_15PCT";
+            break;
+        case TimingMode::FAST_20PCT:
+            bitrate_multiplier = 1.20f;
+            mode_name = "FAST_20PCT";
+            break;
+        case TimingMode::FAST_25PCT:
+            bitrate_multiplier = 1.25f;
+            mode_name = "FAST_25PCT";
+            break;
+        
+        case TimingMode::AUTO:
+        default:
+            bitrate_multiplier = 1.0f;
+            mode_name = "AUTO";
+            break;
+    }
+    
+    // Calculate clkdiv for all modes except LEGACY
+    if (_inst->timingMode != TimingMode::LEGACY_125MHZ) {
+        float target_bitrate = (float)_inst->frequency * bitrate_multiplier;
+        clkdiv = actual_sys_clk / (target_bitrate * 10.0f);
+        actual_bitrate = target_bitrate;
+    }
+
+    #ifdef OPENKNX_DEBUG
+    openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "GPIO%u: sys_clk=%.0f MHz, clkdiv=%.3f, bitrate=%.0f kHz [%s]",
+                                          _inst->pin, actual_sys_clk / 1e6f, clkdiv, actual_bitrate / 1000.0f, mode_name);
+    #endif
 
     #if PICO_PIO_USE_GPIO_BASE
     // RP2350B and later: Use GPIO base support for flexible pin assignment

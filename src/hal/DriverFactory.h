@@ -14,6 +14,7 @@
 #pragma once
 
 #include "../IHardwareDriver.h"
+#include "../TimingMode.h"
 #include "Arduino.h"
 
 class DriverFactory
@@ -23,9 +24,10 @@ class DriverFactory
         uint pin,
         uint16_t ledCount,
         LedProtocol protocol,
-        DriverType driverType = DriverType::AUTO, // Default: AUTO
-        uint mosiPin = 0xFFFFFFFF, // For SPI: MOSI pin (optional)
-        uint sckPin = 0xFFFFFFFF); // For SPI: SCK pin (optional)
+        DriverType driverType = DriverType::AUTO,  // Default: AUTO
+        uint mosiPin = 0xFFFFFFFF,                 // For SPI: MOSI pin (optional)
+        uint sckPin = 0xFFFFFFFF,                  // For SPI: SCK pin (optional)
+        TimingMode timingMode = TimingMode::AUTO); // Timing mode for clock divider
 
     static bool isPlatformRP2040();
     static bool isPlatformRP2350();

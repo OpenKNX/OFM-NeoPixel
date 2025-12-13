@@ -34,6 +34,7 @@
 #if defined(ARDUINO_ARCH_RP2040)
 
     #include "../IHardwareDriver.h"
+    #include "../TimingMode.h"
     #include "hardware/clocks.h"
     #include "hardware/dma.h"
     #include "hardware/pio.h"
@@ -53,6 +54,7 @@ struct pio_neopixel_serial_inst
     LedProtocol protocol;  // LED protocol type
     ColorOrder colorOrder; // Color byte order
     uint32_t frequency;    // Update frequency (Hz)
+    TimingMode timingMode; // Timing mode for PIO clock divider calculation
 
     uint8_t* buffer;   // LED data buffer (RGB/RGBW bytes)
     size_t bufferSize; // Buffer size in bytes
@@ -75,7 +77,7 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
 {
   public:
     
-    PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtocol protocol, bool useDMA = true);
+    PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtocol protocol, bool useDMA = true, TimingMode timingMode = TimingMode::AUTO);
     virtual ~PIO_NeoPixel_Serial();
 
     // IHardwareDriver interface implementation

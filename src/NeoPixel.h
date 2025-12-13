@@ -116,6 +116,8 @@ class NeoPixel : public OpenKNX::Module
     bool processPhysAddCommand(const std::string& args);
     bool processPhysDelCommand(const std::string& args);
     bool processPhysListCommand();
+    bool processPhysTimingsCommand();
+    bool processPhysTimingCommand(const std::string& args);
 
     // VirtualStrip management commands
     bool processVirtCommand(const std::string& args);
@@ -144,6 +146,10 @@ class NeoPixel : public OpenKNX::Module
     bool processHardwareBrightnessCommand(const std::string& args);
     bool processEffectConfigCommand(const std::string& args);
     bool processPowerCommand(const std::string& args);
+
+    // Timing helper functions
+    const char* getTimingModeName(TimingMode mode);
+    TimingMode parseTimingMode(const char* str);
 
 #ifdef OPENKNX_NEOPIXEL_TESTS
     bool processAnimTestStartCommand();

@@ -19,6 +19,7 @@
  */
 
 #include "IHardwareDriver.h"
+#include "TimingMode.h"
 #include <cstdint>
 #include <stddef.h>
 #include <stdint.h>
@@ -26,8 +27,8 @@
 class PhysicalStrip
 {
   public:
-    PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol = LedProtocol::WS2812B, DriverType driverType = DriverType::AUTO);
-    PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, uint32_t sckPin, DriverType driverType = DriverType::AUTO);
+    PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol = LedProtocol::WS2812B, DriverType driverType = DriverType::AUTO, TimingMode timingMode = TimingMode::AUTO);
+    PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, uint32_t sckPin, DriverType driverType = DriverType::AUTO, TimingMode timingMode = TimingMode::AUTO);
     ~PhysicalStrip();
 
     // ====================================================================
@@ -97,6 +98,12 @@ class PhysicalStrip
     bool setUpdateFrequency(uint32_t frequencyHz);
     IHardwareDriver* getDriver() const { return _driver; }
 
+    // ====================================================================
+    // Timing Mode (RP2040/RP2350 only)
+    // ====================================================================
+    TimingMode getTimingMode() const { return _timingMode; }
+    bool setTimingMode(TimingMode mode);
+
   private:
     IHardwareDriver* _driver;    // Underlying driver
     uint32_t _dataPin;           // GPIO pin (MOSI/Data)
@@ -107,6 +114,7 @@ class PhysicalStrip
     ColorOrder _colorOrder;      // Color order for this strip
     bool _hasColorOrder;         // Whether ColorOrder was explicitly set
     uint8_t _hardwareBrightness; // Hardware brightness (0-255, default 255 = max, only APA102/SK9822)
+    TimingMode _timingMode;      // Timing mode for clock divider calculation
 
     bool createDriver(DriverType driverType); // Create appropriate driver
 };
