@@ -105,7 +105,7 @@ RMT_NeoPixel_Serial* RMT_NeoPixel_Serial::getInstance(int channel)
     return nullptr;
 }
 
-RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtocol protocol)
+RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedProtocol protocol)
     : _inst(nullptr)
 {
     _inst = (rmt_neopixel_serial_inst_t*)malloc(sizeof(rmt_neopixel_serial_inst_t));
@@ -367,12 +367,12 @@ DriverCapabilities RMT_NeoPixel_Serial::getCapabilities() const
 // Static Resource Detection Methods (Public API)
 // ============================================================================
 
-uint RMT_NeoPixel_Serial::getAvailableRmtChannels()
+uint32_t RMT_NeoPixel_Serial::getAvailableRmtChannels()
 {
     return get_available_rmt_channels();
 }
 
-uint RMT_NeoPixel_Serial::getTotalRmtChannels()
+uint32_t RMT_NeoPixel_Serial::getTotalRmtChannels()
 {
     return get_total_rmt_channels();
 }

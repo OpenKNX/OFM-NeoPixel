@@ -4,7 +4,7 @@
  *
  * Hardware-accelerated driver for APA102/SK9822 and other SPI-based LED protocols.
  * Uses RP2040/RP2350's PIO (Programmable I/O) subsystem for flexible SPI communication.
- * 
+ *
  * Key Features:
  * - Zero-CPU timing via PIO state machines
  * - DMA-based transfers for maximum efficiency
@@ -13,7 +13,7 @@
  * - Automatic resource management (PIO/SM/DMA)
  * - Support for APA102, SK9822, WS2801, LPD8806
  * - Variable SPI frequencies (tested up to 20MHz)
- * 
+ *
  * Technical Details:
  * - Uses PIO state machines for SPI clock and data
  * - DMA for zero-copy memory transfers
@@ -54,9 +54,9 @@ struct pio_neopixel_spi_inst
     uint mosiPin; // GPIO pin for MOSI/data
     uint csPin;   // Chip select pin (-1 if not used)
 
-    uint16_t ledCount;        // Number of LEDs
-    uint8_t bytesPerLed;      // Bytes per LED (typically 4 for APA102)
-    LedProtocol protocol;     // LED protocol type
+    uint16_t ledCount;    // Number of LEDs
+    uint8_t bytesPerLed;  // Bytes per LED (typically 4 for APA102)
+    LedProtocol protocol; // LED protocol type
 
     // APA102/SK9822 format: 111xxxxx (brightness 5 bits) + BGR
     // Brightness byte: 0xE0 | (brightness & 0x1F)

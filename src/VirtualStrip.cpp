@@ -14,8 +14,8 @@
  */
 
 #include "VirtualStrip.h"
-#include "PowerManager.h"
 #include "OpenKNX.h"
+#include "PowerManager.h"
 #include <Arduino.h>
 #include <algorithm>
 #include <string.h>
@@ -418,7 +418,7 @@ bool VirtualStrip::syncToPhysical(uint8_t hardwareBrightness)
 /**
  * @brief Send to all PhysicalStrips
  * @return true if all sends were successful
- * 
+ *
  * NOTE: Power management (current limiting) is now handled centrally
  *       in NeoPixelManager::updateAll() BEFORE this is called.
  *       This ensures global current limiting across all VirtualStrips.

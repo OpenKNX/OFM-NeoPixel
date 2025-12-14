@@ -521,7 +521,7 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
                                               index, r, g, b, brightness, offset);
     }
     #endif
-      
+
     if (_inst->hasGlobalBrightness)
     {
         // APA102/SK9822 format: 111xxxxx (brightness 5 bits) + BGR
@@ -818,6 +818,5 @@ void PIO_NeoPixel_SPI::dmaIRQHandler()
 {
     unifiedDmaIRQHandler(); // Delegate to unified handler
 }
-
 
 #endif // ARDUINO_ARCH_RP2040

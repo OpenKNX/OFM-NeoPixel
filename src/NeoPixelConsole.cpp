@@ -476,7 +476,7 @@ bool NeoPixel::processInfoCommand()
                                                          pioName, pioDriver->getStateMachine(),
                                                          freq / 1000);
                         }
-                        
+
                         // Show TimingMode
                         TimingMode mode = strip->getTimingMode();
                         const char* modeName = getTimingModeName(mode);
@@ -515,10 +515,10 @@ bool NeoPixel::processInfoCommand()
 #elif defined(ARDUINO_ARCH_ESP32)
                 // ESP32: Show RMT info
                 auto driver = strip->getDriver();
-                if (driver)
+                if (driver && driver->getDriverType() == DriverImplementation::RMT_SERIAL)
                 {
-                    auto rmtDriver = dynamic_cast<RMT_NeoPixel_Serial*>(driver);
-                    if (rmtDriver && rmtDriver->getRmtChannel())
+                    auto rmtDriver = static_cast<RMT_NeoPixel_Serial*>(driver);
+                    if (rmtDriver->getRmtChannel())
                     {
                         openknx.logger.log("      Hardware: RMT Channel");
                     }
@@ -830,6 +830,31 @@ bool NeoPixel::processSpeedCommand(const std::string& args)
         return true;
     }
 
+    // Show current FPS if no argument
+    if (args.empty())
+    {
+        if (_updateInterval > 0)
+        {
+            openknx.logger.logWithValues("Current speed: %d ms (%d FPS target)",
+                                         _updateInterval, 1000 / _updateInterval);
+        }
+        else
+        {
+            float actualFps = getActualFps();
+            if (actualFps > 0.0f)
+            {
+                openknx.logger.logWithValues("Current speed: FTL mode (%.1f FPS measured)",
+                                             actualFps);
+            }
+            else
+            {
+                openknx.logger.log("Current speed: FTL mode (measuring...)");
+            }
+        }
+        openknx.logger.log("Available modes: slow, normal, fast, max, ludicrous, ftl");
+        return true;
+    }
+
     std::string mode = args;
     // Convert to lowercase
     for (auto& c : mode)
@@ -860,6 +885,7 @@ bool NeoPixel::processSpeedCommand(const std::string& args)
     {
         setUpdateSpeed(UpdateSpeed::FTL);
         openknx.logger.log("FTL - Faster Than Light! Maximum overdrive engaged!");
+        openknx.logger.log("Measuring actual FPS... (wait 1 second for measurement)");
     }
     else
     {
@@ -868,8 +894,16 @@ bool NeoPixel::processSpeedCommand(const std::string& args)
         return true;
     }
 
-    openknx.logger.logWithValues("Update speed set to %s (%d ms, %d FPS)",
-                                 args.c_str(), _updateInterval, 1000 / _updateInterval);
+    if (_updateInterval > 0)
+    {
+        openknx.logger.logWithValues("Update speed set to %s (%d ms, %d FPS)",
+                                     args.c_str(), _updateInterval, 1000 / _updateInterval);
+    }
+    else
+    {
+        openknx.logger.logWithValues("Update speed set to %s (%d ms, unlimited FPS)",
+                                     args.c_str(), _updateInterval);
+    }
 
     return true;
 }
@@ -1418,7 +1452,7 @@ bool NeoPixel::processPhysListCommand()
 
                 const char* driver = strip->getDriverName();
                 const char* status = strip->isInitialized() ? "READY" : "ERROR";
-                
+
                 // Get timing mode name
                 const char* timingName = "N/A";
 #ifdef ARDUINO_ARCH_RP2040
@@ -2697,8 +2731,8 @@ bool NeoPixel::processGarageCommand(const std::string& args)
         return true;
     }
 
-    // Cast to GarageDoorEffect
-    GarageDoorEffect* garageEffect = dynamic_cast<GarageDoorEffect*>(effect);
+    // Check if it's GarageDoorEffect (no RTTI, check by name)
+    GarageDoorEffect* garageEffect = (strcmp(effect->getName(), "GarageDoor") == 0) ? static_cast<GarageDoorEffect*>(effect) : nullptr;
     if (!garageEffect)
     {
         openknx.logger.logWithValues("ERROR: Segment [%d] does not have GarageDoor effect!", segId);
@@ -3095,7 +3129,7 @@ const char* NeoPixel::getTimingModeName(TimingMode mode)
     switch (mode)
     {
         case TimingMode::AUTO: return "AUTO";
-        case TimingMode::LEGACY_125MHZ: return "LEGACY_125MHZ";
+        case TimingMode::AUTO_LEGACY: return "AUTO_LEGACY";
         case TimingMode::SLOW_20PCT: return "SLOW_20PCT";
         case TimingMode::SLOW_15PCT: return "SLOW_15PCT";
         case TimingMode::SLOW_10PCT: return "SLOW_10PCT";
@@ -3122,7 +3156,7 @@ TimingMode NeoPixel::parseTimingMode(const char* str)
         c = tolower(c);
 
     if (mode == "auto") return TimingMode::AUTO;
-    if (mode == "legacy" || mode == "legacy_125mhz") return TimingMode::LEGACY_125MHZ;
+    if (mode == "legacy" || mode == "auto_legacy") return TimingMode::AUTO_LEGACY;
     if (mode == "slow20" || mode == "slow_20pct") return TimingMode::SLOW_20PCT;
     if (mode == "slow15" || mode == "slow_15pct") return TimingMode::SLOW_15PCT;
     if (mode == "slow10" || mode == "slow_10pct") return TimingMode::SLOW_10PCT;
@@ -3155,7 +3189,7 @@ bool NeoPixel::processPhysTimingsCommand()
     openknx.logger.log("ID │ Mode Name       │ Target Bitrate │ Description");
     openknx.logger.log("───┼─────────────────┼────────────────┼───────────────────────────");
     openknx.logger.log(" 0 │ AUTO            │ 800 kHz        │ Auto-detect (default)");
-    openknx.logger.log(" 1 │ LEGACY_125MHZ   │ ~960 kHz*      │ Onboard LED workaround");
+    openknx.logger.log(" 1 │ AUTO_LEGACY     │ 960 kHz*       │ WS2812C/D onboard LEDs");
     openknx.logger.log(" 2 │ SLOW_20PCT      │ 640 kHz        │ -20% for signal issues");
     openknx.logger.log(" 3 │ SLOW_15PCT      │ 680 kHz        │ -15%");
     openknx.logger.log(" 4 │ SLOW_10PCT      │ 720 kHz        │ -10%");
@@ -3174,7 +3208,7 @@ bool NeoPixel::processPhysTimingsCommand()
     openknx.logger.color(0);
     openknx.logger.log("  neo phys timing 0              → Show current timing for strip 0");
     openknx.logger.log("  neo phys timing 0 auto         → Set to AUTO mode");
-    openknx.logger.log("  neo phys timing 0 legacy       → Set to LEGACY_125MHZ");
+    openknx.logger.log("  neo phys timing 0 legacy       → Set to AUTO_LEGACY");
     openknx.logger.log("  neo phys timing 0 fast25       → Set to FAST_25PCT (1 MHz)");
     openknx.logger.log("  neo phys timing 0 info         → Detailed timing information");
 
@@ -3291,18 +3325,16 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
         openknx.logger.logWithValues("  PIO Instance:    %s", pioName);
         openknx.logger.logWithValues("  State Machine:   SM%d", pioDriver->getStateMachine());
 
-        uint32_t freq = pioDriver->getFrequency();
-        openknx.logger.logWithValues("  Target Freq:     %d kHz", freq / 1000);
+        uint32_t target_freq = pioDriver->getFrequency();
+        float actual_bitrate = pioDriver->getActualBitrate();
+        float actual_clkdiv = pioDriver->getActualClkdiv();
 
-        // Calculate actual clkdiv (would need getter)
-        float theoretical_clkdiv = sys_clk / (freq * 10.0f);
-        openknx.logger.logWithValues("  Calc. ClkDiv:    %.3f", theoretical_clkdiv);
-
-        float actual_bitrate = (sys_clk / theoretical_clkdiv) / 10.0f;
+        openknx.logger.logWithValues("  Target Freq:     %.0f kHz", actual_bitrate / 1000.0f);
+        openknx.logger.logWithValues("  Calc. ClkDiv:    %.3f", actual_clkdiv);
         openknx.logger.logWithValues("  Actual Bitrate:  %.0f kHz", actual_bitrate / 1000.0f);
 
-        // Timing tolerance
-        float deviation = ((actual_bitrate - freq) / freq) * 100.0f;
+        // Timing tolerance (compare actual to protocol target)
+        float deviation = ((actual_bitrate - target_freq) / target_freq) * 100.0f;
         openknx.logger.logWithValues("  Deviation:       %.1f%%", deviation);
 
         if (fabs(deviation) < 1.0f)

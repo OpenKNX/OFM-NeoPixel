@@ -30,8 +30,8 @@
 #include "PhysicalStrip.h"
 #include "PowerManager.h"
 #include "Segment.h"
-#include "VirtualStrip.h"
 #include "TimingMode.h"
+#include "VirtualStrip.h"
 
 #include <stdint.h>
 #include <string>
@@ -196,7 +196,7 @@ class NeoPixelManager
     // ====================================================================
     // Power Management (NEW!)
     // ====================================================================
-    
+
     /**
      * @brief Get power manager
      * @return Pointer to PowerManager

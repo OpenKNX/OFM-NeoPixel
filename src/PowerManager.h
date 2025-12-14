@@ -8,7 +8,7 @@
  * Example:
  *   PowerManager pm(5000);  // 5A (5000mA) limit
  *   pm.setLedCurrent(60, 40, 40, 0);  // WS2812B: 60mA R, 40mA G, 40mA B per LED
- *   
+ *
  *   // In update loop:
  *   float scale = pm.calculateBrightnessScale(strips, numStrips);
  *   // Apply scale to all brightness values
@@ -24,10 +24,10 @@
  */
 struct LedCurrentProfile
 {
-    uint16_t redMA;    // Red channel max current (mA) at full brightness
-    uint16_t greenMA;  // Green channel max current (mA)
-    uint16_t blueMA;   // Blue channel max current (mA)
-    uint16_t whiteMA;  // White channel max current (mA, 0 for RGB-only)
+    uint16_t redMA;   // Red channel max current (mA) at full brightness
+    uint16_t greenMA; // Green channel max current (mA)
+    uint16_t blueMA;  // Blue channel max current (mA)
+    uint16_t whiteMA; // White channel max current (mA, 0 for RGB-only)
 
     // Default: WS2812B typical values
     LedCurrentProfile()
@@ -60,7 +60,7 @@ namespace LedProfiles
 
     // Conservative estimate (max current)
     static const LedCurrentProfile CONSERVATIVE(20, 20, 20, 20);
-}
+} // namespace LedProfiles
 
 /**
  * Power Manager - Current Limiting for LED Strips
@@ -147,13 +147,13 @@ class PowerManager
         // For APA102/SK9822: Hardware brightness is a 5-bit global multiplier (0-31)
         // Convert 0-255 -> 0-31 scale, then apply as additional multiplier
         // Current = (RGB_Value / 255) × (HW_Brightness / 255) × MaxCurrent
-        
+
         // Optimize: Combine both divisions into one
         // Instead of (r/255) * (hwb/255), we do r*hwb / (255*255)
         uint32_t hwScale = hardwareBrightness; // 0-255
-        
+
         uint32_t current = 0;
-        current += (r * _profile.redMA * hwScale) / 65025;   // 65025 = 255*255
+        current += (r * _profile.redMA * hwScale) / 65025; // 65025 = 255*255
         current += (g * _profile.greenMA * hwScale) / 65025;
         current += (b * _profile.blueMA * hwScale) / 65025;
         current += (w * _profile.whiteMA * hwScale) / 65025;
@@ -272,7 +272,7 @@ class PowerManager
      * @param hardwareBrightness Hardware brightness (NOT used)
      * @param voltage Supply voltage (default 5V)
      * @return Power in Watts (based on LAST calculated current before limiting)
-     * 
+     *
      * NOTE: This returns the power based on the REQUESTED brightness (before limiting),
      *       not the actual scaled brightness. This shows what the LEDs WANT to draw,
      *       not what they actually draw after current limiting.
@@ -289,7 +289,7 @@ class PowerManager
      * @brief Get ACTUAL power consumption after current limiting
      * @param voltage Supply voltage (default 5V)
      * @return Power in Watts (based on ACTUAL current after limiting)
-     * 
+     *
      * This returns what the LEDs are ACTUALLY drawing after current limiting
      * has been applied. This is always <= calculatePowerWatts().
      */
@@ -320,7 +320,7 @@ class PowerManager
      * @brief Manually set cached current values (for global limiting)
      * @param requestedCurrent Requested current before limiting (mA)
      * @param actualCurrent Actual current after limiting (mA)
-     * 
+     *
      * Used by NeoPixelManager when doing global current limiting across
      * multiple VirtualStrips. Allows updating statistics after manual scaling.
      */
@@ -331,9 +331,9 @@ class PowerManager
     }
 
   private:
-    uint32_t _maxCurrentMA;    // Maximum allowed current (mA)
-    bool _enabled;             // Enable/disable power management
-    LedCurrentProfile _profile; // Current profile for LEDs
+    uint32_t _maxCurrentMA;                  // Maximum allowed current (mA)
+    bool _enabled;                           // Enable/disable power management
+    LedCurrentProfile _profile;              // Current profile for LEDs
     mutable uint32_t _lastCalculatedCurrent; // Cached current from last calculation (BEFORE limiting)
     mutable uint32_t _lastActualCurrent;     // Cached current AFTER limiting was applied
 };

@@ -34,7 +34,7 @@
 // =============================================================================
 
     #define ws2812_wrap_target 0 // Wrap target instruction index
-    #define ws2812_wrap 3 // Wrap instruction index
+    #define ws2812_wrap 3        // Wrap instruction index
 
 static const uint16_t ws2812b_program_instructions[] = {
     0x6221, //  0: out    x, 1            side 1 [2]  ; Pull bit, HIGH, wait 2
@@ -159,15 +159,15 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
 
     memset(_inst, 0, sizeof(pio_neopixel_serial_inst_t));
 
-    _inst->pin = pin;           // Set GPIO pin for data line
-    _inst->ledCount = ledCount; // Set number of LEDs
-    _inst->protocol = protocol; // Set LED protocol
-    _inst->useDMA = useDMA;     // Set DMA usage
+    _inst->pin = pin;               // Set GPIO pin for data line
+    _inst->ledCount = ledCount;     // Set number of LEDs
+    _inst->protocol = protocol;     // Set LED protocol
+    _inst->useDMA = useDMA;         // Set DMA usage
     _inst->timingMode = timingMode; // Set timing mode for clock divider calculation
-    _inst->dmaChannel = -1;     // No DMA channel yet
-    _inst->dmaIrqNum = -1;      // Will be claimed dynamically if DMA is used
-    _inst->initialized = false; // Set initialization state
-    _inst->busy = false;        // Set busy state
+    _inst->dmaChannel = -1;         // No DMA channel yet
+    _inst->dmaIrqNum = -1;          // Will be claimed dynamically if DMA is used
+    _inst->initialized = false;     // Set initialization state
+    _inst->busy = false;            // Set busy state
 
     // Determine bytes per LED and color order
     _inst->bytesPerLed = ProtocolHelper::getBytesPerLed(protocol);
@@ -322,23 +322,26 @@ bool PIO_NeoPixel_Serial::initPIO()
     //
     // NOTE: RP2040 runs at 125 MHz, RP2350 at 150 MHz by default
     // The timing modes are overclock-safe: they work at any system clock speed
-    // 
-    // LEGACY_125MHZ: Workaround for onboard NeoPixels designed for 125MHz systems
-    // Some onboard LEDs only work with clkdiv=15.625 (the 125MHz calculation)
-    // This results in faster bit rate on RP2350/overclocked systems but LED tolerates it
+    //
+    // AUTO_LEGACY: Optimized for WS2812C/D onboard LEDs
+    // Targets 960 kHz bitrate which works better for newer LED chips that prefer
+    // slightly faster timing than standard 800 kHz. Automatically calculates the
+    // correct clkdiv for any CPU frequency to maintain consistent 960 kHz output.
     float actual_sys_clk = (float)clock_get_hz(clk_sys);
     float clkdiv;
     float actual_bitrate;
     float bitrate_multiplier = 1.0f;
     const char* mode_name = "AUTO";
-    
-    switch (_inst->timingMode) {
-        case TimingMode::LEGACY_125MHZ:
-            clkdiv = 15.625f;
+
+    switch (_inst->timingMode)
+    {
+        case TimingMode::AUTO_LEGACY:
+            // Target 960 kHz for WS2812C/D (adapts to any CPU frequency)
+            clkdiv = actual_sys_clk / (960000.0f * 10.0f);
             actual_bitrate = (actual_sys_clk / clkdiv) / 10.0f;
-            mode_name = "LEGACY_125MHZ";
+            mode_name = "AUTO_LEGACY";
             break;
-        
+
         case TimingMode::SLOW_20PCT:
             bitrate_multiplier = 0.80f;
             mode_name = "SLOW_20PCT";
@@ -355,7 +358,7 @@ bool PIO_NeoPixel_Serial::initPIO()
             bitrate_multiplier = 0.95f;
             mode_name = "SLOW_5PCT";
             break;
-        
+
         case TimingMode::FAST_5PCT:
             bitrate_multiplier = 1.05f;
             mode_name = "FAST_5PCT";
@@ -376,20 +379,25 @@ bool PIO_NeoPixel_Serial::initPIO()
             bitrate_multiplier = 1.25f;
             mode_name = "FAST_25PCT";
             break;
-        
+
         case TimingMode::AUTO:
         default:
             bitrate_multiplier = 1.0f;
             mode_name = "AUTO";
             break;
     }
-    
-    // Calculate clkdiv for all modes except LEGACY
-    if (_inst->timingMode != TimingMode::LEGACY_125MHZ) {
+
+    // Calculate clkdiv for all modes except AUTO_LEGACY (which has custom calculation)
+    if (_inst->timingMode != TimingMode::AUTO_LEGACY)
+    {
         float target_bitrate = (float)_inst->frequency * bitrate_multiplier;
         clkdiv = actual_sys_clk / (target_bitrate * 10.0f);
         actual_bitrate = target_bitrate;
     }
+
+    // Store actual values for debugging/info display
+    _inst->actual_bitrate = actual_bitrate;
+    _inst->actual_clkdiv = clkdiv;
 
     #ifdef OPENKNX_DEBUG
     openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "GPIO%u: sys_clk=%.0f MHz, clkdiv=%.3f, bitrate=%.0f kHz [%s]",

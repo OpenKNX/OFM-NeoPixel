@@ -1,11 +1,10 @@
 #include "PhysicalStrip.h"
 #include "hal/DriverFactory.h"
+#include <Arduino.h>
 
 #ifdef ARDUINO_ARCH_RP2040
-#include "pio/pio_neopixel_serial.h"
+    #include "pio/pio_neopixel_serial.h"
 #endif
-
-#include <Arduino.h>
 
 /**
  * @brief Constructor with automatic driver selection
@@ -89,8 +88,8 @@ bool PhysicalStrip::createDriver(DriverType driverType)
         _ledCount,
         _protocol,
         driverType,
-        _dataPin, // MOSI = dataPin
-        _clockPin, // SCK = clockPin
+        _dataPin,   // MOSI = dataPin
+        _clockPin,  // SCK = clockPin
         _timingMode // Pass through
     );
 

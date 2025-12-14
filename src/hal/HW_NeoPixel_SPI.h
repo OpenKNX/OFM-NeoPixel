@@ -35,10 +35,10 @@
 
 struct hw_neopixel_spi_inst
 {
-    SPIClass* spi; // SPI Instance (SPI, SPI1)
-    uint mosiPin;  // MOSI Pin
-    uint sckPin;   // Clock Pin
-    int csPin;     // Chip Select Pin (-1 if not used)
+    SPIClass* spi;    // SPI Instance (SPI, SPI1)
+    uint32_t mosiPin; // MOSI Pin
+    uint32_t sckPin;  // Clock Pin
+    int csPin;        // Chip Select Pin (-1 if not used)
 
     uint16_t ledCount;        // Number of LEDs
     uint8_t bytesPerLed;      // Bytes per LED
@@ -56,7 +56,6 @@ struct hw_neopixel_spi_inst
 };
 typedef struct hw_neopixel_spi_inst hw_neopixel_spi_inst_t;
 
-
 //
 // Hardware SPI NeoPixel Driver Uses Arduino SPI API for maximum compatibility
 //
@@ -70,8 +69,8 @@ class HW_NeoPixel_SPI : public IHardwareDriver
     );
 
     HW_NeoPixel_SPI(
-        uint mosiPin,                  // MOSI/Data Pin
-        uint sckPin,                   // Clock Pin
+        uint32_t mosiPin,              // MOSI/Data Pin
+        uint32_t sckPin,               // Clock Pin
         uint16_t ledCount,             // Number of LEDs
         LedProtocol protocol,          // LED Protocol: APA102, WS2801, etc.
         uint32_t frequency = 10000000, // Default 10MHz
@@ -93,6 +92,7 @@ class HW_NeoPixel_SPI : public IHardwareDriver
     uint8_t* getBuffer() override { return _inst ? _inst->buffer : nullptr; }
     size_t getBufferSize() const override { return _inst ? _inst->bufferSize : 0; }
     bool isInitialized() const override { return _inst ? _inst->initialized : false; }
+    DriverImplementation getDriverType() const override { return DriverImplementation::HARDWARE_SPI; }
 
     /**
      * @brief Set SPI frequency in Hz (only before init())

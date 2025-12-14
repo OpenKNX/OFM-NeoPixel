@@ -34,7 +34,7 @@ struct rmt_neopixel_serial_inst
     rmt_channel_handle_t channel; // RMT channel
     rmt_encoder_handle_t encoder; // Encoder for LED data
 
-    uint pin;              // GPIO pin
+    uint32_t pin;          // GPIO pin
     uint16_t ledCount;     // Number of LEDs
     uint8_t bytesPerLed;   // 3 for RGB, 4 for RGBW
     LedProtocol protocol;  // LED protocol
@@ -60,7 +60,7 @@ class RMT_NeoPixel_Serial : public IHardwareDriver
      * @param ledCount Number of LEDs
      * @param protocol LED protocol (WS2812, SK6812, etc.)
      */
-    RMT_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtocol protocol);
+    RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedProtocol protocol);
 
     /**
      * Destructor
@@ -87,16 +87,17 @@ class RMT_NeoPixel_Serial : public IHardwareDriver
     inline rmt_encoder_handle_t getRmtEncoder() const { return _inst ? _inst->encoder : nullptr; }
 
     // Static Resource Detection Methods (ESP32-S3)
-    static uint getAvailableRmtChannels(); // Count available RMT channels
-    static uint getTotalRmtChannels();     // Total RMT channels (4 for ESP32-S3)
+    static uint32_t getAvailableRmtChannels(); // Count available RMT channels
+    static uint32_t getTotalRmtChannels();     // Total RMT channels (4 for ESP32-S3)
 
   private:
     rmt_neopixel_serial_inst_t* _inst;
 
     void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
 
+  public:
     /**
-     * Static mapping for callbacks
+     * Static mapping for callbacks (public for resource detection)
      */
     static RMT_NeoPixel_Serial* _instances[8]; // Max 8 RMT channels
     static void registerInstance(int channel, RMT_NeoPixel_Serial* instance);

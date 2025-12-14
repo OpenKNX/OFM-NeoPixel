@@ -13,7 +13,7 @@ NeoPixelManager::NeoPixelManager()
       _lastUpdateTime(0),
       _updateCount(0),
       _errorCount(0),
-      _powerManager(5000)  // Default 5A (5000mA)
+      _powerManager(5000) // Default 5A (5000mA)
 {
     // Pre-allocate vectors based on configured limits to avoid reallocation overhead
     _strips.reserve(NEOPIXEL_MAX_PHYSICAL_STRIPS);
@@ -601,8 +601,8 @@ void NeoPixelManager::update(uint32_t deltaTime)
 
             // Update PowerManager statistics for correct reporting
             _powerManager.setCachedCurrentValues(
-                totalRequestedCurrent,           // What was requested
-                _powerManager.getMaxCurrent()    // What is actually flowing (capped at limit)
+                totalRequestedCurrent,        // What was requested
+                _powerManager.getMaxCurrent() // What is actually flowing (capped at limit)
             );
         }
         else

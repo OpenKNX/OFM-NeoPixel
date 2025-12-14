@@ -93,7 +93,7 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint16_t ledCount, LedProtocol protocol, uint32
  * @param frequency SPI Frequency (Hz)
  * @param csPin Chip Select Pin (optional, -1 if not used)
  */
-HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint mosiPin, uint sckPin, uint16_t ledCount, LedProtocol protocol, uint32_t frequency, int csPin) : _inst(nullptr)
+HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, uint32_t frequency, int csPin) : _inst(nullptr)
 {
     _inst = new hw_neopixel_spi_inst();
     _inst->mosiPin = mosiPin;        // Set the SPI MOSI Pin
@@ -287,10 +287,10 @@ bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, 
  * @param g Second color byte (already in hardware order)
  * @param b Third color byte (already in hardware order)
  * @param brightness Brightness value (0-255, converted to 5-bit for APA102)
- * 
+ *
  * IMPORTANT: PhysicalStrip has already converted RGB to hardware ColorOrder!
  * For APA102 with BGR: r=B, g=G, b=R (not RGB!)
- * 
+ *
  * This function writes hardware-ordered bytes directly to protocol-specific buffer:
  * - APA102/SK9822: [Brightness byte][byte0][byte1][byte2]
  * - WS2801: [byte0][byte1][byte2]

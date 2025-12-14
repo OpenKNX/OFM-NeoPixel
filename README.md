@@ -74,8 +74,8 @@ This design enables complex LED configurations with minimal CPU overhead through
 
 ### Timing Modes (NEW)
 
-- **11 Timing Modes**: AUTO, LEGACY_125MHZ, SLOW_5-20%, FAST_5-25%
-- **RP2350/RP2040 Compatible**: Legacy mode for onboard LEDs on XIAO RP2350/RP2040
+- **11 Timing Modes**: AUTO, AUTO_LEGACY, SLOW_5-20%, FAST_5-25%
+- **RP2350/RP2040 Compatible**: AUTO_LEGACY mode for WS2812C/D onboard LEDs (adapts to any CPU frequency)
 - **Runtime Adjustable**: Change timing without restart via console or API
 - **Overclock Safe**: Automatic CPU frequency detection (125-300+ MHz)
 - **Console Commands**: Inspect and modify timing with `neo phys timing`
@@ -700,8 +700,8 @@ PIO Clock Divider = CPU Frequency / (Target Frequency × 10 cycles/bit)
 
 Some scenarios require non-standard timing:
 
-1. **RP2350/Rp2040 Onboard LEDs** (XIAO RP2350/RP2040): Require legacy 125MHz-based timing even at 150MHz
-2. **Overclocked Systems**: Automatic recalculation at 200/300 MHz
+1. **RP2350/RP2040 Onboard LEDs** (XIAO RP2350/RP2040): Newer WS2812C/D chips prefer 960 kHz (AUTO_LEGACY)
+2. **Overclocked Systems**: AUTO_LEGACY automatically adapts from 125 MHz to 300+ MHz
 3. **Timing-Sensitive Chips**: Some clones need slower/faster bitrates
 4. **Cable Length**: Long wires may need slower speeds for reliability
 
@@ -710,7 +710,7 @@ Some scenarios require non-standard timing:
 | Mode | Bitrate | Multiplier | Use Case |
 |------|---------|------------|----------|
 | `AUTO` | 800 kHz | 1.0× | **Default** - WS2812B specification |
-| `LEGACY_125MHZ` | 800 kHz* | Fixed | RP2350/RP2040 onboard LEDs (clkdiv=15.625) |
+| `AUTO_LEGACY` | 960 kHz* | Adaptive | **WS2812C/D onboard LEDs** - adapts to CPU freq |
 | `SLOW_20PCT` | 640 kHz | 0.80× | Long cables, timing-sensitive chips |
 | `SLOW_15PCT` | 680 kHz | 0.85× | Moderate slowdown |
 | `SLOW_10PCT` | 720 kHz | 0.90× | Minor adjustment |
@@ -721,19 +721,23 @@ Some scenarios require non-standard timing:
 | `FAST_20PCT` | 960 kHz | 1.20× | Maximum speed |
 | `FAST_25PCT` | 1000 kHz | 1.25× | Extreme (may cause glitches) |
 
-\* LEGACY_125MHZ always uses `clkdiv = 15.625` regardless of CPU frequency
+\* AUTO_LEGACY targets 960 kHz at any CPU frequency (125-300 MHz tested)
+  - 125 MHz: clkdiv=13.02 → 960 kHz
+  - 150 MHz: clkdiv=15.63 → 960 kHz
+  - 200 MHz: clkdiv=20.83 → 960 kHz
+  - 300 MHz: clkdiv=31.25 → 960 kHz
 
 #### API Usage
 
 **Creating Strips with Timing Modes:**
 
 ```cpp
-// Auto mode (default)
+// Auto mode (default) - 800 kHz for WS2812B
 auto strip0 = npxmgr->addStrip(22, 64, LedProtocol::WS2812B, ColorOrder::RGB);
 
-// Legacy mode for RP2350 onboard LED
+// AUTO_LEGACY mode for WS2812C/D onboard LED - 960 kHz (adapts to CPU freq)
 auto strip1 = npxmgr->addStrip(12, 1, LedProtocol::WS2812B, ColorOrder::RGB, 
-                               TimingMode::LEGACY_125MHZ);
+                               TimingMode::AUTO_LEGACY);
 
 // Slow mode for long cables
 auto strip2 = npxmgr->addStrip(9, 100, LedProtocol::WS2812B, ColorOrder::RGB, 
@@ -834,8 +838,8 @@ The console accepts flexible input formats:
 |---------|---------------|----------|
 | First LED flickers | Wrong timing, no level shifter | Try `SLOW_10PCT`, add level shifter |
 | Random colors | Timing too fast | Use `SLOW_5PCT` or `SLOW_10PCT` |
-| RP2350 onboard LED not working | Needs legacy timing | Use `LEGACY_125MHZ` |
-| Works on RP2040, fails on RP2350 | Different default clkdiv | Try `SLOW_5PCT` or `LEGACY_125MHZ` |
+| RP2350 onboard LED not working | WS2812C needs faster timing | Use `AUTO_LEGACY` (960 kHz) |
+| Works on RP2040, fails on RP2350 | Different LED chip generation | Try `AUTO_LEGACY` or `FAST_15PCT` |
 | All LEDs off | Timing too slow | Try `FAST_5PCT` or check wiring |
 
 ---
@@ -908,7 +912,7 @@ neo phys timing <index> <mode>
     # Recreates driver with new timing (waits for DMA completion)
     # Examples:
     neo phys timing 0 auto         # Default 800 kHz
-    neo phys timing 1 legacy       # Legacy 125MHz timing
+    neo phys timing 1 legacy       # AUTO_LEGACY mode (960 kHz)
     neo phys timing 0 slow10       # 10% slower (720 kHz)
     neo phys timing 2 fast_25pct   # 25% faster (1000 kHz)
 
@@ -1225,7 +1229,7 @@ public:
 ```cpp
 enum class TimingMode : uint8_t {
     AUTO = 0,           // 800 kHz (default, auto-calculated from CPU freq)
-    LEGACY_125MHZ = 1,  // Fixed clkdiv=15.625 (for RP2350 onboard LEDs)
+    AUTO_LEGACY = 1,    // 960 kHz - Optimized for WS2812C/D onboard LEDs (adapts to CPU freq)
     SLOW_20PCT = 2,     // 640 kHz (0.80× multiplier)
     SLOW_15PCT = 3,     // 680 kHz (0.85× multiplier)
     SLOW_10PCT = 4,     // 720 kHz (0.90× multiplier)

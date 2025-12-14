@@ -4,7 +4,7 @@
  *
  * Hardware-accelerated driver for WS2812/SK6812 and other 1-wire LED protocols.
  * Uses RP2040/RP2350's PIO (Programmable I/O) subsystem for precise timing.
- * 
+ *
  * Key Features:
  * - Zero-CPU timing via PIO state machines
  * - DMA-based transfers for maximum efficiency
@@ -12,7 +12,7 @@
  * - Automatic resource management (PIO/SM/DMA)
  * - Multiple LED strips on any GPIO pins
  * - Support for WS2812 (800kHz), WS2811 (400kHz), etc.
- * 
+ *
  * Technical Details:
  * - Uses PIO state machines for timing-critical protocols
  * - DMA for zero-copy memory transfers
@@ -55,6 +55,8 @@ struct pio_neopixel_serial_inst
     ColorOrder colorOrder; // Color byte order
     uint32_t frequency;    // Update frequency (Hz)
     TimingMode timingMode; // Timing mode for PIO clock divider calculation
+    float actual_bitrate;  // Actual bitrate used (may differ for AUTO_LEGACY)
+    float actual_clkdiv;   // Actual clock divider used
 
     uint8_t* buffer;   // LED data buffer (RGB/RGBW bytes)
     size_t bufferSize; // Buffer size in bytes
@@ -70,13 +72,11 @@ struct pio_neopixel_serial_inst
 };
 typedef struct pio_neopixel_serial_inst pio_neopixel_serial_inst_t;
 
-
 // PIO NeoPixel Serial Driver Class - Implements IHardwareDriver interface using RP2040/RP2350 PIO
 //
 class PIO_NeoPixel_Serial : public IHardwareDriver
 {
   public:
-    
     PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtocol protocol, bool useDMA = true, TimingMode timingMode = TimingMode::AUTO);
     virtual ~PIO_NeoPixel_Serial();
 
@@ -126,10 +126,22 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
     inline uint getProgramOffset() const { return _inst ? _inst->offset : 0; }
 
     /**
-     * @brief Get LED protocol frequency in Hz
+     * @brief Get LED protocol frequency in Hz (target frequency)
      * @return Frequency (e.g. 800000 for WS2812B) or 0 if not initialized
      */
     inline uint32_t getFrequency() const { return _inst ? _inst->frequency : 0; }
+
+    /**
+     * @brief Get actual bitrate used by PIO (may differ from target for AUTO_LEGACY)
+     * @return Actual bitrate in Hz or 0 if not initialized
+     */
+    inline float getActualBitrate() const { return _inst ? _inst->actual_bitrate : 0.0f; }
+
+    /**
+     * @brief Get actual clock divider used by PIO
+     * @return Actual clkdiv or 0 if not initialized
+     */
+    inline float getActualClkdiv() const { return _inst ? _inst->actual_clkdiv : 0.0f; }
 
     /**
      * @brief Get LED color byte order (RGB/GRB/etc)

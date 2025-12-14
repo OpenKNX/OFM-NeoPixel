@@ -20,7 +20,10 @@ NeoPixel::NeoPixel()
       _initialized(false),
       _lastUpdateTime(0),
       _updateInterval(static_cast<uint32_t>(UpdateSpeed::NORMAL)), // Default: 20 FPS
-      _autoUpdate(false)
+      _autoUpdate(false),
+      _fpsCounter(0),
+      _fpsLastMeasure(0),
+      _measuredFps(0.0f)
 {
     // Initialize performance tracking (always available)
     g_perfTracker.reset();
@@ -137,6 +140,15 @@ void NeoPixel::loop(bool configured)
 
             // Record timing for performance tracking
             g_perfTracker.recordUpdate(updateTime);
+
+            // FPS measurement (update every 1000ms)
+            _fpsCounter++;
+            if (now - _fpsLastMeasure >= 1000)
+            {
+                _measuredFps = _fpsCounter * 1000.0f / (now - _fpsLastMeasure);
+                _fpsCounter = 0;
+                _fpsLastMeasure = now;
+            }
         }
     }
 }
@@ -298,7 +310,14 @@ void NeoPixel::clearAll()
 void NeoPixel::setUpdateSpeed(UpdateSpeed speed)
 {
     _updateInterval = static_cast<uint32_t>(speed);
-    logInfoP("Update speed set to %d ms (%d FPS)", _updateInterval, 1000 / _updateInterval);
+    if (_updateInterval > 0)
+    {
+        logInfoP("Update speed set to %d ms (%d FPS)", _updateInterval, 1000 / _updateInterval);
+    }
+    else
+    {
+        logInfoP("Update speed set to %d ms (FTL mode - measuring actual FPS...)", _updateInterval);
+    }
 }
 
 /**
@@ -311,10 +330,29 @@ void NeoPixel::setAutoUpdate(bool enabled)
     if (enabled)
     {
         _lastUpdateTime = millis();
-        logInfoP("Auto-update enabled @ %d FPS", 1000 / _updateInterval);
+        _fpsCounter = 0;
+        _fpsLastMeasure = millis();
+        _measuredFps = 0.0f;
+        if (_updateInterval > 0)
+        {
+            logInfoP("Auto-update enabled @ %d FPS", 1000 / _updateInterval);
+        }
+        else
+        {
+            logInfoP("Auto-update enabled @ FTL mode (unlimited)");
+        }
     }
     else
     {
         logInfoP("Auto-update disabled");
     }
+}
+
+/**
+ * @brief Get actual measured FPS
+ * @return Measured FPS (0.0 if not yet measured)
+ */
+float NeoPixel::getActualFps() const
+{
+    return _measuredFps;
 }

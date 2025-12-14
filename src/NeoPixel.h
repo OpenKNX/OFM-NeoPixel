@@ -90,6 +90,7 @@ class NeoPixel : public OpenKNX::Module
     void setAutoUpdate(bool enabled);
     inline bool getAutoUpdate() const { return _autoUpdate; }
     inline uint32_t getUpdateInterval() const { return _updateInterval; }
+    float getActualFps() const;
 
   private:
     NeoPixelManager* _manager; // NeoPixel Manager instance
@@ -97,6 +98,9 @@ class NeoPixel : public OpenKNX::Module
     uint32_t _lastUpdateTime;  // Last update timestamp
     uint32_t _updateInterval;  // Update interval in ms (for auto-update mode)
     bool _autoUpdate;          // Auto-update mode enabled
+    uint32_t _fpsCounter;      // Frame counter for FPS measurement
+    uint32_t _fpsLastMeasure;  // Last FPS measurement timestamp
+    float _measuredFps;        // Measured FPS (updated every second)
 
     // =============================================================================
     // Console command handlers - Core (always available)

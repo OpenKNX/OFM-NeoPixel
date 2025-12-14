@@ -88,8 +88,8 @@ class VirtualStrip
     // ====================================================================
     // Power Management
     // ====================================================================
-    void setPowerManager(PowerManager* pm) { _powerManager = pm; } // Set power manager for current limiting
-    PowerManager* getPowerManager() const { return _powerManager; } // Get power manager
+    void setPowerManager(PowerManager* pm) { _powerManager = pm; }        // Set power manager for current limiting
+    PowerManager* getPowerManager() const { return _powerManager; }       // Get power manager
     uint8_t getHardwareBrightness() const { return _hardwareBrightness; } // Get hardware brightness for power calculation
 
     // ====================================================================

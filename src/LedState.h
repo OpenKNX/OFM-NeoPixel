@@ -4,7 +4,7 @@
  *
  * Defines the states of LED segments for
  * state management and debug tracking.
- * 
+ *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 
