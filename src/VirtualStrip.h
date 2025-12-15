@@ -103,6 +103,16 @@ class VirtualStrip
     uint16_t getTotalPhysicalLeds() const;
     size_t getMemoryUsage() const { return _bufferSize; } // Memory usage in bytes
 
+    // ====================================================================
+    // Color Correction (applied during render, NOT in-place!)
+    // ====================================================================
+    void setColorCorrection(bool gammaEnabled, float gammaValue,
+                            bool whiteBalanceEnabled, uint8_t wbR, uint8_t wbG, uint8_t wbB,
+                            uint8_t swapMode);
+    inline bool getGammaCorrectionEnabled() const { return _gammaCorrectionEnabled; }
+    inline bool getWhiteBalanceEnabled() const { return _whiteBalanceEnabled; }
+    inline uint8_t getSwapMode() const { return _swapMode; }
+
   private:
     std::vector<VirtualToPhysicalMapping> _physicalStrips; // Attached physical strips
     uint16_t _totalLeds;                                   // Virtual LED count
@@ -113,6 +123,16 @@ class VirtualStrip
     PowerManager* _powerManager;                           // Optional power manager for current limiting
     uint8_t _hardwareBrightness;                           // Hardware brightness for APA102/SK9822 (0-255, default 255)
 
+    // Color correction parameters (applied during syncToPhysical, NOT in-place!)
+    bool _gammaCorrectionEnabled = false;
+    uint8_t _gammaLUT[256];                           // Gamma lookup table (owned by VirtualStrip)
+    bool _whiteBalanceEnabled = false;
+    uint8_t _whiteBalanceRed = 255;
+    uint8_t _whiteBalanceGreen = 255;
+    uint8_t _whiteBalanceBlue = 255;
+    uint8_t _swapMode = 0;                            // 0=none, 1=R<->G, 2=R<->B, 3=G<->B, 4=rotate right, 5=rotate left
+
     PhysicalStrip* findPhysicalAtIndex(uint16_t virtualIndex, uint16_t& outPhysicalIndex) const;
     void writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
+    void applyColorCorrection(uint8_t& r, uint8_t& g, uint8_t& b) const; // Apply correction to single pixel
 };

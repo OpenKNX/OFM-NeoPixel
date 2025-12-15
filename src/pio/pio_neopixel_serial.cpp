@@ -563,7 +563,31 @@ bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
 {
     if (!_inst || !_inst->buffer || index >= _inst->ledCount) return false;
 
+    // DEBUG: Log what bytes we received from PhysicalStrip
+    if (index == 0) {
+        Serial.printf("PIO Driver:           setPixel[0] Received bytes=(%d,%d,%d), ColorOrder=%d\n",
+                     r, g, b, (int)_inst->colorOrder);
+    }
+    if (index == 30) {
+        Serial.printf("PIO Driver:           setPixel[30] Received bytes=(%d,%d,%d)\n", r, g, b);
+    }
+
     rgbToBuffer(index, r, g, b, 0);
+    
+    // DEBUG: Log what was written to buffer after rgbToBuffer()
+    if (index == 0) {
+        uint32_t offset = index * _inst->bytesPerLed;
+        Serial.printf("PIO Driver:           setPixel[0] After rgbToBuffer(): buffer[%u,%u,%u] = [%d,%d,%d]\n",
+                     offset, offset+1, offset+2,
+                     _inst->buffer[offset], _inst->buffer[offset+1], _inst->buffer[offset+2]);
+    }
+    if (index == 30) {
+        uint32_t offset = index * _inst->bytesPerLed;
+        Serial.printf("PIO Driver:           setPixel[30] After rgbToBuffer(): buffer[%u,%u,%u] = [%d,%d,%d]\n",
+                     offset, offset+1, offset+2,
+                     _inst->buffer[offset], _inst->buffer[offset+1], _inst->buffer[offset+2]);
+    }
+    
     return true;
 }
 
@@ -585,7 +609,22 @@ bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
     if (!_inst || !_inst->buffer || index >= _inst->ledCount) return false;
     if (_inst->bytesPerLed < 4) return false; // Not RGBW
 
+    // DEBUG: Log RGBW bytes received
+    if (index == 0) {
+        Serial.printf("PIO Driver:           setPixel[0] RGBW Received bytes=(%d,%d,%d,%d), ColorOrder=%d\n",
+                     r, g, b, w, (int)_inst->colorOrder);
+    }
+
     rgbToBuffer(index, r, g, b, w);
+    
+    // DEBUG: Log buffer after rgbToBuffer()
+    if (index == 0) {
+        uint32_t offset = index * _inst->bytesPerLed;
+        Serial.printf("PIO Driver:           setPixel[0] RGBW After rgbToBuffer(): buffer[%u-%u] = [%d,%d,%d,%d]\n",
+                     offset, offset+3,
+                     _inst->buffer[offset], _inst->buffer[offset+1], _inst->buffer[offset+2], _inst->buffer[offset+3]);
+    }
+    
     return true;
 }
 
@@ -605,44 +644,15 @@ void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
 {
     if (!_inst || !_inst->buffer) return;
 
+    // BYTE-ORIENTED DRIVER: store bytes exactly as received
+    // PhysicalStrip already applied hardware ColorOrder; we do no reordering here.
     uint32_t offset = index * _inst->bytesPerLed;
-
-    switch (_inst->colorOrder)
+    _inst->buffer[offset] = r;
+    _inst->buffer[offset + 1] = g;
+    _inst->buffer[offset + 2] = b;
+    if (_inst->bytesPerLed >= 4)
     {
-        case ColorOrder::RGB:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            break;
-
-        case ColorOrder::GRB:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            break;
-
-        case ColorOrder::BGR:
-            _inst->buffer[offset] = b;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = r;
-            break;
-
-        case ColorOrder::RGBW:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = w;
-            break;
-
-        case ColorOrder::GRBW:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = w;
-            break;
-
-        default:
-            break;
+        _inst->buffer[offset + 3] = w;
     }
 }
 
@@ -666,10 +676,12 @@ bool PIO_NeoPixel_Serial::show()
 
     if (_inst->useDMA && _inst->dmaChannel >= 0)
     {
+        Serial.println("PIO Driver:           show() using DMA path");
         sendDataDMA();
     }
     else
     {
+        Serial.println("PIO Driver:           show() using blocking PIO path");
         sendDataPIO();
         _inst->busy = false; // PIO mode is blocking
     }
@@ -784,6 +796,10 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
             dst[i] = ((uint32_t)src[idx] << 24) |     // G → bits 31-24 (sent 1st!)
                      ((uint32_t)src[idx + 1] << 16) | // R → bits 23-16
                      ((uint32_t)src[idx + 2] << 8);   // B → bits 15-8
+            if (i == 0) {
+                Serial.printf("PIO Driver:           packDataToDMABuffer[0] packed word=0x%08X (G=%d,R=%d,B=%d)\n",
+                             dst[i], src[idx], src[idx+1], src[idx+2]);
+            }
         }
     }
     else if (bytesPerLed == 4)
@@ -797,6 +813,10 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
                      ((uint32_t)src[idx + 1] << 16) | // R → bits 23-16
                      ((uint32_t)src[idx + 2] << 8) |  // B → bits 15-8
                      (uint32_t)src[idx + 3];          // W → bits 7-0 (sent last!)
+            if (i == 0) {
+                Serial.printf("PIO Driver:           packDataToDMABuffer[0] RGBW packed word=0x%08X (G=%d,R=%d,B=%d,W=%d)\n",
+                             dst[i], src[idx], src[idx+1], src[idx+2], src[idx+3]);
+            }
         }
     }
 }

@@ -399,9 +399,28 @@ bool VirtualStrip::syncToPhysical(uint8_t hardwareBrightness)
             uint8_t g = _buffer[bufferOffset + 1]; // Green
             uint8_t b = _buffer[bufferOffset + 2]; // Blue
 
+            // DEBUG: Log first pixel from VirtualStrip buffer
+            if (i == 0) {
+                Serial.printf("VirtualStrip[%u]:     Buffer RGB=(%d,%d,%d) -> Calling PhysicalStrip->setPixel(0, %d, %d, %d)\n",
+                             virtualIdx, r, g, b, r, g, b);
+            }
+            // DEBUG: Also log pixel at segment boundary (virtual index 30) for diagnostics
+            if (virtualIdx == 30) {
+                Serial.printf("VirtualStrip[30]:     Buffer RGB=(%d,%d,%d) -> Calling PhysicalStrip->setPixel(%d, %d, %d, %d)\n",
+                             r, g, b, i, r, g, b);
+            }
+
             if (_bytesPerLed >= 4)
             {
                 uint8_t w = _buffer[bufferOffset + 3]; // White or Brightness
+                if (i == 0) {
+                    Serial.printf("VirtualStrip[%u]:     RGBW mode, W=%d -> Calling PhysicalStrip->setPixel(0, %d, %d, %d, %d)\n",
+                                 virtualIdx, w, r, g, b, w);
+                }
+                if (virtualIdx == 30) {
+                    Serial.printf("VirtualStrip[30]:     RGBW mode, W=%d -> Calling PhysicalStrip->setPixel(%d, %d, %d, %d, %d)\n",
+                                 w, i, r, g, b, w);
+                }
                 pstrip->setPixel(i, r, g, b, w);
             }
             else

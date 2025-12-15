@@ -151,6 +151,16 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
     if (!_driver || !isInitialized()) return false;
 
+    // DEBUG: Log input from VirtualStrip
+    if (index == 0) {
+        Serial.printf("PhysicalStrip:        setPixel[0] Input RGB=(%d,%d,%d), ColorOrder=%d, _hasColorOrder=%d\n",
+                     r, g, b, (int)_colorOrder, _hasColorOrder);
+    }
+    if (index == 30) {
+        Serial.printf("PhysicalStrip:        setPixel[30] Input RGB=(%d,%d,%d), ColorOrder=%d\n",
+                     r, g, b, (int)_colorOrder);
+    }
+
     // If PhysicalStrip has ColorOrder, convert RGB to hardware order
     if (_hasColorOrder)
     {
@@ -194,6 +204,16 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
                 break;
         }
 
+        // DEBUG: Log converted bytes being sent to driver
+        if (index == 0) {
+            Serial.printf("PhysicalStrip:        setPixel[0] After ColorOrder conversion: bytes=(%d,%d,%d) -> Calling driver->setPixel()\n",
+                         byte0, byte1, byte2);
+        }
+        if (index == 30) {
+            Serial.printf("PhysicalStrip:        setPixel[30] After conversion: bytes=(%d,%d,%d)\n",
+                         byte0, byte1, byte2);
+        }
+
         // For APA102/SK9822: Use 4-parameter setPixel with hardware brightness
         if (supportsHardwareBrightness())
         {
@@ -204,6 +224,11 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
     }
 
     // No ColorOrder: Pass RGB directly (backward compatibility)
+    if (index == 0) {
+        Serial.printf("PhysicalStrip:        setPixel[0] NO ColorOrder, passing RGB=(%d,%d,%d) directly to driver\n",
+                     r, g, b);
+    }
+    
     if (supportsHardwareBrightness())
     {
         return _driver->setPixel(index, r, g, b, _hardwareBrightness);
@@ -224,6 +249,12 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
     if (!_driver || !isInitialized()) return false;
+
+    // DEBUG: Log input RGBW from VirtualStrip
+    if (index == 0) {
+        Serial.printf("PhysicalStrip:        setPixel[0] RGBW Input RGBW=(%d,%d,%d,%d), ColorOrder=%d\n",
+                     r, g, b, w, (int)_colorOrder);
+    }
 
     // If PhysicalStrip has ColorOrder, convert RGB to hardware order
     if (_hasColorOrder)
