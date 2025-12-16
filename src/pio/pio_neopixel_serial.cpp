@@ -676,12 +676,12 @@ bool PIO_NeoPixel_Serial::show()
 
     if (_inst->useDMA && _inst->dmaChannel >= 0)
     {
-        Serial.println("PIO Driver:           show() using DMA path");
+        //Serial.println("PIO Driver:           show() using DMA path");
         sendDataDMA();
     }
     else
     {
-        Serial.println("PIO Driver:           show() using blocking PIO path");
+        //Serial.println("PIO Driver:           show() using blocking PIO path");
         sendDataPIO();
         _inst->busy = false; // PIO mode is blocking
     }
@@ -796,10 +796,10 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
             dst[i] = ((uint32_t)src[idx] << 24) |     // G → bits 31-24 (sent 1st!)
                      ((uint32_t)src[idx + 1] << 16) | // R → bits 23-16
                      ((uint32_t)src[idx + 2] << 8);   // B → bits 15-8
-            if (i == 0) {
+/*             if (i == 0) {
                 Serial.printf("PIO Driver:           packDataToDMABuffer[0] packed word=0x%08X (G=%d,R=%d,B=%d)\n",
                              dst[i], src[idx], src[idx+1], src[idx+2]);
-            }
+            } */
         }
     }
     else if (bytesPerLed == 4)

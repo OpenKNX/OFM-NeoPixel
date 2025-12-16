@@ -506,20 +506,6 @@ bool NeoPixelManager::updateAll()
     uint32_t startTime = millis();
     bool allSuccess = true;
 
-    // PHASE: SYNC VIRTUAL TO PHYSICAL BEFORE SENDING (blocking variant)
-    for (auto segment : _segments)
-    {
-        if (segment && segment->getVirtualStrip())
-        {
-            VirtualStrip* vstrip = segment->getVirtualStrip();
-            if (vstrip->isDirty())
-            {
-                uint8_t hwBrightness = segment->getHardwareBrightness();
-                vstrip->syncToPhysical(hwBrightness);
-            }
-        }
-    }
-
     // Starte alle Transfers
     for (auto strip : _strips)
     {
