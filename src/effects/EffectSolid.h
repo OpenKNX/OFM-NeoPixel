@@ -19,7 +19,7 @@ class EffectSolid : public Effect
   public:
     EffectSolid() = default;
     virtual ~EffectSolid() = default;
-    
+
     void update(Segment* segment, uint32_t deltaTime) override;
     const char* getName() override { return "Solid"; }
 

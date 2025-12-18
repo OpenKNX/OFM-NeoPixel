@@ -29,6 +29,7 @@ class PhysicalStrip
   public:
     PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol = LedProtocol::WS2812B, DriverType driverType = DriverType::AUTO, TimingMode timingMode = TimingMode::AUTO);
     PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, uint32_t sckPin, DriverType driverType = DriverType::AUTO, TimingMode timingMode = TimingMode::AUTO);
+    PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, uint32_t sckPin, int csPin, uint32_t frequencyHz, DriverType driverType = DriverType::AUTO);
     ~PhysicalStrip();
 
     // ====================================================================
@@ -75,10 +76,14 @@ class PhysicalStrip
     void setColorOrder(ColorOrder order)
     {
         _colorOrder = order;
-        _hasColorOrder = true;
+
+        // Pass ColorOrder to driver (all drivers support this now via interface)
+        if (_driver)
+        {
+            _driver->setColorOrder(order);
+        }
     }
     ColorOrder getColorOrder() const { return _colorOrder; }
-    bool hasColorOrder() const { return _hasColorOrder; }
 
     // ====================================================================
     // Hardware Brightness (APA102/SK9822 only)

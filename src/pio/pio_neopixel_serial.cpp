@@ -684,21 +684,23 @@ bool PIO_NeoPixel_Serial::show()
  * Data is packed into 32-bit words:
  *
  * RGB format (3 bytes per LED):
- * - Pack as: B<<24 | R<<16 | G<<8
- * - LSB (G) sent first
+ * - Pack as: Byte2<<24 | Byte1<<16 | Byte0<<8
+ * - LSB (Byte0) sent first
  *
  * RGBW format (4 bytes per LED):
- * - Pack as: W<<24 | B<<16 | R<<8 | G
- * - LSB (G) sent first
+ * - Pack as: Byte3<<24 | Byte2<<16 | Byte1<<8 | Byte0
+ * - LSB (Byte0) sent first
+ *
+ * NOTE: Buffer order is determined by ColorOrder setting (via rgbToBuffer).
+ *       This function is ColorOrder-agnostic and just sends bytes in buffer order.
  */
 void PIO_NeoPixel_Serial::sendDataPIO()
 {
     if (!_inst) return;
 
-    // OPTIMIZED: Send data to PIO FIFO in 32-bit chunks
+    // Send data to PIO FIFO in 32-bit chunks
     // PIO autopull LSB-first (shift_right=false means shift LEFT, output from LSB!)
-    // Buffer is in GRB order: [G, R, B]
-    // Pack REVERSED: B<<24 | R<<16 | G<<8 so LSB (G) is sent first!
+    // Pack REVERSED: Byte2<<24 | Byte1<<16 | Byte0<<8 so LSB (Byte0) is sent first!
 
     uint32_t bytesPerTransfer = _inst->bytesPerLed;
     uint32_t numTransfers = _inst->bufferSize / bytesPerTransfer;
@@ -706,26 +708,26 @@ void PIO_NeoPixel_Serial::sendDataPIO()
 
     if (bytesPerTransfer == 3)
     {
-        // GRB buffer: Pack REVERSED as B<<24 | R<<16 | G<<8
+        // 3-byte buffer: Pack REVERSED as Byte2<<24 | Byte1<<16 | Byte0<<8
         for (uint32_t i = 0; i < numTransfers; i++)
         {
             uint32_t idx = i * 3;
-            uint32_t value = ((uint32_t)buf[idx + 2] << 24) | // B → bits 31-24
-                             ((uint32_t)buf[idx + 1] << 16) | // R → bits 23-16
-                             ((uint32_t)buf[idx] << 8);       // G → bits 15-8 (sent 1st!)
+            uint32_t value = ((uint32_t)buf[idx + 2] << 24) | // Byte2 → bits 31-24
+                             ((uint32_t)buf[idx + 1] << 16) | // Byte1 → bits 23-16
+                             ((uint32_t)buf[idx] << 8);       // Byte0 → bits 15-8 (sent 1st!)
             pio_sm_put_blocking(_inst->pio, _inst->sm, value);
         }
     }
     else
     {
-        // GRBW buffer: Pack REVERSED
+        // 4-byte buffer (RGBW): Pack REVERSED
         for (uint32_t i = 0; i < numTransfers; i++)
         {
             uint32_t idx = i * 4;
-            uint32_t value = ((uint32_t)buf[idx + 3] << 24) | // W → bits 31-24
-                             ((uint32_t)buf[idx + 2] << 16) | // B → bits 23-16
-                             ((uint32_t)buf[idx + 1] << 8) |  // R → bits 15-8
-                             (uint32_t)buf[idx];              // G → bits 7-0 (sent 1st!)
+            uint32_t value = ((uint32_t)buf[idx + 3] << 24) | // Byte3 → bits 31-24
+                             ((uint32_t)buf[idx + 2] << 16) | // Byte2 → bits 23-16
+                             ((uint32_t)buf[idx + 1] << 8) |  // Byte1 → bits 15-8
+                             (uint32_t)buf[idx];              // Byte0 → bits 7-0 (sent 1st!)
             pio_sm_put_blocking(_inst->pio, _inst->sm, value);
         }
     }
@@ -759,12 +761,15 @@ void PIO_NeoPixel_Serial::sendDataDMA()
  * Converts byte color values into 32-bit words for DMA:
  *
  * RGB format (3 bytes → 1 word):
- * - Input: [G,R,B] as bytes
- * - Output: G<<24 | R<<16 | B<<8 (MSB first)
+ * - Input: [Byte0, Byte1, Byte2] as bytes
+ * - Output: Byte0<<24 | Byte1<<16 | Byte2<<8 (MSB first)
  *
  * RGBW format (4 bytes → 1 word):
- * - Input: [G,R,B,W] as bytes
- * - Output: G<<24 | R<<16 | B<<8 | W (MSB first)
+ * - Input: [Byte0, Byte1, Byte2, Byte3] as bytes
+ * - Output: Byte0<<24 | Byte1<<16 | Byte2<<8 | Byte3 (MSB first)
+ *
+ * NOTE: Buffer order is determined by ColorOrder setting (set via rgbToBuffer).
+ *       This function is ColorOrder-agnostic and just packs bytes in buffer order.
  */
 void PIO_NeoPixel_Serial::packDataToDMABuffer()
 {
@@ -776,27 +781,27 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
 
     if (bytesPerLed == 3)
     {
-        // GRB buffer: Pack for MSB-first transmission (PIO shifts left, sends bit 31 first!)
-        // Buffer layout: [G, R, B] → Pack as G<<24 | R<<16 | B<<8
+        // 3-byte buffer: Pack for MSB-first transmission (PIO shifts left, sends bit 31 first!)
+        // Buffer layout: [Byte0, Byte1, Byte2] → Pack as Byte0<<24 | Byte1<<16 | Byte2<<8
         for (uint16_t i = 0; i < _inst->ledCount; i++)
         {
             uint32_t idx = i * 3;
-            dst[i] = ((uint32_t)src[idx] << 24) |     // G → bits 31-24 (sent 1st!)
-                     ((uint32_t)src[idx + 1] << 16) | // R → bits 23-16
-                     ((uint32_t)src[idx + 2] << 8);   // B → bits 15-8
+            dst[i] = ((uint32_t)src[idx] << 24) |     // Byte0 → bits 31-24 (sent 1st!)
+                     ((uint32_t)src[idx + 1] << 16) | // Byte1 → bits 23-16
+                     ((uint32_t)src[idx + 2] << 8);   // Byte2 → bits 15-8
         }
     }
     else if (bytesPerLed == 4)
     {
-        // GRBW buffer: Pack for MSB-first transmission (PIO shifts left, sends bit 31 first!)
-        // Buffer layout: [G, R, B, W] → Pack as G<<24 | R<<16 | B<<8 | W<<0
+        // 4-byte buffer (RGBW): Pack for MSB-first transmission (PIO shifts left, sends bit 31 first!)
+        // Buffer layout: [Byte0, Byte1, Byte2, Byte3] → Pack as Byte0<<24 | Byte1<<16 | Byte2<<8 | Byte3<<0
         for (uint16_t i = 0; i < _inst->ledCount; i++)
         {
             uint32_t idx = i * 4;
-            dst[i] = ((uint32_t)src[idx] << 24) |     // G → bits 31-24 (sent 1st!)
-                     ((uint32_t)src[idx + 1] << 16) | // R → bits 23-16
-                     ((uint32_t)src[idx + 2] << 8) |  // B → bits 15-8
-                     (uint32_t)src[idx + 3];          // W → bits 7-0 (sent last!)
+            dst[i] = ((uint32_t)src[idx] << 24) |     // Byte0 → bits 31-24 (sent 1st!)
+                     ((uint32_t)src[idx + 1] << 16) | // Byte1 → bits 23-16
+                     ((uint32_t)src[idx + 2] << 8) |  // Byte2 → bits 15-8
+                     (uint32_t)src[idx + 3];          // Byte3 → bits 7-0 (sent last!)
         }
     }
 }

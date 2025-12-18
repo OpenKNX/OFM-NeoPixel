@@ -240,7 +240,6 @@ namespace OpenKNX
             // PROTOCOL COMPARISON (1-WIRE vs SPI)
             // ====================================================================
 
-  
             inline void compareProtocols(uint32_t serialPin, uint32_t spiMosiPin, uint32_t spiSckPin, uint16_t ledCount = 64)
             {
                 print_separator("1-Wire (WS2812B) vs SPI (APA102) Comparison");

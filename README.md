@@ -283,8 +283,8 @@ neo perf                # Show CPU usage and frame rate
 └───────────────────────┬──────────────────────────────────┘
                         ▼
 ┌──────────────────────────────────────────────────────────┐
-│ PHASE 2: GLOBAL POWER MANAGEMENT (NEW!)                  │
-│ NeoPixelManager::updateAll()                             │
+│ PHASE 2: GLOBAL POWER MANAGEMENT                         │
+│ NeoPixelManager::_applyPowerLimit() [PRIVATE HELPER]     │
 │ ├─ Calculate total current across ALL VirtualStrips      │
 │ ├─ PowerManager: Sum(I_strip1 + I_strip2 + ...)          │
 │ ├─ If total > limit: globalScale = limit / total         │
@@ -292,14 +292,14 @@ neo perf                # Show CPU usage and frame rate
 └───────────────────────┬──────────────────────────────────┘
                         ▼
 ┌──────────────────────────────────────────────────────────┐
-│ PHASE 3: Sync Virtual→Physical                           │
+│ PHASE 3: Sync Virtual→Physical [PUBLIC: syncAll()]       │
 │ VirtualStrip.syncToPhysical()                            │
 │ Copy SCALED buffer to PhysicalStrips with ColorOrder     │
-│ conversion (RGB→GRB/BGR/etc.)                            │
+│ conversion (RGB→GRB/BGR/etc.) + Hardware brightness      │
 └───────────────────────┬──────────────────────────────────┘
                         ▼
 ┌──────────────────────────────────────────────────────────┐
-│ PHASE 4: Hardware Transfer                               │
+│ PHASE 4: Hardware Transfer [PUBLIC: showAll()]           │
 │ PhysicalStrip.show() → DMA/PIO/RMT/SPI                   │
 │ Non-blocking hardware transfer to GPIO                   │
 └───────────────────────┬──────────────────────────────────┘
@@ -308,6 +308,17 @@ neo perf                # Show CPU usage and frame rate
 │ LED Hardware: Displays scaled, safe output               │
 │ Power consumption ≤ configured limit                     │
 └──────────────────────────────────────────────────────────┘
+
+METHOD FLOW:
+  update(deltaTime)      -> updateEffects(dt) -> updateAll() -> Override timing=0
+  updateEffects(dt)      -> Segment effects only (Phase 1)
+  updateAll()            -> applyPowerLimit() -> syncAll() -> showAll()
+  
+GRANULAR CONTROL (all 4 phases individually):
+  mgr->updateEffects(dt);   // Phase 1: Calculate effects
+  mgr->applyPowerLimit();   // Phase 2: Apply power scaling
+  mgr->syncAll();           // Phase 3: Sync buffers
+  mgr->showAll();           // Phase 4: Hardware transfer
 ```
 
 
@@ -351,32 +362,48 @@ The ColorOrder system provides automatic color byte reordering for different LED
        │ syncToPhysical() sends RGB
        ▼
 ┌──────────────┐
-│PhysicalStrip │  Converts RGB → Hardware ColorOrder
-│              │  Example GRB: RGB(255,0,0) → [0,255,0]
-│ ColorOrder:  │  Example BGR: RGB(255,0,0) → [0,0,255]
-│   GRB / BGR  │
+│PhysicalStrip │  Pass-through layer (NO conversion!)
+│              │  Forwards RGB directly to driver
+│ ColorOrder:  │  Stored but not used for conversion
+│   GRB / BGR  │  Driver reads it via getColorOrder()
 └──────┬───────┘
-       │ Hardware-ordered bytes
+       │ RGB unchanged
        ▼
 ┌──────────────┐
-│ Hardware     │  Receives native byte order
-│ Driver (PIO/ │  WS2812B reads: [G, R, B]
-│  RMT / SPI)  │  APA102 reads: [Brightness, B, G, R]
+│ Hardware     │  rgbToBuffer(): RGB → ColorOrder
+│ Driver (PIO/ │  Example GRB: RGB(255,0,0) → [0,255,0]
+│  RMT / SPI)  │  Example BGR: RGB(255,0,0) → [0,0,255]
+│              │  WS2812B sends: [G, R, B]
+│              │  APA102 sends: [Brightness, B, G, R]
 └──────────────┘
 ```
 
 #### Supported ColorOrders
 
+**RGB Protocols (3-byte):**
+
 | ColorOrder | LED Chips          | Byte Mapping       | Example (RED)      |
 |------------|-------------------|--------------------|--------------------|
-| `RGB`      | WS2811, some clones| [R, G, B]          | [255, 0, 0]        |
+| `NONE`     | Auto-detect        | Uses protocol default | Protocol-specific |
+| `RGB`      | WS2811, SK9822 clones | [R, G, B]       | [255, 0, 0]        |
 | `RBG`      | Rare variants      | [R, B, G]          | [255, 0, 0]        |
-| `GRB`      | WS2812, WS2812B   | [G, R, B]          | [0, 255, 0]        |
+| `GRB`      | WS2812B, SK6812   | [G, R, B]          | [0, 255, 0]        |
 | `GBR`      | Rare variants      | [G, B, R]          | [0, 0, 255]        |
-| `BGR`      | APA102, WS2801    | [B, G, R]          | [0, 0, 255]        |
 | `BRG`      | Rare variants      | [B, R, G]          | [0, 255, 0]        |
-| `RGBW`     | SK6812            | [R, G, B, W]       | [255, 0, 0, 0]     |
-| `GRBW`     | SK6812 variants   | [G, R, B, W]       | [0, 255, 0, 0]     |
+| `BGR`      | APA102 (some clones) | [B, G, R]        | [0, 0, 255]        |
+
+**RGBW Protocols (4-byte):**
+
+| ColorOrder | LED Chips          | Byte Mapping       | Example (RED)      |
+|------------|-------------------|--------------------|--------------------|
+| `RGBW`     | SK6812-RGBW variants | [R, G, B, W]     | [255, 0, 0, 0]     |
+| `RBGW`     | Rare variants      | [R, B, G, W]       | [255, 0, 0, 0]     |
+| `GRBW`     | SK6812-RGBW (common) | [G, R, B, W]     | [0, 255, 0, 0]     |
+| `GBRW`     | Rare variants      | [G, B, R, W]       | [0, 0, 255, 0]     |
+| `BRGW`     | Rare variants      | [B, R, G, W]       | [0, 255, 0, 0]     |
+| `BGRW`     | Rare variants      | [B, G, R, W]       | [0, 0, 255, 0]     |
+
+**Total:** All 13 possible color byte orders (1 auto + 6 RGB + 6 RGBW)
 
 #### Data Flow Example
 
@@ -394,11 +421,12 @@ The ColorOrder system provides automatic color byte reordering for different LED
 4. VirtualStrip:     Stores in buffer: [255, 0, 0]  (Always RGB!)
                      Calls syncToPhysical()
 
-5. PhysicalStrip:    Reads ColorOrder = GRB
-                     Converts: byte0=G(0), byte1=R(255), byte2=B(0)
-                     Calls driver->setPixel(i, 0, 255, 0);
+5. PhysicalStrip:    Passes RGB directly: setPixel(i, 255, 0, 0)
+                     Calls driver->setPixel(i, 255, 0, 0);
 
-6. PIO Driver:       Writes bytes to GPIO: [0, 255, 0]
+6. Driver:           Reads ColorOrder = GRB
+                     rgbToBuffer(): RGB(255,0,0) → buffer[0]=0, buffer[1]=255, buffer[2]=0
+                     Writes bytes: [0, 255, 0]
 
 7. WS2812B LED:      Interprets as: G=0, R=255, B=0 → RED
 ```
@@ -410,45 +438,58 @@ The ColorOrder system provides automatic color byte reordering for different LED
    - No color conversion in VirtualStrip layer
    - Simplifies effect development
 
-2. **PhysicalStrip handles hardware differences**
-   - Converts RGB → hardware ColorOrder
-   - Each PhysicalStrip can have different ColorOrder
-   - Conversion happens once per frame
+2. **PhysicalStrip is a pass-through layer**
+   - Forwards RGB values directly to driver
+   - Stores ColorOrder setting but doesn't use it
+   - Passes ColorOrder to driver via setColorOrder()
 
-3. **Hardware drivers are byte-oriented**
-   - Receive already-converted bytes
-   - No color logic in hardware layer
-   - Protocol-specific formatting only (APA102 brightness, etc.)
+3. **Hardware drivers handle ColorOrder conversion**
+   - rgbToBuffer() does the ONLY ColorOrder mapping
+   - Each driver (PIO/RMT/SPI) implements the same logic
+   - sendData/show functions are ColorOrder-agnostic (1:1 byte transfer)
+
+4. **No double-mapping**
+   - ColorOrder conversion happens ONCE (in driver's rgbToBuffer)
+   - All other layers pass RGB unchanged
+   - Clean separation of concerns
 
 #### Mixed ColorOrders in ONE VirtualStrip
 
 **This is the killer feature:** Combine strips with different ColorOrders seamlessly!
 
 ```cpp
-// Example: WS2812B (GRB) + APA102 (BGR) in one logical strip
-auto strip0 = mgr->addStrip(22, 64, LedProtocol::WS2812B, ColorOrder::GRB);
-auto strip1 = mgr->addSpiStrip(9, 8, 40, LedProtocol::APA102, ColorOrder::BGR);
+// Example: WS2812B (GRB) + SK9822 (RGB) in one logical strip
+auto strip0 = mgr->addStrip(22, 64, LedProtocol::WS2812B);  // Auto: GRB
+auto strip1 = mgr->addSpiStrip(9, 8, 40, LedProtocol::SK9822);  // Auto: RGB
 
 // Combine into ONE VirtualStrip
-auto virt = mgr->addVirtualStrip(104, ColorOrder::RGB);  // Always RGB!
-mgr->attachPhysicalToVirtual(virt, strip0, 0);    // WS2812B at 0-63
-mgr->attachPhysicalToVirtual(virt, strip1, 64);   // APA102 at 64-103
+auto virt = mgr->addVirtualStrip(104);  // Always RGB internally!
+mgr->attachPhysicalToVirtual(virt, strip0, 0);    // WS2812B at 0-63 (GRB)
+mgr->attachPhysicalToVirtual(virt, strip1, 64);   // SK9822 at 64-103 (RGB)
 
 // ONE segment, ONE effect across BOTH strips with DIFFERENT hardware!
 auto seg = mgr->addSegment(virt, 0, 103);
 seg->setEffect(EffectPool::getRainbow());
-seg->setPrimaryColor(255, 0, 0, 255);  // RED on both strips ✅
+seg->setPrimaryColor(255, 0, 0, 255);  // RED on both strips
 ```
 
 **Result:** Both strips show the same logical colors despite different hardware!
 
 #### Setting ColorOrder
 
-**Per PhysicalStrip (Recommended):**
+**Auto-Detect (Recommended):**
+
+```cpp
+// ColorOrder is automatically set based on protocol
+auto strip1 = mgr->addStrip(pin, count, LedProtocol::WS2812B);  // Auto: GRB
+auto strip2 = mgr->addSpiStrip(mosi, sck, count, LedProtocol::SK9822);  // Auto: RGB
+```
+
+**Explicit Override (for clones/variants):**
 
 ```cpp
 // 1-Wire strips
-auto strip = mgr->addStrip(pin, count, protocol, ColorOrder::GRB);
+auto strip = mgr->addStrip(pin, count, protocol, ColorOrder::RGB);  // Override
 
 // SPI strips
 auto strip = mgr->addSpiStrip(mosi, sck, count, protocol, ColorOrder::BGR);
@@ -1075,7 +1116,12 @@ public:
     Segment* addSegment(uint8_t virtStripIndex, 
                        uint16_t startLed, uint16_t endLed);
     
-    // Update Control
+    // Update Control (4-Phase Pipeline)
+    void update(uint32_t deltaTime);
+    void updateEffects(uint32_t deltaTime);
+    void applyPowerLimit();
+    void syncAll();
+    bool showAll();
     void updateAll();
     void clearAll();
     void setAutoUpdate(bool enable);
@@ -1118,10 +1164,17 @@ public:
     Segment* getSegment(uint8_t index);
     uint8_t getSegmentCount() const;
     
-    // Update Control
-    void updateAll();
-    void updateSegments(uint32_t deltaTime);
+    // Update Control (4-Phase Pipeline)
+    void update(uint32_t deltaTime);      // Phase 1-4: Full pipeline (non-blocking)
+    void updateEffects(uint32_t deltaTime); // Phase 1: Effect calculations only
+    void applyPowerLimit();               // Phase 2: Global power scaling
+    void syncAll();                       // Phase 3: VirtualStrip → PhysicalStrip sync
+    bool showAll();                       // Phase 4: PhysicalStrip → Hardware (blocking)
+    void updateAll();                     // Phase 2-4: Convenience method
+    
+    // Clear & Reset
     void clearAll();
+    void allOff();                        // Clear + updateAll()
     
     // Performance
     ManagerStats getStats() const;
@@ -1867,7 +1920,24 @@ auto strip2 = mgr2.addStrip(23, 50, WS2812B);
 
 The library applies brightness in this order:
 1. **Segment Brightness** (`segment->setBrightness(128)`) - Applied when Effect writes pixels
-2. **Power Limiting** - Applied globally in `NeoPixelManager::updateAll()`
+2. **Power Limiting** - Applied globally in `NeoPixelManager::_applyPowerLimit()` (private helper)
+3. **VirtualStrip → PhysicalStrip Sync** - `syncAll()` copies scaled buffers with ColorOrder conversion
+4. **Hardware Transfer** - `showAll()` sends to LEDs via DMA/PIO/RMT
+
+**Update Pipeline:**
+```cpp
+// Method 1: Full pipeline with effects (non-blocking)
+mgr->update(deltaTime);
+// Phase 1: Effects update
+// Phase 2-4: Calls updateAll() internally
+// Override timing=0 for non-blocking
+
+// Method 2: Manual control (blocking)
+mgr->updateAll();
+// _applyPowerLimit()  (private: calculates global power scaling)
+// syncAll()           (public: VirtualStrip → PhysicalStrip)
+// showAll()           (public: PhysicalStrip → Hardware)
+```
 
 **Example:**
 ```cpp

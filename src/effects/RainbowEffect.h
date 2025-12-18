@@ -49,8 +49,8 @@ class RainbowEffect : public Effect
     {
         switch (index)
         {
-            case 0: return 1;   // Speed
-            case 1: return 7;   // Delta (hue spacing)
+            case 0: return 1; // Speed
+            case 1: return 7; // Delta (hue spacing)
             default: return 0;
         }
     }
@@ -61,8 +61,8 @@ class RainbowEffect : public Effect
         auto& state = segment->getState();
         switch (index)
         {
-            case 0: return state.aux1;  // Speed
-            case 1: return state.aux2;  // Delta
+            case 0: return state.aux1; // Speed
+            case 1: return state.aux2; // Delta
             default: return 0;
         }
     }
@@ -73,8 +73,8 @@ class RainbowEffect : public Effect
         auto& state = segment->getState();
         switch (index)
         {
-            case 0: state.aux1 = value; break;  // Speed
-            case 1: state.aux2 = value; break;  // Delta
+            case 0: state.aux1 = value; break; // Speed
+            case 1: state.aux2 = value; break; // Delta
         }
     }
 
@@ -114,4 +114,3 @@ class RainbowEffect : public Effect
 
     void reset() override {}
 };
-

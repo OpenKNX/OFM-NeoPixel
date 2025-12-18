@@ -147,7 +147,16 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
      * @brief Get LED color byte order (RGB/GRB/etc)
      * @return ColorOrder enum value
      */
-    inline ColorOrder getColorOrder() const { return _inst ? _inst->colorOrder : ColorOrder::RGB; }
+    ColorOrder getColorOrder() const override { return _inst ? _inst->colorOrder : ColorOrder::RGB; }
+
+    /**
+     * @brief Set LED color byte order (override protocol default)
+     * @param order New ColorOrder (RGB, GRB, BGR, etc.)
+     */
+    void setColorOrder(ColorOrder order) override
+    {
+        if (_inst) _inst->colorOrder = order;
+    }
 
     /**
      * @brief Get bytes per LED (3=RGB, 4=RGBW)

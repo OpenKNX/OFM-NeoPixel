@@ -48,8 +48,8 @@ class JuggleEffect : public Effect
     {
         switch (index)
         {
-            case 0: return 8;   // NumDots
-            case 1: return 20;  // FadeSpeed
+            case 0: return 8;  // NumDots
+            case 1: return 20; // FadeSpeed
             default: return 0;
         }
     }
@@ -60,8 +60,8 @@ class JuggleEffect : public Effect
         auto& state = segment->getState();
         switch (index)
         {
-            case 0: return state.aux1;  // NumDots
-            case 1: return state.aux2;  // FadeSpeed
+            case 0: return state.aux1; // NumDots
+            case 1: return state.aux2; // FadeSpeed
             default: return 0;
         }
     }

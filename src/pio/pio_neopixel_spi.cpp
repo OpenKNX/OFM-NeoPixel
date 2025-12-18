@@ -138,7 +138,8 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
                                    LedProtocol protocol,
                                    uint32_t frequency,
                                    int csPin,
-                                   bool useDMA)
+                                   bool useDMA,
+                                   ColorOrder colorOrder)
     : _inst(nullptr)
 {
     _inst = (pio_neopixel_spi_inst_t*)malloc(sizeof(pio_neopixel_spi_inst_t));
@@ -152,6 +153,32 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     _inst->ledCount = ledCount;
     _inst->protocol = protocol;
     _inst->spiFrequency = frequency;
+
+    // Set ColorOrder: Use provided value, or protocol-dependent default
+    if (colorOrder == ColorOrder::NONE)
+    {
+    // Protocol defaults:
+    // - APA102: BGR (original Adafruit protocol)
+    // - SK9822: RGB (clone chips use different order)
+    #ifdef OPENKNX_DEBUG
+        openknx.logger.logWithPrefixAndValues("PIO NeoPixel SPI",
+                                              "PIO_NeoPixel_SPI: Using default ColorOrder for protocol %d",
+                                              static_cast<int>(protocol));
+    #endif
+        _inst->colorOrder = (protocol == LedProtocol::APA102) ? ColorOrder::BGR : ColorOrder::RGB;
+    }
+    else
+    {
+    #ifdef OPENKNX_DEBUG
+        openknx.logger.logWithPrefixAndValues("PIO NeoPixel SPI",
+                                              "PIO_NeoPixel_SPI: Using specified ColorOrder %s",
+                                              (colorOrder == ColorOrder::RGB) ? "RGB" : (colorOrder == ColorOrder::BGR) ? "BGR"
+                                                                                    : (colorOrder == ColorOrder::GRB)   ? "GRB"
+                                                                                                                        : "Other");
+
+    #endif
+        _inst->colorOrder = colorOrder;
+    }
     _inst->useDMA = useDMA; // DMA re-enabled!
     _inst->dmaChannel = -1;
     _inst->dmaIrqNum = -1; // Will be claimed dynamically if DMA is used
@@ -163,11 +190,17 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     _inst->hasGlobalBrightness = (protocol == LedProtocol::APA102 || protocol == LedProtocol::SK9822);
 
     // Allocate buffer: 4 bytes start frame + LED data + end frame
-    // APA102 Protocol:
+    // APA102/SK9822 Protocol:
     // - Start Frame: 0x00000000 (32 bits LOW)
     // - LED Data: 4 bytes per LED [111xxxxx][BBBBBBBB][GGGGGGGG][RRRRRRRR]
-    // - End Frame: 0xFFFFFFFF (32 bits HIGH) to latch data
-    _inst->bufferSize = 4 + (ledCount * _inst->bytesPerLed) + 4;
+    // - End Frame: Protocol dependent (see show() method)
+    //   APA102: 0xFFFFFFFF to latch
+    //   SK9822: Additional clocks needed: (ledCount + 15) / 16 bytes of 0x00
+    uint16_t endFrameSize = (protocol == LedProtocol::SK9822)
+                                ? ((ledCount + 15) / 16) // SK9822: 1 byte per 16 LEDs
+                                : 4;                     // APA102: 4 bytes
+
+    _inst->bufferSize = 4 + (ledCount * _inst->bytesPerLed) + endFrameSize;
     _inst->buffer = (uint8_t*)malloc(_inst->bufferSize);
     if (_inst->buffer)
     {
@@ -177,7 +210,7 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
         _inst->buffer[1] = 0x00;
         _inst->buffer[2] = 0x00;
         _inst->buffer[3] = 0x00;
-        // End Frame: All ones (set in show() method after LED data)
+        // End Frame: Set in show() method
     }
 }
 
@@ -449,12 +482,13 @@ bool PIO_NeoPixel_SPI::initDMA()
  * Sets RGB color values for an LED
  *
  * Stores RGB color values with default brightness for a specific LED.
+ * Input is always logical RGB - driver handles ColorOrder mapping to hardware.
  * For APA102/SK9822, uses global default brightness (scaled to 0-31).
  *
  * @param index LED index (0-based)
- * @param r Red component (0-255)
- * @param g Green component (0-255)
- * @param b Blue component (0-255)
+ * @param r Red component (0-255, logical RGB)
+ * @param g Green component (0-255, logical RGB)
+ * @param b Blue component (0-255, logical RGB)
  * @return true if successful, false if index invalid
  */
 bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
@@ -462,6 +496,7 @@ bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
     if (!_inst || !_inst->buffer || index >= _inst->ledCount) return false;
 
     // Use max brightness (255, scaled to 31) for APA102/SK9822
+    // Scale from 0-255 to 0-31: (255 * 31 + 127) / 255 = 31
     uint8_t brightness_5bit = (GLOBAL_DEFAULT_BRIGHTNESS * 31 + 127) / 255;
     rgbToBuffer(index, r, g, b, brightness_5bit);
     return true;
@@ -484,8 +519,8 @@ bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b,
 {
     if (!_inst || !_inst->buffer || index >= _inst->ledCount) return false;
 
-    // w parameter is interpreted as brightness (0-255) for APA102
-    // Scale from 0-255 to 0-31 (5-bit brightness)
+    // w parameter is interpreted as brightness (0-255) for APA102/SK9822
+    // Scale from 0-255 to 0-31 (5-bit brightness): (w * 31 + 127) / 255
     uint8_t brightness_5bit = (w * 31 + 127) / 255;
     rgbToBuffer(index, r, g, b, brightness_5bit);
     return true;
@@ -495,15 +530,16 @@ bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b,
  * Stores color values in correct format in buffer
  *
  * Internal helper function that stores color values according to
- * LED protocol format (APA102, WS2801, etc.) in the buffer.
+ * ColorOrder setting. Input is always logical RGB, output is hardware format.
  *
- * APA102/SK9822 format: [111xxxxx][B][G][R]
- * WS2801 format: [R][G][B]
+ * APA102/SK9822 format: [111xxxxx][C1][C2][C3]
+ * - Brightness byte: 0xE0 | (brightness & 0x1F)
+ * - Color bytes: Mapped according to ColorOrder (RGB, BGR, GRB, etc.)
  *
  * @param index LED index
- * @param r Red component
- * @param g Green component
- * @param b Blue component
+ * @param r Red component (0-255, logical RGB)
+ * @param g Green component (0-255, logical RGB)
+ * @param b Blue component (0-255, logical RGB)
  * @param brightness Brightness value (0-31) for APA102/SK9822
  */
 void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t brightness)
@@ -524,25 +560,74 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
 
     if (_inst->hasGlobalBrightness)
     {
-        // APA102/SK9822 format: 111xxxxx (brightness 5 bits) + BGR
-        // Brightness byte: 0xE0 | (brightness & 0x1F)
-        // According to protocol, first byte is brightness/gray level byte, then B, G, R
-        // The highest 3 bits are '111' followed by 5 bits of brightness
-        // Example: brightness=31 -> 0xFF(11111111) (full brightness), brightness=0 -> 0xE0(11100000) (off)
-        _inst->buffer[offset] = 0xE0 | (brightness & 0x1F); // 111xxxxx
-        _inst->buffer[offset + 1] = b;
-        _inst->buffer[offset + 2] = g;
-        _inst->buffer[offset + 3] = r;
+        // APA102/SK9822 format: [111xxxxx][C1][C2][C3]
+        // Byte order depends on ColorOrder setting
+
+        uint8_t effective_brightness = brightness;
+
+        // SK9822 Clone PWM Fix:
+        // - At very low brightness (<8), PWM glitches cause blue flicker
+        // - Solution: Use minimum brightness of 8 (25% of 5-bit range)
+        // - At OFF (0,0,0): Use brightness=0 to fully disable PWM
+        if (r == 0 && g == 0 && b == 0)
+        {
+            // True OFF: brightness=0, no PWM
+            effective_brightness = 0;
+        }
+        else if (effective_brightness > 0 && effective_brightness < 8)
+        {
+            // Clamp to minimum brightness to avoid PWM glitches (SK9822 clones)
+            effective_brightness = 8;
+        }
+
+        // Write brightness byte
+        _inst->buffer[offset + 0] = 0xE0 | (effective_brightness & 0x1F);
+
+        // Write color bytes according to ColorOrder
+        switch (_inst->colorOrder)
+        {
+            case ColorOrder::RGB:
+                _inst->buffer[offset + 1] = r;
+                _inst->buffer[offset + 2] = g;
+                _inst->buffer[offset + 3] = b;
+                break;
+            case ColorOrder::RBG:
+                _inst->buffer[offset + 1] = r;
+                _inst->buffer[offset + 2] = b;
+                _inst->buffer[offset + 3] = g;
+                break;
+            case ColorOrder::GRB:
+                _inst->buffer[offset + 1] = g;
+                _inst->buffer[offset + 2] = r;
+                _inst->buffer[offset + 3] = b;
+                break;
+            case ColorOrder::GBR:
+                _inst->buffer[offset + 1] = g;
+                _inst->buffer[offset + 2] = b;
+                _inst->buffer[offset + 3] = r;
+                break;
+            case ColorOrder::BRG:
+                _inst->buffer[offset + 1] = b;
+                _inst->buffer[offset + 2] = r;
+                _inst->buffer[offset + 3] = g;
+                break;
+            case ColorOrder::BGR:
+            default:
+                _inst->buffer[offset + 1] = b;
+                _inst->buffer[offset + 2] = g;
+                _inst->buffer[offset + 3] = r;
+                break;
+        }
 
     #ifdef OPENKNX_TRACE1
         if (index < 1)
         {
             openknx.logger.logWithPrefixAndValues("PIO NeoPixel Spi",
                                                   "  Written: [%d]=%02X [%d]=%02X [%d]=%02X [%d]=%02X",
-                                                  offset, 0xE0 | (brightness & 0x1F),
-                                                  offset + 1, b,
-                                                  offset + 2, g,
-                                                  offset + 3, r);
+                                                  offset, 0xE0 | (effective_brightness & 0x1F),
+                                                  offset + 1, _inst->buffer[offset + 1],
+                                                  offset + 2, _inst->buffer[offset + 2],
+                                                  offset + 3, _inst->buffer[offset + 3]);
         }
     #endif
     }
@@ -575,7 +660,26 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
 bool PIO_NeoPixel_SPI::show()
 {
     if (!_inst || !_inst->initialized || !_inst->buffer) return false;
-    if (_inst->busy) return false; // Already transmitting
+    // if( _inst->busy) return false; // Previous transfer still active
+
+    // Wait for previous DMA transfer to complete (prevents buffer corruption)
+    // Active wait with timeout - typically completes in <1ms
+    if (_inst->busy)
+    {
+        uint32_t timeout = millis() + 100;
+        while (_inst->busy && millis() < timeout)
+        {
+            tight_loop_contents();
+        }
+        if (_inst->busy)
+        {
+    #ifdef OPENKNX_DEBUG
+            openknx.logger.logWithPrefixAndValues("PIO NeoPixel SPI",
+                                                  "WARNING: DMA timeout, forcing reset");
+    #endif
+            _inst->busy = false;
+        }
+    }
 
     // Trace: Print first LED data and buffer info
     #ifdef OPENKNX_TRACE1
@@ -593,13 +697,23 @@ bool PIO_NeoPixel_SPI::show()
                                           _inst->buffer[4], _inst->buffer[5], _inst->buffer[6], _inst->buffer[7]);
     #endif
 
-    // Set End Frame (last 4 bytes of buffer)
-    // APA102 needs 0xFFFFFFFF to latch all LED data
-    size_t endFrameOffset = _inst->bufferSize - 4;
-    _inst->buffer[endFrameOffset] = 0xFF;
-    _inst->buffer[endFrameOffset + 1] = 0xFF;
-    _inst->buffer[endFrameOffset + 2] = 0xFF;
-    _inst->buffer[endFrameOffset + 3] = 0xFF;
+    // Set End Frame (protocol-specific)
+    // - APA102: 0xFFFFFFFF (4 bytes) to latch LED data
+    // - SK9822: 0x00 bytes for additional clocks ((ledCount+15)/16 bytes)
+    //           SK9822 needs extra clocks to propagate data through chain
+    size_t ledDataEnd = 4 + (_inst->ledCount * _inst->bytesPerLed);
+    size_t endFrameSize = _inst->bufferSize - ledDataEnd;
+
+    if (_inst->protocol == LedProtocol::SK9822)
+    {
+        // SK9822: Fill end frame with 0x00 for additional clock cycles
+        memset(_inst->buffer + ledDataEnd, 0x00, endFrameSize);
+    }
+    else
+    {
+        // APA102: Fill end frame with 0xFF
+        memset(_inst->buffer + ledDataEnd, 0xFF, endFrameSize);
+    }
 
     _inst->busy = true;
 
@@ -743,8 +857,27 @@ void PIO_NeoPixel_SPI::clear()
 {
     if (!_inst || !_inst->buffer) return;
 
-    // Clear LED data, but keep start frame
-    memset(_inst->buffer + 4, 0, _inst->bufferSize - 4);
+    if (_inst->hasGlobalBrightness)
+    {
+        // APA102/SK9822: Set all LEDs to OFF with protocol-specific brightness
+        // SK9822 clones: brightness=0 for true OFF (no PWM glitch)
+        // APA102: brightness=31 to prevent PWM artifacts
+        uint8_t off_brightness = (_inst->protocol == LedProtocol::SK9822) ? 0 : 31;
+
+        for (uint16_t i = 0; i < _inst->ledCount; i++)
+        {
+            uint32_t offset = 4 + (i * _inst->bytesPerLed);
+            _inst->buffer[offset + 0] = 0xE0 | (off_brightness & 0x1F); // Brightness
+            _inst->buffer[offset + 1] = 0x00;                           // Color byte 1 = 0
+            _inst->buffer[offset + 2] = 0x00;                           // Color byte 2 = 0
+            _inst->buffer[offset + 3] = 0x00;                           // Color byte 3 = 0 (ColorOrder-agnostic: all 0 = black)
+        }
+    }
+    else
+    {
+        // Other SPI protocols: Simple zero
+        memset(_inst->buffer + 4, 0, (_inst->ledCount * _inst->bytesPerLed));
+    }
 }
 
 /**
@@ -764,6 +897,15 @@ DriverCapabilities PIO_NeoPixel_SPI::getCapabilities() const
     caps.maxFrequency = _inst ? _inst->spiFrequency : 10000000;
     caps.maxLeds = 2000;
     return caps;
+    #ifdef OPENKNX_DEBUG
+    openknx.logger.logWithPrefixAndValues("PIO NeoPixel SPI",
+                                          "getCapabilities(): DMA=%s, Async=%s, RGBW=%s, MaxFreq=%dMHz, MaxLEDs=%d",
+                                          caps.supportsDMA ? "YES" : "NO",
+                                          caps.supportsAsync ? "YES" : "NO",
+                                          caps.supportsRGBW ? "YES" : "NO",
+                                          caps.maxFrequency / 1000000,
+                                          caps.maxLeds);
+    #endif
 }
 
 /**

@@ -24,13 +24,13 @@
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 
- // #########################################################
- // ToDo: Complete documentation
- // Know Bugs:
- // - On Change of phase, a frame delay may occur
- // - On phase change, some pixels may briefly flash
- // - On Color change the pixel gets the correct color only after phase restart
- //
+// #########################################################
+// ToDo: Complete documentation
+// Know Bugs:
+// - On Change of phase, a frame delay may occur
+// - On phase change, some pixels may briefly flash
+// - On Color change the pixel gets the correct color only after phase restart
+//
 
 #pragma once
 #include "../Segment.h"
@@ -43,10 +43,10 @@
  */
 enum class GaragePhase : uint8_t
 {
-    OPENING = 0,     // Arrow from center to edges (door opening)
-    RUNWAY = 1,      // Runway lights (enter/exit guidance)
-    COMPLETED = 2,   // Breathing celebration (parking confirmed)
-    STOPPED = 3      // Effect finished/idle
+    OPENING = 0,   // Arrow from center to edges (door opening)
+    RUNWAY = 1,    // Runway lights (enter/exit guidance)
+    COMPLETED = 2, // Breathing celebration (parking confirmed)
+    STOPPED = 3    // Effect finished/idle
 };
 
 /**
@@ -68,21 +68,21 @@ class GarageDoorEffect : public Effect
     // =============================================================================
 
     // Phase 1: Opening Arrow
-    uint8_t _arrowSize = 6;               // Arrow eye size (trail length)
-    float _arrowSpeed = 0.0f;             // Auto-calculated if 0
+    uint8_t _arrowSize = 6;                // Arrow eye size (trail length)
+    float _arrowSpeed = 0.0f;              // Auto-calculated if 0
     uint32_t _arrowColorRGBW = 0x00000000; // Default: Use segment color (black = fallback)
-    uint16_t _openingDuration = 0;        // Duration in ms (0 = infinite loop)
+    uint16_t _openingDuration = 0;         // Duration in ms (0 = infinite loop)
 
     // Phase 2: Runway
-    uint8_t _runwayGroupSize = 1;          // LEDs per group (1-10)
-    float _runwaySpeed = 0.0f;             // Auto-calculated if 0
+    uint8_t _runwayGroupSize = 1;           // LEDs per group (1-10)
+    float _runwaySpeed = 0.0f;              // Auto-calculated if 0
     uint32_t _runwayColorRGBW = 0x00000000; // Default: Use segment color (black = fallback)
-    uint16_t _runwayDuration = 0;          // Duration in milliseconds (0 = infinite loop)
+    uint16_t _runwayDuration = 0;           // Duration in milliseconds (0 = infinite loop)
 
     // Phase 3: Success Breathing
-    float _breathingSpeed = 0.05f;         // Breathing cycle speed (radians per frame)
+    float _breathingSpeed = 0.05f;           // Breathing cycle speed (radians per frame)
     uint32_t _successColorRGBW = 0x00000000; // Default: Use segment color (black = fallback)
-    uint16_t _breathingDuration = 0;       // Duration in milliseconds (0 = infinite loop)
+    uint16_t _breathingDuration = 0;         // Duration in milliseconds (0 = infinite loop)
 
     // =============================================================================
     // Runtime State - STORED PER SEGMENT (stateless design!)
@@ -188,13 +188,13 @@ class GarageDoorEffect : public Effect
     void setSegmentPhase(Segment* segment, GaragePhase phase)
     {
         if (!segment) return;
-        
+
         auto& state = segment->getState();
         state.phase = (uint8_t)phase;
-        state.aux1 = 0;       // Reset timer
-        state.position = 0;   // Reset position for new phase
-        state.counter = 0;    // Reset counter to trigger re-initialization
-        state.aux2 = 0;       // Reset breathing angle
+        state.aux1 = 0;     // Reset timer
+        state.position = 0; // Reset position for new phase
+        state.counter = 0;  // Reset counter to trigger re-initialization
+        state.aux2 = 0;     // Reset breathing angle
     }
 
     /**
@@ -355,14 +355,14 @@ class GarageDoorEffect : public Effect
             // Auto-scale: 2-3 seconds from center to edge
             // At ~20 FPS: speed = (length/2) / (2.5 * 20) = length / 100
             effectiveSpeed = (float)length / 100.0f;
-            if (effectiveSpeed < 1.0f) effectiveSpeed = 1.0f;  // Minimum 1 pixel/frame
+            if (effectiveSpeed < 1.0f) effectiveSpeed = 1.0f; // Minimum 1 pixel/frame
         }
 
         // Initialize on first run OR when returning to this phase
         if (state.counter == 0)
         {
-            state.position = 0;      // Start at offset 0 (will add to center)
-            state.counter = 1;       // Mark initialized
+            state.position = 0; // Start at offset 0 (will add to center)
+            state.counter = 1;  // Mark initialized
         }
 
         // Fade all LEDs
@@ -370,11 +370,11 @@ class GarageDoorEffect : public Effect
         {
             uint8_t r, g, b;
             segment->getPixel(i, r, g, b);
-            
+
             r = FastLEDMath::fadeToBlackBy(r, 50);
             g = FastLEDMath::fadeToBlackBy(g, 50);
             b = FastLEDMath::fadeToBlackBy(b, 50);
-            
+
             segment->setPixel(i, r, g, b);
         }
 
@@ -383,7 +383,7 @@ class GarageDoorEffect : public Effect
         uint8_t arrowG = (_arrowColorRGBW >> 16) & 0xFF;
         uint8_t arrowB = (_arrowColorRGBW >> 8) & 0xFF;
         uint8_t arrowW = _arrowColorRGBW & 0xFF;
-        
+
         // Fallback to segment color if effect color is black
         if (arrowR == 0 && arrowG == 0 && arrowB == 0 && arrowW == 0)
         {
@@ -411,8 +411,8 @@ class GarageDoorEffect : public Effect
         // Loop: When arrows reach edges, restart from center
         if (state.position >= center)
         {
-            state.position = 0;  // Restart animation (loop)
-            state.counter = 0;   // Trigger re-init next frame
+            state.position = 0; // Restart animation (loop)
+            state.counter = 0;  // Trigger re-init next frame
         }
     }
 
@@ -488,7 +488,7 @@ class GarageDoorEffect : public Effect
                 // Infinite loop: use fixed speed
                 // ~2-3 seconds per cycle at 20 FPS: speed = length / (2.5 * 20) = length / 50
                 effectiveSpeed = (float)length / 50.0f;
-                if (effectiveSpeed < 1.0f) effectiveSpeed = 1.0f;  // Minimum 1 pixel/frame
+                if (effectiveSpeed < 1.0f) effectiveSpeed = 1.0f; // Minimum 1 pixel/frame
             }
         }
 
@@ -507,7 +507,7 @@ class GarageDoorEffect : public Effect
         uint8_t runwayG = (_runwayColorRGBW >> 16) & 0xFF;
         uint8_t runwayB = (_runwayColorRGBW >> 8) & 0xFF;
         uint8_t runwayW = _runwayColorRGBW & 0xFF;
-        
+
         // Fallback to segment color if effect color is black
         if (runwayR == 0 && runwayG == 0 && runwayB == 0 && runwayW == 0)
         {
@@ -579,7 +579,7 @@ class GarageDoorEffect : public Effect
         uint8_t successG = (_successColorRGBW >> 16) & 0xFF;
         uint8_t successB = (_successColorRGBW >> 8) & 0xFF;
         uint8_t successW = _successColorRGBW & 0xFF;
-        
+
         // Fallback to segment color if effect color is black
         if (successR == 0 && successG == 0 && successB == 0 && successW == 0)
         {
@@ -591,7 +591,7 @@ class GarageDoorEffect : public Effect
 
         // Calculate breathing brightness (sine wave)
         // aux2 stores angle (0-360 degrees)
-        float angle = (float)state.aux2 * 0.0174533f; // Convert to radians
+        float angle = (float)state.aux2 * 0.0174533f;   // Convert to radians
         float breathValue = (sin(angle) + 1.0f) / 2.0f; // 0.0 - 1.0
         uint8_t brightness = (uint8_t)(breathValue * 255.0f);
 
@@ -617,7 +617,7 @@ class GarageDoorEffect : public Effect
 
         // Advance breathing angle
         state.aux2 += (uint16_t)(_breathingSpeed * 100.0f); // Scale for integer storage
-        if (state.aux2 >= 36000) state.aux2 = 0; // Wrap at 360 degrees (scaled by 100)
+        if (state.aux2 >= 36000) state.aux2 = 0;            // Wrap at 360 degrees (scaled by 100)
     }
 
     /**
@@ -632,11 +632,11 @@ class GarageDoorEffect : public Effect
         {
             uint8_t r, g, b;
             segment->getPixel(i, r, g, b);
-            
+
             r = FastLEDMath::fadeToBlackBy(r, 200);
             g = FastLEDMath::fadeToBlackBy(g, 200);
             b = FastLEDMath::fadeToBlackBy(b, 200);
-            
+
             segment->setPixel(i, r, g, b);
         }
     }
@@ -644,7 +644,7 @@ class GarageDoorEffect : public Effect
     /**
      * Utility: Clamp value to range
      */
-    template<typename T>
+    template <typename T>
     T clampValue(T value, T min, T max)
     {
         if (value < min) return min;

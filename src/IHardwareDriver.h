@@ -71,6 +71,7 @@ enum class DriverImplementation
  */
 enum class ColorOrder
 {
+    NONE, // Not set - use protocol default
     RGB,  // Red, Green, Blue
     RBG,  // Red, Blue, Green (some LED clones)
     GRB,  // Green, Red, Blue (WS2812, SK6812 standard)
@@ -119,6 +120,10 @@ class IHardwareDriver
 
     // Get driver implementation type (for runtime detection)
     virtual DriverImplementation getDriverType() const = 0;
+
+    // Allow changing ColorOrder after construction (default: no-op for drivers that don't support it)
+    virtual void setColorOrder(ColorOrder order) { /* Default: ignore */ }
+    virtual ColorOrder getColorOrder() const { return ColorOrder::RGB; } // Default fallback
 };
 
 /**

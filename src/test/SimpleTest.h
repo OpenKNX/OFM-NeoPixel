@@ -5,14 +5,14 @@
  *
  * Direct bit-banging test to verify LED hardware functionality.
  * Sends raw timing signals for WS2812B protocol.
- * 
+ *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 
-#pragma once
-#include "NeoPixelManager.h"
-#include <stdint.h>
-#include <string>
+    #pragma once
+    #include "NeoPixelManager.h"
+    #include <stdint.h>
+    #include <string>
 
 /**
  * @brief Simple Hardware Test (Singleton, Direct Bit-Banging)

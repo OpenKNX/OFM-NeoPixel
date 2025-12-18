@@ -54,11 +54,12 @@ struct pio_neopixel_spi_inst
     uint mosiPin; // GPIO pin for MOSI/data
     uint csPin;   // Chip select pin (-1 if not used)
 
-    uint16_t ledCount;    // Number of LEDs
-    uint8_t bytesPerLed;  // Bytes per LED (typically 4 for APA102)
-    LedProtocol protocol; // LED protocol type
+    uint16_t ledCount;     // Number of LEDs
+    uint8_t bytesPerLed;   // Bytes per LED (typically 4 for APA102)
+    LedProtocol protocol;  // LED protocol type
+    ColorOrder colorOrder; // Color byte order (RGB, BGR, etc.)
 
-    // APA102/SK9822 format: 111xxxxx (brightness 5 bits) + BGR
+    // APA102/SK9822 format: 111xxxxx (brightness 5 bits) + color bytes
     // Brightness byte: 0xE0 | (brightness & 0x1F)
     // According to protocol, first byte is brightness/gray level byte, then B, G, R
     // The highest 3 bits are '111' followed by 5 bits of brightness
@@ -93,7 +94,8 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
         LedProtocol protocol,
         uint32_t frequency = 10000000,
         int csPin = -1,
-        bool useDMA = true);
+        bool useDMA = true,
+        ColorOrder colorOrder = ColorOrder::NONE);
 
     virtual ~PIO_NeoPixel_SPI();
 
@@ -117,11 +119,17 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
     inline int getDmaChannel() const { return _inst ? _inst->dmaChannel : -1; }
     inline bool isDMAenabled() const { return _inst ? _inst->useDMA : false; }
     inline uint getprogramOffset() const { return _inst ? _inst->offset : 0; }
-    inline ColorOrder getColorOrder() const { return ColorOrder::BGR; } // APA102/SK9822 use BGR order
     inline uint8_t getBytesPerLed() const { return _inst ? _inst->bytesPerLed : 0; }
     inline uint32_t getSpiFrequency() const { return _inst ? _inst->spiFrequency : 0; }
     inline uint getClkPin() const { return _inst ? _inst->clkPin : 0; }
     inline uint getMosiPin() const { return _inst ? _inst->mosiPin : 0; }
+
+    // IHardwareDriver ColorOrder interface
+    void setColorOrder(ColorOrder order) override
+    {
+        if (_inst) _inst->colorOrder = order;
+    }
+    ColorOrder getColorOrder() const override { return _inst ? _inst->colorOrder : ColorOrder::RGB; }
 
     void onDmaComplete();
 

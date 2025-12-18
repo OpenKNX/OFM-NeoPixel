@@ -4,26 +4,26 @@
  * @brief Simple Hardware Test Implementation
  */
 
-#include "test/SimpleTest.h"
-#include "OpenKNX/Log/Logger.h"
-#include <Arduino.h>
-#include <hardware/gpio.h>
+    #include "test/SimpleTest.h"
+    #include "OpenKNX/Log/Logger.h"
+    #include <Arduino.h>
+    #include <hardware/gpio.h>
 
-// Fast GPIO macros (RP2040 direct register access)
-#define GPIO_SET(pin) sio_hw->gpio_set = (1u << (pin))
-#define GPIO_CLR(pin) sio_hw->gpio_clr = (1u << (pin))
+    // Fast GPIO macros (RP2040 direct register access)
+    #define GPIO_SET(pin) sio_hw->gpio_set = (1u << (pin))
+    #define GPIO_CLR(pin) sio_hw->gpio_clr = (1u << (pin))
 
-// NOP macros for precise timing
-#define NOP1 __asm__ volatile("nop")
-#define NOP5 \
-    NOP1;    \
-    NOP1;    \
-    NOP1;    \
-    NOP1;    \
-    NOP1
-#define NOP10 \
-    NOP5;     \
-    NOP5
+    // NOP macros for precise timing
+    #define NOP1 __asm__ volatile("nop")
+    #define NOP5 \
+        NOP1;    \
+        NOP1;    \
+        NOP1;    \
+        NOP1;    \
+        NOP1
+    #define NOP10 \
+        NOP5;     \
+        NOP5
 
 bool SimpleTest::init(uint8_t pin, uint8_t ledCount)
 {

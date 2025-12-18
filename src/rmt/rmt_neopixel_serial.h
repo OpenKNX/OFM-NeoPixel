@@ -86,6 +86,13 @@ class RMT_NeoPixel_Serial : public IHardwareDriver
     inline rmt_channel_handle_t getRmtChannel() const { return _inst ? _inst->channel : nullptr; }
     inline rmt_encoder_handle_t getRmtEncoder() const { return _inst ? _inst->encoder : nullptr; }
 
+    // IHardwareDriver ColorOrder interface
+    void setColorOrder(ColorOrder order) override
+    {
+        if (_inst) _inst->colorOrder = order;
+    }
+    ColorOrder getColorOrder() const override { return _inst ? _inst->colorOrder : ColorOrder::RGB; }
+
     // Static Resource Detection Methods (ESP32-S3)
     static uint32_t getAvailableRmtChannels(); // Count available RMT channels
     static uint32_t getTotalRmtChannels();     // Total RMT channels (4 for ESP32-S3)

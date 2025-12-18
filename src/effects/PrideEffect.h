@@ -94,4 +94,3 @@ class PrideEffect : public Effect
 
     void reset() override {}
 };
-

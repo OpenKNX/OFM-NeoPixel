@@ -53,7 +53,7 @@ class EffectWipe : public Effect
   public:
     EffectWipe() = default;
     virtual ~EffectWipe() = default;
-    
+
     void update(Segment* segment, uint32_t deltaTime) override;
     const char* getName() override { return "Wipe"; }
 
@@ -110,4 +110,3 @@ class EffectWipe : public Effect
         }
     }
 };
-

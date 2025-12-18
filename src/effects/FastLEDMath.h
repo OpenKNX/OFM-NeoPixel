@@ -389,20 +389,23 @@ namespace FastLEDMath
     /**
      * @brief Linear interpolation between a and b by amount
      * @param a First value
-     * @param b Second value  
+     * @param b Second value
      * @param frac Amount (0-255, where 0=all a, 255=all b)
      */
     inline uint8_t lerp8by8(uint8_t a, uint8_t b, uint8_t frac)
     {
         if (frac == 0) return a;
         if (frac == 255) return b;
-        
+
         uint8_t result;
-        if (b > a) {
+        if (b > a)
+        {
             uint8_t delta = b - a;
             uint8_t scaled = scale8(delta, frac);
             result = a + scaled;
-        } else {
+        }
+        else
+        {
             uint8_t delta = a - b;
             uint8_t scaled = scale8(delta, frac);
             result = a - scaled;

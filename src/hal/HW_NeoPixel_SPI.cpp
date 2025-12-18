@@ -230,6 +230,23 @@ bool HW_NeoPixel_SPI::init()
             if (actualFrequency > 10000000) actualFrequency = 10000000; // 10MHz default max
     }
 
+#ifdef OPENKNX_DEBUG
+    // Log requested vs achievable frequency
+    openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
+                                          "Init: Protocol=%u, Requested Freq=%lu Hz, SysClock=%lu Hz",
+                                          (uint8_t)_inst->protocol, actualFrequency, clock_get_hz(clk_sys));
+
+    // Calculate actual achievable frequency based on system clock
+    // SPI baudrate = sys_clk / (CPSR * (1 + SCR))
+    // where CPSR = 2..254 (even), SCR = 0..255
+    // For simplicity, calculate what we can actually achieve
+    uint32_t sys_freq = clock_get_hz(clk_sys);
+    float best_div = (float)sys_freq / (float)actualFrequency;
+    uint32_t achievable_freq = sys_freq / (uint32_t)(best_div + 0.5f);
+    openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
+                                          "Achievable Freq=%lu Hz (div=%.2f)", achievable_freq, best_div);
+#endif
+
     // Begin SPI Transaction, configure the SPI Mode and Frequency
     SPISettings settings(actualFrequency, MSBFIRST, SPI_MODE0); // APA102/WS2801/LPD8806 are using Mode 0 (CPOL=0, CPHA=0)
 
@@ -364,10 +381,14 @@ void HW_NeoPixel_SPI::sendEndFrame()
 {
     if (!_inst || !_inst->spi) return;
 
-    // APA102 End Frame: Min. 4 Byte 0xFF (floor(n/2) Bits "1")
-    for (int i = 0; i < 4; i++)
+    // APA102 End Frame: Needs (ledCount + 1) / 2 bits of "1"
+    // Safer to send (ledCount / 16) + 1 bytes of 0xFF (minimum 4 bytes)
+    uint16_t endFrameBytes = (_inst->ledCount / 16) + 1;
+    if (endFrameBytes < 4) endFrameBytes = 4;
+
+    for (uint16_t i = 0; i < endFrameBytes; i++)
     {
-        _inst->spi->transfer(0xFF); // Protocol requires at least 4 bytes of 0xFF
+        _inst->spi->transfer(0x00); // Protocol requires at least 4 bytes of 0xFF
     }
 }
 

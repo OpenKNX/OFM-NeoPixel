@@ -49,7 +49,7 @@
  * Default: 8 (sufficient for most RP2040/ESP32 applications)
  */
 #ifndef NEOPIXEL_MAX_PHYSICAL_STRIPS
-    #define NEOPIXEL_MAX_PHYSICAL_STRIPS 6
+    #define NEOPIXEL_MAX_PHYSICAL_STRIPS 8
 #endif
 
 /**
@@ -128,6 +128,7 @@ class NeoPixelManager
     PhysicalStrip* addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, DriverType driverType);
     PhysicalStrip* addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder);
     PhysicalStrip* addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, DriverType driverType, ColorOrder colorOrder);
+    PhysicalStrip* addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder, uint32_t frequencyHz);
     bool removeStrip(PhysicalStrip* strip);
     PhysicalStrip* getStrip(uint32_t index);
     uint32_t getStripCount() const { return _strips.size(); }
@@ -143,10 +144,14 @@ class NeoPixelManager
     uint32_t getErrorCount() const { return _errorCount; }
 
     // ====================================================================
-    // Update Control
+    // Update Control (4-Phase Pipeline)
     // ====================================================================
-    void update(uint32_t deltaTime);
-    bool updateAll();
+    void update(uint32_t deltaTime);        // Phase 1-4: Full pipeline (non-blocking)
+    void updateEffects(uint32_t deltaTime); // Phase 1: Effect calculations only
+    void applyPowerLimit();                 // Phase 2: Global power scaling
+    void syncAll();                         // Phase 3: VirtualStrip → PhysicalStrip
+    bool showAll();                         // Phase 4: Hardware transfer
+    bool updateAll();                       // Phase 2-4: Convenience method
     bool waitForAll(uint32_t timeoutMs = 0);
     bool waitForStrip(PhysicalStrip* strip, uint32_t timeoutMs = 0);
     bool isAnyBusy() const;
@@ -178,7 +183,7 @@ class NeoPixelManager
     void setAllRGB(uint8_t r, uint8_t g, uint8_t b);
     void setAllRGBW(uint8_t r, uint8_t g, uint8_t b, uint8_t w);
     void clearAll();
-    void blackout();
+    void allOff();
 
     // ====================================================================
     // Statistics & Debug
@@ -231,6 +236,7 @@ class NeoPixelManager
     uint32_t _errorCount;                      // Error counter
     PowerManager _powerManager;                // Power/Current management
 
+    // Private helper methods
     bool checkResourcesAvailable(LedProtocol protocol);                               // Check if resources are available for new strip
     void countResourceUsage(uint32_t& pioUsed, uint32_t& spiUsed, uint32_t& rmtUsed); // Count current resource usage
 };

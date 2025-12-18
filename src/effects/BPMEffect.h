@@ -48,8 +48,8 @@ class BPMEffect : public Effect
     {
         switch (index)
         {
-            case 0: return 62;  // BPM default
-            case 1: return 0;   // Hue default
+            case 0: return 62; // BPM default
+            case 1: return 0;  // Hue default
             default: return 0;
         }
     }

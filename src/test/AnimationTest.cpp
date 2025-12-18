@@ -1,7 +1,7 @@
 #ifdef OPENKNX_NEOPIXEL_TESTS
-#include "test/AnimationTest.h"
-#include "OpenKNX/Log/Logger.h"
-#include <Arduino.h>
+    #include "test/AnimationTest.h"
+    #include "OpenKNX/Log/Logger.h"
+    #include <Arduino.h>
 
 // Rainbow lookup table
 static uint8_t rainbowR[8];

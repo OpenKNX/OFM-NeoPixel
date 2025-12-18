@@ -3,7 +3,7 @@
  * @brief Base Effect Interface - STATELESS Design
  *
  * This is the base class for all effects.
- * 
+ *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 
@@ -18,8 +18,8 @@
 
 #pragma once
 
-#include <stdint.h>
 #include "ParameterType.h"
+#include <stdint.h>
 
 // Forward declaration
 class Segment;
@@ -136,16 +136,16 @@ class Effect
 
     /**
      * @brief Initialize parameters with default values
-     * 
+     *
      * Calls setParameter() for each parameter with getParameterDefault()
      * Should be called once when effect is assigned to segment.
-     * 
+     *
      * @param segment The segment to initialize
      */
     virtual void initializeDefaults(Segment* segment)
     {
         if (!segment) return;
-        
+
         uint8_t count = getParameterCount();
         for (uint8_t i = 0; i < count; i++)
         {

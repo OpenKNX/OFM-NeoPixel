@@ -8,15 +8,15 @@
  * - Matrix color tests (R/G/B/W)
  * - Virtual 9x8 matrix mode
  * - Performance monitoring
- * 
+ *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 
-#pragma once
+    #pragma once
 
-#include "NeoPixelManager.h"
-#include <stdint.h>
-#include <string>
+    #include "NeoPixelManager.h"
+    #include <stdint.h>
+    #include <string>
 
 /**
  * @brief Animation Test System (Singleton)
@@ -39,11 +39,11 @@ class AnimationTest
 
     bool init(
         NeoPixelManager* manager, // NeoPixel Manager
-        uint8_t pin1 = 9, // GPIO for 8-LED strip
-        uint8_t ledCount1 = 8, // Number of LEDs in first strip
-        uint8_t pin2 = 22, // GPIO for 64-LED strip
-        uint8_t ledCount2 = 64, // Number of LEDs in second strip
-        bool virtualMode = true, // Virtual 9x8 matrix mode
+        uint8_t pin1 = 9,         // GPIO for 8-LED strip
+        uint8_t ledCount1 = 8,    // Number of LEDs in first strip
+        uint8_t pin2 = 22,        // GPIO for 64-LED strip
+        uint8_t ledCount2 = 64,   // Number of LEDs in second strip
+        bool virtualMode = true,  // Virtual 9x8 matrix mode
         uint8_t brightness = 10); // Brightness (1-255)
 
     bool loop();

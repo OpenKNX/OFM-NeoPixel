@@ -379,6 +379,25 @@ PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, u
 }
 
 /**
+ * Add SPI PhysicalStrip with ColorOrder and custom frequency
+ */
+PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder, uint32_t frequencyHz)
+{
+    PhysicalStrip* strip = new PhysicalStrip(mosiPin, ledCount, protocol, sckPin, -1, frequencyHz);
+    if (!strip)
+    {
+        _errorCount++;
+        return nullptr;
+    }
+
+    strip->setColorOrder(colorOrder);
+    _strips.push_back(strip);
+    logDebugP("NeoPixelManager: Added SPI strip at MOSI=%d, SCK=%d with %d LEDs, %d Hz",
+              mosiPin, sckPin, ledCount, frequencyHz);
+    return strip;
+}
+
+/**
  * @brief Remove a PhysicalStrip
  * @param strip Pointer to the PhysicalStrip to remove
  * @return true if the strip was found and removed
@@ -492,10 +511,105 @@ void NeoPixelManager::reset()
 }
 
 /**
- * Update all strips (blocking)
+ * Apply global power limiting to all VirtualStrip buffers
+ * Phase 2: Must be called BEFORE syncAll()
+ * @public
+ */
+void NeoPixelManager::applyPowerLimit()
+{
+    if (!_initialized || !_powerManager.isEnabled()) return;
+
+    // Step 1: Calculate total current across ALL VirtualStrips
+    uint32_t totalRequestedCurrent = 0;
+    for (auto vstrip : _virtualStrips)
+    {
+        if (vstrip && vstrip->getBuffer())
+        {
+            uint16_t ledCount = vstrip->getLedCount();
+            uint8_t bytesPerPixel = vstrip->getBytesPerLed();
+            uint8_t hardwareBrightness = vstrip->getHardwareBrightness();
+            const uint8_t* buffer = vstrip->getBuffer();
+
+            uint32_t stripCurrent = _powerManager.calculateTotalCurrent(
+                buffer, ledCount, bytesPerPixel, hardwareBrightness);
+            totalRequestedCurrent += stripCurrent;
+        }
+    }
+
+    // Step 2: Check if limiting is needed
+    if (totalRequestedCurrent > _powerManager.getMaxCurrent())
+    {
+        // Calculate global scale factor
+        float globalScale = (float)_powerManager.getMaxCurrent() / (float)totalRequestedCurrent;
+
+        // Step 3: Apply same scale to ALL VirtualStrip buffers
+        for (auto vstrip : _virtualStrips)
+        {
+            if (vstrip && vstrip->getBuffer())
+            {
+                uint16_t ledCount = vstrip->getLedCount();
+                uint8_t bytesPerPixel = vstrip->getBytesPerLed();
+                uint8_t* buffer = vstrip->getBuffer();
+
+                // Scale all pixels in this VirtualStrip
+                for (uint16_t i = 0; i < ledCount; i++)
+                {
+                    uint16_t offset = i * bytesPerPixel;
+                    buffer[offset] = (uint8_t)(buffer[offset] * globalScale);         // R
+                    buffer[offset + 1] = (uint8_t)(buffer[offset + 1] * globalScale); // G
+                    buffer[offset + 2] = (uint8_t)(buffer[offset + 2] * globalScale); // B
+                    if (bytesPerPixel == 4)
+                    {
+                        buffer[offset + 3] = (uint8_t)(buffer[offset + 3] * globalScale); // W
+                    }
+                }
+            }
+        }
+
+        // Update PowerManager statistics for correct reporting
+        _powerManager.setCachedCurrentValues(
+            totalRequestedCurrent,        // What was requested
+            _powerManager.getMaxCurrent() // What is actually flowing (capped at limit)
+        );
+    }
+    else
+    {
+        // No limiting needed - actual = requested
+        _powerManager.setCachedCurrentValues(totalRequestedCurrent, totalRequestedCurrent);
+    }
+}
+
+/**
+ * Sync all VirtualStrips to their PhysicalStrips
+ * Handles hardware brightness and dirty flag checking
+ * Call this after _applyPowerLimit() and before showAll()
+ */
+void NeoPixelManager::syncAll()
+{
+    if (!_initialized) return;
+
+    // Synchronize all Virtual→Physical buffers with Hardware-Brightness
+    // (AFTER power limiting has been applied to VirtualStrip buffers)
+    for (auto segment : _segments)
+    {
+        if (segment && segment->getVirtualStrip())
+        {
+            VirtualStrip* vstrip = segment->getVirtualStrip();
+            if (vstrip->isDirty())
+            {
+                // Propagate Hardware-Brightness from Segment to PhysicalStrips
+                uint8_t hwBrightness = segment->getHardwareBrightness();
+                vstrip->syncToPhysical(hwBrightness);
+            }
+        }
+    }
+}
+
+/**
+ * Send all PhysicalStrips to hardware (blocking)
  * @return true if all strips were successfully updated
  */
-bool NeoPixelManager::updateAll()
+bool NeoPixelManager::showAll()
 {
     if (!_initialized)
     {
@@ -526,7 +640,38 @@ bool NeoPixelManager::updateAll()
 }
 
 /**
+ * Convenience method: PowerLimit + Sync + Show all strips
+ * @return true if all strips were successfully updated
+ */
+bool NeoPixelManager::updateAll()
+{
+    applyPowerLimit(); // Phase 2: Global power management
+    syncAll();         // Phase 3: VirtualStrip → PhysicalStrip
+    return showAll();  // Phase 4: PhysicalStrip → Hardware
+}
+
+/**
+ * Update effects only (Phase 1)
+ * Calculates new pixel values without touching hardware
+ * @param deltaTime Time since last update in milliseconds
+ */
+void NeoPixelManager::updateEffects(uint32_t deltaTime)
+{
+    if (!_initialized) return;
+
+    // Update all segment effects
+    for (auto segment : _segments)
+    {
+        if (segment)
+        {
+            segment->update(deltaTime);
+        }
+    }
+}
+
+/**
  * Update all strips (non-blocking)
+ * Full pipeline: Phase 1-4
  * @param deltaTime Time since last update in milliseconds
  */
 void NeoPixelManager::update(uint32_t deltaTime)
@@ -538,109 +683,11 @@ void NeoPixelManager::update(uint32_t deltaTime)
     }
 
     // ========== PHASE 1: UPDATE EFFECTS ==========
-    // Für jedes Segment: rufe effect->update() auf
-    for (auto segment : _segments)
-    {
-        if (segment)
-        {
-            segment->update(deltaTime);
-        }
-    }
+    updateEffects(deltaTime);
 
-    // ========== PHASE 2: GLOBAL POWER MANAGEMENT ==========
-    // Apply global current limiting BEFORE sync to physical
-    // This ensures one power limit for ALL LEDs (not per VirtualStrip)
-    if (_powerManager.isEnabled())
-    {
-        // Step 1: Calculate total current across ALL VirtualStrips
-        uint32_t totalRequestedCurrent = 0;
-        for (auto vstrip : _virtualStrips)
-        {
-            if (vstrip && vstrip->getBuffer())
-            {
-                uint16_t ledCount = vstrip->getLedCount();
-                uint8_t bytesPerPixel = vstrip->getBytesPerLed();
-                uint8_t hardwareBrightness = vstrip->getHardwareBrightness();
-                const uint8_t* buffer = vstrip->getBuffer();
-
-                uint32_t stripCurrent = _powerManager.calculateTotalCurrent(
-                    buffer, ledCount, bytesPerPixel, hardwareBrightness);
-                totalRequestedCurrent += stripCurrent;
-            }
-        }
-
-        // Step 2: Check if limiting is needed
-        if (totalRequestedCurrent > _powerManager.getMaxCurrent())
-        {
-            // Calculate global scale factor
-            float globalScale = (float)_powerManager.getMaxCurrent() / (float)totalRequestedCurrent;
-
-            // Step 3: Apply same scale to ALL VirtualStrip buffers
-            for (auto vstrip : _virtualStrips)
-            {
-                if (vstrip && vstrip->getBuffer())
-                {
-                    uint16_t ledCount = vstrip->getLedCount();
-                    uint8_t bytesPerPixel = vstrip->getBytesPerLed();
-                    uint8_t* buffer = vstrip->getBuffer();
-
-                    // Scale all pixels in this VirtualStrip
-                    for (uint16_t i = 0; i < ledCount; i++)
-                    {
-                        uint16_t offset = i * bytesPerPixel;
-                        buffer[offset] = (uint8_t)(buffer[offset] * globalScale);         // R
-                        buffer[offset + 1] = (uint8_t)(buffer[offset + 1] * globalScale); // G
-                        buffer[offset + 2] = (uint8_t)(buffer[offset + 2] * globalScale); // B
-                        if (bytesPerPixel == 4)
-                        {
-                            buffer[offset + 3] = (uint8_t)(buffer[offset + 3] * globalScale); // W
-                        }
-                    }
-                }
-            }
-
-            // Update PowerManager statistics for correct reporting
-            _powerManager.setCachedCurrentValues(
-                totalRequestedCurrent,        // What was requested
-                _powerManager.getMaxCurrent() // What is actually flowing (capped at limit)
-            );
-        }
-        else
-        {
-            // No limiting needed - actual = requested
-            _powerManager.setCachedCurrentValues(totalRequestedCurrent, totalRequestedCurrent);
-        }
-    }
-
-    // ========== PHASE 3: SYNC VIRTUAL TO PHYSICAL ==========
-    // Synchronisiere alle Virtual→Physical Buffer mit Hardware-Brightness
-    // (AFTER power limiting has been applied to VirtualStrip buffers)
-    for (auto segment : _segments)
-    {
-        if (segment && segment->getVirtualStrip())
-        {
-            VirtualStrip* vstrip = segment->getVirtualStrip();
-            if (vstrip->isDirty())
-            {
-                // Propagiere Hardware-Brightness vom Segment zu PhysicalStrips
-                uint8_t hwBrightness = segment->getHardwareBrightness();
-                vstrip->syncToPhysical(hwBrightness);
-            }
-        }
-    }
-
-    // ========== PHASE 4: SEND TO HARDWARE ==========
-    // Starte DMA zu allen PhysicalStrips (non-blocking!)
-    for (auto strip : _strips)
-    {
-        if (strip)
-        {
-            strip->show();
-        }
-    }
-
-    _lastUpdateTime = 0; // Reset timing
-    _updateCount++;
+    // ========== PHASE 2-4: POWER + SYNC + HARDWARE ==========
+    updateAll();         // Calls: applyPowerLimit() → syncAll() → showAll()
+    _lastUpdateTime = 0; // Override timing for non-blocking mode
 }
 
 /**
@@ -765,17 +812,14 @@ void NeoPixelManager::clearAll()
 }
 
 /**
- * Set all strips to blackout (Switch to off) - (clear + update: blocking)
+ * Turn off all strips (clear + updateAll)
  */
-void NeoPixelManager::blackout()
+void NeoPixelManager::allOff()
 {
     clearAll();
     updateAll();
 }
 
-/**
- * Set all strips to blackout (Switch to off) - (clear + update: non-blocking)
- */
 ManagerStats NeoPixelManager::getStats() const
 {
     ManagerStats stats = {0};

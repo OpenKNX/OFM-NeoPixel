@@ -10,7 +10,7 @@
 
 /**
  * @brief Parameter Type Enum
- * 
+ *
  * Describes parameter types for effect parameters.
  * Used for UI generation and console commands.
  */

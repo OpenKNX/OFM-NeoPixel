@@ -48,8 +48,8 @@ class ConfettiEffect : public Effect
     {
         switch (index)
         {
-            case 0: return 10;   // FadeSpeed
-            case 1: return 200;  // Saturation
+            case 0: return 10;  // FadeSpeed
+            case 1: return 200; // Saturation
             default: return 0;
         }
     }
@@ -60,8 +60,8 @@ class ConfettiEffect : public Effect
         auto& state = segment->getState();
         switch (index)
         {
-            case 0: return state.aux1;  // FadeSpeed
-            case 1: return state.aux2;  // Saturation
+            case 0: return state.aux1; // FadeSpeed
+            case 1: return state.aux2; // Saturation
             default: return 0;
         }
     }
@@ -129,4 +129,3 @@ class ConfettiEffect : public Effect
 
     void reset() override {}
 };
-

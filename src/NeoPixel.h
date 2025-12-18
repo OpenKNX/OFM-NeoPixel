@@ -151,6 +151,13 @@ class NeoPixel : public OpenKNX::Module
     bool processEffectConfigCommand(const std::string& args);
     bool processPowerCommand(const std::string& args);
 
+    // Console help helper functions
+    void printDetailHelpHeader(const char* title);
+    void printDetailHelpSeparator();
+    void printDetailHelpParameter(const char* paramDesc);
+    void printDetailHelpExample(const char* example);
+    void printDetailHelpEnd();
+
     // Timing helper functions
     const char* getTimingModeName(TimingMode mode);
     TimingMode parseTimingMode(const char* str);

@@ -53,10 +53,10 @@ class CylonEffect : public Effect
     {
         switch (index)
         {
-            case 0: return 0;    // Speed (0 = auto)
-            case 1: return 0;    // Hue (red)
-            case 2: return 4;    // EyeSize
-            case 3: return 40;   // FadeAmount
+            case 0: return 0;  // Speed (0 = auto)
+            case 1: return 0;  // Hue (red)
+            case 2: return 4;  // EyeSize
+            case 3: return 40; // FadeAmount
             default: return 0;
         }
     }
@@ -67,10 +67,10 @@ class CylonEffect : public Effect
         auto& state = segment->getState();
         switch (index)
         {
-            case 0: return state.aux1;     // Speed
-            case 1: return state.aux2;     // Hue
-            case 2: return state.phase;    // EyeSize
-            case 3: return state.counter;  // FadeAmount
+            case 0: return state.aux1;    // Speed
+            case 1: return state.aux2;    // Hue
+            case 2: return state.phase;   // EyeSize
+            case 3: return state.counter; // FadeAmount
             default: return 0;
         }
     }
@@ -81,10 +81,10 @@ class CylonEffect : public Effect
         auto& state = segment->getState();
         switch (index)
         {
-            case 0: state.aux1 = value; break;     // Speed
-            case 1: state.aux2 = value; break;     // Hue
-            case 2: state.phase = value; break;    // EyeSize
-            case 3: state.counter = value; break;  // FadeAmount
+            case 0: state.aux1 = value; break;    // Speed
+            case 1: state.aux2 = value; break;    // Hue
+            case 2: state.phase = value; break;   // EyeSize
+            case 3: state.counter = value; break; // FadeAmount
         }
     }
 
@@ -100,15 +100,15 @@ class CylonEffect : public Effect
         uint16_t length = segment->getLength();
 
         // Get parameters from state
-        uint8_t speed = state.aux1;           // Speed parameter
-        uint8_t hue = state.aux2;             // Hue parameter
-        uint8_t eyeSize = state.phase;        // EyeSize parameter
-        uint8_t fadeAmount = state.counter;   // FadeAmount parameter
+        uint8_t speed = state.aux1;         // Speed parameter
+        uint8_t hue = state.aux2;           // Hue parameter
+        uint8_t eyeSize = state.phase;      // EyeSize parameter
+        uint8_t fadeAmount = state.counter; // FadeAmount parameter
         uint8_t brightness = config.intensity;
 
         // Position stored in position field (float position, range 0.0 to length-1.0)
         // Stored as fixed-point: position * 16
-        uint16_t posScaled = state.position & 0x7FFF;  // Lower 15 bits = position * 16
+        uint16_t posScaled = state.position & 0x7FFF; // Lower 15 bits = position * 16
         int8_t direction = (state.position & 0x8000) ? -1 : 1;
         float position = (float)posScaled / 16.0f;
 
@@ -139,7 +139,7 @@ class CylonEffect : public Effect
                 uint8_t eyeBrightness = brightness;
                 if (i == 0 || i == eyeSize - 1)
                 {
-                    eyeBrightness = brightness / 2;  // Dimmer edges
+                    eyeBrightness = brightness / 2; // Dimmer edges
                 }
 
                 uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, eyeBrightness);
@@ -172,4 +172,3 @@ class CylonEffect : public Effect
 
     void reset() override {}
 };
-
