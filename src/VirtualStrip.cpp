@@ -410,8 +410,12 @@ bool VirtualStrip::syncToPhysical(uint8_t hardwareBrightness)
                              r, g, b, i, r, g, b);
             }
 
-            if (_bytesPerLed >= 4)
+            // Check if this physical strip supports RGBW
+            bool stripIsRGBW = (pstrip->getColorOrder() >= ColorOrder::RGBW);
+            
+            if (_bytesPerLed >= 4 && stripIsRGBW)
             {
+                // VirtualStrip has W channel AND physical strip supports RGBW
                 uint8_t w = _buffer[bufferOffset + 3]; // White or Brightness
                 if (i == 0) {
                     Serial.printf("VirtualStrip[%u]:     RGBW mode, W=%d -> Calling PhysicalStrip->setPixel(0, %d, %d, %d, %d)\n",
@@ -425,6 +429,7 @@ bool VirtualStrip::syncToPhysical(uint8_t hardwareBrightness)
             }
             else
             {
+                // RGB-only strip or VirtualStrip doesn't have W channel
                 pstrip->setPixel(i, r, g, b);
             }
         }

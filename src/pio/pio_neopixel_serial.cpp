@@ -813,10 +813,10 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
                      ((uint32_t)src[idx + 1] << 16) | // R → bits 23-16
                      ((uint32_t)src[idx + 2] << 8) |  // B → bits 15-8
                      (uint32_t)src[idx + 3];          // W → bits 7-0 (sent last!)
-            if (i == 0) {
+/*             if (i == 0) {
                 Serial.printf("PIO Driver:           packDataToDMABuffer[0] RGBW packed word=0x%08X (G=%d,R=%d,B=%d,W=%d)\n",
                              dst[i], src[idx], src[idx+1], src[idx+2], src[idx+3]);
-            }
+            } */
         }
     }
 }
