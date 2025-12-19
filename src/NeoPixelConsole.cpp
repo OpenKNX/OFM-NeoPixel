@@ -10,6 +10,9 @@
 
 #include "NeoPixel.h"
 
+// Standard library includes
+#include <sstream>
+
 // Effect system includes
 #include "effects/Effect.h"
 #include "effects/EffectPool.h"
@@ -103,6 +106,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("neo phys add ?", "Create new physical strip (1-Wire or SPI)");
         openknx.console.printHelpLine("neo phys del <i>", "Delete physical strip by ID");
         openknx.console.printHelpLine("neo phys timing ?", "Configure timing modes");
+        openknx.console.printHelpLine("neo phys config ?", "Configure strip settings (SPI/Serial)");
 
         openknx.logger.log("");
         openknx.logger.color(CONSOLE_HEADLINE_COLOR);
@@ -181,11 +185,22 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("timing <i>", "Show current timing mode for strip");
         openknx.console.printHelpLine("timing <i> <mode>", "Set timing (auto|legacy|slow5-20|fast5-25)");
         openknx.console.printHelpLine("timing <i> info", "Show detailed timing information");
+        openknx.console.printHelpLine("config <i> info", "Show config (SPI: APA102/SK9822, Serial: WS2812B/SK6812)");
+        openknx.console.printHelpLine("config <i> dummy <0-2>", "Set dummy LED mode (SPI only, 0=none, 1=physical, 2=virtual)");
+        openknx.console.printHelpLine("config <i> frames <start> <end>", "Set frame counts (SPI only, start: 1-8, end: 1-80)");
+        openknx.console.printHelpLine("config <i> pattern <0x00|0xFF>", "Set end frame pattern (SPI only, 0x00=APA102, 0xFF=SK9822)");
+        openknx.console.printHelpLine("config <i> brightness <0-31>", "Set hardware brightness (SPI only)");
+        openknx.console.printHelpLine("config <i> freq <MHz>", "Set SPI frequency in MHz (SPI only, e.g. 7.5, 10, 15)");
+        openknx.console.printHelpLine("config <i> delay <us>", "Set start frame delay in microseconds (SPI only, 0-1000)");
+        openknx.console.printHelpLine("config <i> autodetect <on|off>", "Enable/disable chip auto-detection on init (SPI only)");
+        openknx.console.printHelpLine("config <i> detect", "Auto-detect chip type now (SPI: APA102 vs SK9822)");
         printDetailHelpSeparator();
         printDetailHelpParameter("<i>=ID/Index, <n>=LED Count, <gpio>=Pin, <clk>=Clock Pin, <data>=Data Pin");
         printDetailHelpExample("neo phys add 22 64 ws2812b     Create 1-Wire strip on GPIO22 with 64 LEDs");
         printDetailHelpExample("neo phys add 18 32 apa102 19   Create SPI strip (CLK=18, DATA=19, 32 LEDs)");
         printDetailHelpExample("neo phys timing 0 auto         Set strip 0 to auto timing");
+        printDetailHelpExample("neo phys config 0 detect       Auto-detect APA102 vs SK9822");
+        printDetailHelpExample("neo phys config 0 brightness 25 Set hardware brightness to 25");
         printDetailHelpEnd();
         return true;
     }
@@ -603,21 +618,22 @@ bool NeoPixel::processInfoCommand()
                                                                                          : "PIO2";
                             int dmaChannel = spiDriver->getDmaChannel();
                             uint32_t spiFreq = spiDriver->getSpiFrequency();
+                            float clkdiv = spiDriver->getClkdiv();
 
                             openknx.logger.logWithValues("      Pins: CLK=GPIO%d, MOSI=GPIO%d",
                                                          spiDriver->getClkPin(), spiDriver->getMosiPin());
 
                             if (dmaChannel >= 0)
                             {
-                                openknx.logger.logWithValues("      Hardware: %s/SM%d (SPI), DMA Ch%d, %dMHz",
+                                openknx.logger.logWithValues("      Hardware: %s/SM%d (SPI), DMA Ch%d, %dMHz (clkdiv: %.2f)",
                                                              pioName, spiDriver->getStateMachine(),
-                                                             dmaChannel, spiFreq / 1000000);
+                                                             dmaChannel, spiFreq / 1000000, clkdiv);
                             }
                             else
                             {
-                                openknx.logger.logWithValues("      Hardware: %s/SM%d (SPI, no DMA), %dMHz",
+                                openknx.logger.logWithValues("      Hardware: %s/SM%d (SPI, no DMA), %dMHz (clkdiv: %.2f)",
                                                              pioName, spiDriver->getStateMachine(),
-                                                             spiFreq / 1000000);
+                                                             spiFreq / 1000000, clkdiv);
                             }
                         }
                     }
@@ -1492,6 +1508,10 @@ bool NeoPixel::processPhysCommand(const std::string& args)
     else if (args.compare(0, 4, "del ") == 0)
     {
         return processPhysDelCommand(args.substr(4));
+    }
+    else if (args.compare(0, 7, "config ") == 0)
+    {
+        return processPhysConfigCommand(args.substr(7));
     }
     else
     {
@@ -3062,6 +3082,9 @@ bool NeoPixel::processHardwareBrightnessCommand(const std::string& args)
     // Set hardware brightness
     seg->setHardwareBrightness((uint8_t)brightness);
 
+    // Trigger update to apply brightness change immediately
+    _manager->updateAll();
+
     openknx.logger.logWithValues("Segment [%d] HARDWARE brightness set to %d (%.1f%%, 5-bit: %d/31)",
                                  segId, brightness, (brightness * 100.0f / 255.0f), brightness >> 3);
     openknx.logger.log("  Only effective for APA102/SK9822 (ignored for WS2812B, SK6812)");
@@ -3622,6 +3645,615 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
     // Clear LEDs after timing change to ensure clean state
     strip->clear();
     strip->show();
+
+    return true;
+}
+
+// ============================================================================
+/**
+ * @brief Process 'neo phys config' command router
+ */
+bool NeoPixel::processPhysConfigCommand(const std::string& args)
+{
+    // Parse: <id> <subcommand> [params...]
+    std::istringstream iss(args);
+    uint32_t stripId;
+    std::string subCmd;
+
+    if (!(iss >> stripId >> subCmd))
+    {
+        openknx.logger.log("ERROR: Usage: neo phys config <id> <info|dummy|frames|pattern|brightness|detect>");
+        return true;
+    }
+
+    if (subCmd == "info")
+    {
+        return processPhysConfigInfoCommand(stripId);
+    }
+    else if (subCmd == "dummy")
+    {
+        int modeInt;
+        if (!(iss >> modeInt))
+        {
+            openknx.logger.log("ERROR: Usage: neo phys config <id> dummy <0-2>");
+            return true;
+        }
+        return processPhysConfigDummyCommand(stripId, (uint8_t)modeInt);
+    }
+    else if (subCmd == "frames")
+    {
+        int startInt, endInt;
+        if (!(iss >> startInt >> endInt))
+        {
+            openknx.logger.log("ERROR: Usage: neo phys config <id> frames <start> <end>");
+            return true;
+        }
+        return processPhysConfigFramesCommand(stripId, (uint8_t)startInt, (uint8_t)endInt);
+    }
+    else if (subCmd == "pattern")
+    {
+        std::string patternStr;
+        if (!(iss >> patternStr))
+        {
+            openknx.logger.log("ERROR: Usage: neo phys config <id> pattern <0x00|0xFF>");
+            return true;
+        }
+        uint8_t pattern = (uint8_t)strtol(patternStr.c_str(), nullptr, 0);
+        return processPhysConfigPatternCommand(stripId, pattern);
+    }
+    else if (subCmd == "brightness")
+    {
+        int brightnessInt;
+        if (!(iss >> brightnessInt))
+        {
+            openknx.logger.log("ERROR: Usage: neo phys config <id> brightness <0-31>");
+            return true;
+        }
+        return processPhysConfigBrightnessCommand(stripId, (uint8_t)brightnessInt);
+    }
+    else if (subCmd == "freq" || subCmd == "frequency")
+    {
+        float freqMHz;
+        if (!(iss >> freqMHz))
+        {
+            openknx.logger.log("ERROR: Usage: neo phys config <id> freq <MHz> (e.g. 7.5, 10, 15)");
+            return true;
+        }
+        return processPhysConfigFrequencyCommand(stripId, (uint32_t)(freqMHz * 1000000.0f));
+    }
+    else if (subCmd == "delay")
+    {
+        int delayUs;
+        if (!(iss >> delayUs))
+        {
+            openknx.logger.log("ERROR: Usage: neo phys config <id> delay <us> (0-1000)");
+            return true;
+        }
+        return processPhysConfigDelayCommand(stripId, (uint32_t)delayUs);
+    }
+    else if (subCmd == "autodetect")
+    {
+        std::string onOff;
+        if (!(iss >> onOff))
+        {
+            openknx.logger.log("ERROR: Usage: neo phys config <id> autodetect <on|off>");
+            return true;
+        }
+        bool enable = (onOff == "on" || onOff == "1" || onOff == "true");
+        return processPhysConfigAutoDetectCommand(stripId, enable);
+    }
+    else if (subCmd == "detect")
+    {
+        return processPhysConfigDetectCommand(stripId);
+    }
+    else
+    {
+        openknx.logger.log("ERROR: Unknown config subcommand. Use 'neo phys ?' for help.");
+        return true;
+    }
+}
+
+/**
+ * @brief Process 'neo phys config <id> info' command
+ */
+bool NeoPixel::processPhysConfigInfoCommand(uint32_t stripId)
+{
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.log("ERROR: Strip ID not found!");
+        return true;
+    }
+
+    openknx.logger.log("");
+    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+    openknx.logger.log("══════════════════════════════════════════════════════════════════════════════════════");
+    openknx.logger.logWithPrefixAndValues("", "  Strip Configuration - Strip %d", stripId);
+    openknx.logger.log("══════════════════════════════════════════════════════════════════════════════════════");
+    openknx.logger.color(0);
+
+    // Get config
+    auto* cfg = strip->getConfig();
+    if (!cfg)
+    {
+        openknx.logger.log("ERROR: No config available for this strip");
+        return false;
+    }
+
+    // Check if SPI or Serial
+    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    auto* serialCfg = dynamic_cast<SerialStripConfig*>(cfg);
+
+    if (spiCfg)
+    {
+        // Display SPI config
+        uint8_t hwBrightness = spiCfg->getHwBrightness();
+        uint8_t dummyMode = spiCfg->getDummyLedMode();
+        uint8_t startFrames = spiCfg->getStartFrameCount();
+        uint8_t endFrames = spiCfg->getEndFrameCount();
+        uint8_t endPattern = spiCfg->getEndFramePattern();
+        uint32_t frequency = spiCfg->getSpiFrequency();
+        bool autoDetect = spiCfg->getAutoDetectChip();
+        LedProtocol detected = spiCfg->getDetectedChip();
+
+        openknx.logger.log("Type: SPI Strip (APA102/SK9822)");
+        openknx.logger.log("");
+
+        // Hardware Info (from driver)
+        auto driver = strip->getDriver();
+        if (driver)
+        {
+            auto spiDriver = dynamic_cast<PIO_NeoPixel_SPI*>(driver);
+            if (spiDriver)
+            {
+                PIO pio = spiDriver->getPio();
+                const char* pioName = (pio == pio0) ? "PIO0" : (pio == pio1) ? "PIO1"
+                                                                             : "PIO2";
+                int dmaChannel = spiDriver->getDmaChannel();
+                float clkdiv = spiDriver->getClkdiv();
+
+                openknx.logger.logWithValues("Pins: CLK=GPIO%d, MOSI=GPIO%d",
+                                             spiDriver->getClkPin(), spiDriver->getMosiPin());
+
+                if (dmaChannel >= 0)
+                {
+                    openknx.logger.logWithValues("Hardware: %s/SM%d (SPI), DMA Ch%d",
+                                                 pioName, spiDriver->getStateMachine(), dmaChannel);
+                }
+                else
+                {
+                    openknx.logger.logWithValues("Hardware: %s/SM%d (SPI, no DMA)",
+                                                 pioName, spiDriver->getStateMachine());
+                }
+
+                openknx.logger.logWithValues("SPI Frequency: %d MHz (clkdiv: %.2f)",
+                                             frequency / 1000000, clkdiv);
+                openknx.logger.log("");
+            }
+        }
+
+        uint8_t minBright = spiCfg->getHwBrightnessMin();
+        uint8_t maxBright = spiCfg->getHwBrightnessMax();
+        uint8_t defBright = spiCfg->getHwBrightnessDefault();
+        openknx.logger.logWithValues("HW Brightness: %d (range: %d-%d, default: %d)", hwBrightness, minBright, maxBright, defBright);
+
+        openknx.logger.logWithValues("Dummy LED Mode: %d (%s)",
+                                     dummyMode,
+                                     dummyMode == 0 ? "None" : (dummyMode == 1 ? "Physical" : "Virtual"));
+
+        openknx.logger.logWithValues("Start Frames: %d", startFrames);
+
+        openknx.logger.logWithValues("End Frames: %d", endFrames);
+
+        openknx.logger.logWithValues("End Frame Pattern: 0x%02X (%s)",
+                                     endPattern,
+                                     endPattern == 0x00 ? "APA102" : "SK9822");
+
+        openknx.logger.logWithValues("Auto-Detect: %s", autoDetect ? "Enabled" : "Disabled");
+
+        const char* detectedName = "Unknown";
+        if (detected == LedProtocol::APA102) detectedName = "APA102";
+        else if (detected == LedProtocol::SK9822)
+            detectedName = "SK9822";
+        openknx.logger.logWithValues("Detected Chip: %s", detectedName);
+
+        openknx.logger.log("");
+        openknx.logger.log("Tip: Clone chips often mislabeled - use 'neo phys config <id> detect' to verify");
+    }
+    else if (serialCfg)
+    {
+        // Display Serial config
+        uint8_t timingMode = static_cast<uint8_t>(serialCfg->getTimingMode());
+        uint16_t t0h = serialCfg->getT0H();
+        uint16_t t0l = serialCfg->getT0L();
+        uint16_t t1h = serialCfg->getT1H();
+        uint16_t t1l = serialCfg->getT1L();
+        uint32_t reset = serialCfg->getResetTime();
+
+        openknx.logger.log("Type: Serial Strip (WS2812B/SK6812)");
+        openknx.logger.log("");
+
+        openknx.logger.logWithValues("Timing Mode: %d", (int)timingMode);
+        openknx.logger.logWithValues("T0H (0-bit high): %d ns", t0h);
+        openknx.logger.logWithValues("T0L (0-bit low): %d ns", t0l);
+        openknx.logger.logWithValues("T1H (1-bit high): %d ns", t1h);
+        openknx.logger.logWithValues("T1L (1-bit low): %d ns", t1l);
+        openknx.logger.logWithValues("Reset Time: %d µs", reset);
+
+        openknx.logger.log("");
+        openknx.logger.log("Tip: Use 'neo phys timing <id> auto' to auto-detect optimal timing");
+    }
+    else
+    {
+        openknx.logger.log("ERROR: Unknown config type");
+        return false;
+    }
+
+    openknx.logger.log("");
+
+    return true;
+}
+
+/**
+ * @brief Process 'neo phys config <id> dummy <mode>' command
+ */
+bool NeoPixel::processPhysConfigDummyCommand(uint32_t stripId, uint8_t mode)
+{
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.log("ERROR: Strip ID not found!");
+        return true;
+    }
+
+    if (mode > 2)
+    {
+        openknx.logger.log("ERROR: Dummy mode must be 0 (none), 1 (physical), or 2 (virtual)");
+        return true;
+    }
+
+    // Get SPI config and set dummy mode
+    auto* cfg = strip->getConfig();
+    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    if (!spiCfg)
+    {
+        openknx.logger.log("ERROR: Strip is not SPI type!");
+        openknx.logger.log("  Only supported for APA102/SK9822 SPI strips");
+        return true;
+    }
+
+    spiCfg->setDummyLedMode(mode);
+    if (!strip->applyConfig())
+    {
+        openknx.logger.log("ERROR: Failed to apply config!");
+        openknx.logger.log("  Must be called before init() - requires strip re-creation");
+        return true;
+    }
+
+    openknx.logger.logWithPrefixAndValues("", "Dummy LED mode set to: %d (%s)",
+                                          mode,
+                                          mode == 0 ? "None" : (mode == 1 ? "Physical" : "Virtual"));
+    openknx.logger.log("Note: Recreate strip for changes to take effect");
+
+    return true;
+}
+
+/**
+ * @brief Process 'neo phys config <id> frames <start> <end>' command
+ */
+bool NeoPixel::processPhysConfigFramesCommand(uint32_t stripId, uint8_t start, uint8_t end)
+{
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.log("ERROR: Strip ID not found!");
+        return true;
+    }
+
+    if (start < 1 || start > 8)
+    {
+        openknx.logger.log("ERROR: Start frame count must be 1-8");
+        return true;
+    }
+
+    if (end < 1 || end > 80)
+    {
+        openknx.logger.log("ERROR: End frame count must be 1-80");
+        return true;
+    }
+
+    // Get SPI config and set frame counts
+    auto* cfg = strip->getConfig();
+    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    if (!spiCfg)
+    {
+        openknx.logger.log("ERROR: Strip is not SPI type!");
+        openknx.logger.log("  Only supported for APA102/SK9822 SPI strips");
+        return true;
+    }
+
+    spiCfg->setStartFrameCount(start);
+    spiCfg->setEndFrameCount(end);
+
+    if (!strip->applyConfig())
+    {
+        openknx.logger.log("ERROR: Failed to apply config!");
+        openknx.logger.log("  Only supported for APA102/SK9822 SPI strips");
+        return true;
+    }
+
+    openknx.logger.logWithPrefixAndValues("", "Frame counts set: start=%d, end=%d", start, end);
+    openknx.logger.log("Note: Start frame changes require strip re-creation");
+
+    return true;
+}
+
+/**
+ * @brief Process 'neo phys config <id> pattern <0x00|0xFF>' command
+ */
+bool NeoPixel::processPhysConfigPatternCommand(uint32_t stripId, uint8_t pattern)
+{
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.log("ERROR: Strip ID not found!");
+        return true;
+    }
+
+    if (pattern != 0x00 && pattern != 0xFF)
+    {
+        openknx.logger.log("ERROR: End frame pattern must be 0x00 (APA102) or 0xFF (SK9822)");
+        return true;
+    }
+
+    // Get SPI config and set pattern
+    auto* cfg = strip->getConfig();
+    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    if (!spiCfg)
+    {
+        openknx.logger.log("ERROR: Strip is not SPI type!");
+        openknx.logger.log("  Only supported for APA102/SK9822 SPI strips");
+        return true;
+    }
+
+    spiCfg->setEndFramePattern(pattern);
+
+    if (!strip->applyConfig())
+    {
+        openknx.logger.log("ERROR: Failed to set end frame pattern!");
+        openknx.logger.log("  Only supported for APA102/SK9822 SPI strips");
+        return true;
+    }
+
+    openknx.logger.logWithPrefixAndValues("", "End frame pattern set to: 0x%02X (%s)",
+                                          pattern,
+                                          pattern == 0x00 ? "APA102" : "SK9822");
+
+    return true;
+}
+
+/**
+ * @brief Process 'neo phys config <id> brightness <value>' command
+ */
+bool NeoPixel::processPhysConfigBrightnessCommand(uint32_t stripId, uint8_t brightness)
+{
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.log("ERROR: Strip ID not found!");
+        return true;
+    }
+
+    // Get config - brightness only available for SPI strips
+    auto* cfg = strip->getConfig();
+    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    if (!spiCfg)
+    {
+        openknx.logger.log("ERROR: Hardware brightness only available for SPI strips (APA102/SK9822)!");
+        openknx.logger.log("  Serial strips (WS2812B/SK6812) use software brightness");
+        return true;
+    }
+
+    const uint8_t minBright = spiCfg->getHwBrightnessMin();
+    const uint8_t maxBright = spiCfg->getHwBrightnessMax();
+
+    if (brightness < minBright || brightness > maxBright)
+    {
+        openknx.logger.logWithPrefixAndValues("", "ERROR: Brightness must be %d-%d (protocol limit)", minBright, maxBright);
+        return true;
+    }
+
+    spiCfg->setHwBrightness(brightness);
+
+    if (!strip->applyConfig())
+    {
+        openknx.logger.log("ERROR: Failed to apply config!");
+        return true;
+    }
+
+    openknx.logger.logWithPrefixAndValues("", "Hardware brightness set to: %d (range: %d-%d)", brightness, minBright, maxBright);
+    openknx.logger.log("Note: Takes effect immediately on next setPixel() call");
+
+    return true;
+}
+
+/**
+ * @brief Process 'neo phys config <id> freq <MHz>' command
+ */
+bool NeoPixel::processPhysConfigFrequencyCommand(uint32_t stripId, uint32_t frequencyHz)
+{
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.log("ERROR: Strip ID not found!");
+        return true;
+    }
+
+    // Get config - frequency only available for SPI strips
+    auto* cfg = strip->getConfig();
+    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    if (!spiCfg)
+    {
+        openknx.logger.log("ERROR: SPI frequency only available for SPI strips (APA102/SK9822)!");
+        openknx.logger.log("  Serial strips (WS2812B/SK6812) use fixed timing");
+        return true;
+    }
+
+    // Validate frequency range (1 MHz to 25 MHz typical)
+    if (frequencyHz < 1000000 || frequencyHz > 25000000)
+    {
+        openknx.logger.log("ERROR: Frequency must be 1-25 MHz");
+        openknx.logger.log("  Typical: 7.5 MHz (safe), 10 MHz (standard), 15-20 MHz (fast)");
+        return true;
+    }
+
+    spiCfg->setSpiFrequency(frequencyHz);
+
+    if (!strip->applyConfig())
+    {
+        openknx.logger.log("ERROR: Failed to apply config!");
+        return true;
+    }
+
+    openknx.logger.logWithPrefixAndValues("", "SPI frequency set to: %.1f MHz", frequencyHz / 1000000.0f);
+    openknx.logger.log("Note: Takes effect immediately");
+    openknx.logger.log("Tip: Higher frequencies = faster updates, but may cause issues on long cables");
+
+    return true;
+}
+
+/**
+ * @brief Process 'neo phys config <id> delay <us>' command
+ */
+bool NeoPixel::processPhysConfigDelayCommand(uint32_t stripId, uint32_t delayUs)
+{
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.log("ERROR: Strip ID not found!");
+        return true;
+    }
+
+    // Get config - delay only available for SPI strips
+    auto* cfg = strip->getConfig();
+    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    if (!spiCfg)
+    {
+        openknx.logger.log("ERROR: Start frame delay only available for SPI strips (APA102/SK9822)!");
+        return true;
+    }
+
+    // Validate range
+    if (delayUs > 1000)
+    {
+        openknx.logger.log("ERROR: Delay must be 0-1000 microseconds");
+        return true;
+    }
+
+    spiCfg->setStartFrameDelayUs(delayUs);
+
+    if (!strip->applyConfig())
+    {
+        openknx.logger.log("ERROR: Failed to apply config!");
+        return true;
+    }
+
+    openknx.logger.logWithPrefixAndValues("", "Start frame delay set to: %d us", delayUs);
+    openknx.logger.log("Note: Takes effect immediately on next show() call");
+
+    return true;
+}
+
+/**
+ * @brief Process 'neo phys config <id> autodetect <on|off>' command
+ */
+bool NeoPixel::processPhysConfigAutoDetectCommand(uint32_t stripId, bool enable)
+{
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.log("ERROR: Strip ID not found!");
+        return true;
+    }
+
+    // Get config - autodetect only available for SPI strips
+    auto* cfg = strip->getConfig();
+    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    if (!spiCfg)
+    {
+        openknx.logger.log("ERROR: Auto-detection only available for SPI strips (APA102/SK9822)!");
+        return true;
+    }
+
+    spiCfg->setAutoDetectChip(enable);
+
+    if (!strip->applyConfig())
+    {
+        openknx.logger.log("ERROR: Failed to apply config!");
+        return true;
+    }
+
+    openknx.logger.logWithPrefixAndValues("", "Auto-detection %s", enable ? "ENABLED" : "DISABLED");
+    if (enable)
+    {
+        openknx.logger.log("Note: Chip type will be auto-detected on next init()");
+        openknx.logger.log("Tip: Use 'neo phys config <id> detect' to detect now");
+    }
+    else
+    {
+        openknx.logger.log("Note: Using manual chip configuration (end frame pattern)");
+    }
+
+    return true;
+}
+
+/**
+ * @brief Process 'neo phys config <id> detect' command
+ */
+bool NeoPixel::processPhysConfigDetectCommand(uint32_t stripId)
+{
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.log("ERROR: Strip ID not found!");
+        return true;
+    }
+
+    LedProtocol proto = strip->getProtocol();
+    if (proto != LedProtocol::APA102 && proto != LedProtocol::SK9822)
+    {
+        openknx.logger.log("ERROR: Chip detection only available for APA102/SK9822 strips!");
+        return true;
+    }
+
+    openknx.logger.log("");
+    openknx.logger.log("Starting chip auto-detection...");
+    openknx.logger.log("Watch LEDs: RED → GREEN flash test");
+    openknx.logger.log("");
+
+    // Get SPI config and run detection
+    auto* cfg = strip->getConfig();
+    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    if (!spiCfg)
+    {
+        openknx.logger.log("ERROR: Strip is not SPI type!");
+        return true;
+    }
+
+    LedProtocol detected = spiCfg->detectChipType(strip);
+    strip->applyConfig(); // Apply detected settings
+
+    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+    const char* chipName = (detected == LedProtocol::APA102) ? "APA102" : "SK9822";
+    openknx.logger.logWithPrefixAndValues("", "Detected chip type: %s", chipName);
+    openknx.logger.color(0);
+
+    uint8_t endPattern = spiCfg->getEndFramePattern();
+    openknx.logger.logWithPrefixAndValues("", "End frame pattern: 0x%02X", endPattern);
+
+    openknx.logger.log("");
+    openknx.logger.log("Note: Detection is heuristic-based (LED count + pattern test)");
+    openknx.logger.log("      Use 'neo phys config <id> pattern <0x00|0xFF>' for manual override");
 
     return true;
 }

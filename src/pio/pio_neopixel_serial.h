@@ -158,6 +158,10 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
         if (_inst) _inst->colorOrder = order;
     }
 
+    // Configuration management (IHardwareDriver interface)
+    PhysicalStripConfig* createDefaultConfig() const override;
+    bool applyConfig(const PhysicalStripConfig* config) override;
+
     /**
      * @brief Get bytes per LED (3=RGB, 4=RGBW)
      * @return Bytes per LED or 3 if not initialized

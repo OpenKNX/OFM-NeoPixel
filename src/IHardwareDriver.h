@@ -16,6 +16,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Forward declaration
+struct PhysicalStripConfig;
+
 /**
  * LED Protocol Types
  */
@@ -121,9 +124,28 @@ class IHardwareDriver
     // Get driver implementation type (for runtime detection)
     virtual DriverImplementation getDriverType() const = 0;
 
+    // Check if driver supports hardware brightness byte (APA102/SK9822)
+    virtual bool supportsHardwareBrightness() const { return false; }
+
     // Allow changing ColorOrder after construction (default: no-op for drivers that don't support it)
     virtual void setColorOrder(ColorOrder order) { /* Default: ignore */ }
     virtual ColorOrder getColorOrder() const { return ColorOrder::RGB; } // Default fallback
+
+    // Configuration management (NEW API)
+    /**
+     * @brief Create default configuration for this driver type
+     * @return New config object (caller must delete)
+     * @note Each driver creates its appropriate config type (SpiStripConfig/SerialStripConfig)
+     */
+    virtual PhysicalStripConfig* createDefaultConfig() const = 0;
+
+    /**
+     * @brief Apply configuration to driver
+     * @param config Configuration to apply (must match driver type)
+     * @return true if config applied successfully
+     * @note Driver reads config and applies hardware settings
+     */
+    virtual bool applyConfig(const PhysicalStripConfig* config) = 0;
 };
 
 /**

@@ -1,6 +1,7 @@
 #if defined(ARDUINO_ARCH_RP2040)
 
     #include "pio_neopixel_serial.h"
+    #include "../PhysicalStripConfig.h"
     #include "OpenKNX.h"
     #include "pio_dma_shared.h"
     #include <Arduino.h>
@@ -60,6 +61,20 @@ PIO_NeoPixel_Serial* PIO_NeoPixel_Serial::_dmaHandlers[12] = {nullptr};
  */
 static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, uint pin, float clkdiv, bool rgbw)
 {
+    // ===== GPIO OPTIMIZATION FOR HIGH-SPEED SERIAL (800 kHz - 1.25 MHz) =====
+
+    // 1. Set pin LOW before init (prevents glitches during initialization)
+    gpio_put(pin, 0);
+
+    // 2. Set GPIO drive strength to maximum (12mA) for sharp edges
+    //    Critical for WS2812B timing accuracy (300-900ns pulses)
+    gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_12MA);
+
+    // 3. Set slew rate to FAST for precise timing
+    //    WS2812B timing is strict: ±150ns tolerance
+    gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
+
+    // Initialize GPIO pin for PIO control
     pio_gpio_init(pio, pin);
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true); // Set pin as output
 
@@ -250,6 +265,53 @@ PIO_NeoPixel_Serial::~PIO_NeoPixel_Serial()
         delete _inst;
         _inst = nullptr;
     }
+}
+
+// =============================================================================
+// Configuration Management (IHardwareDriver Interface)
+// =============================================================================
+
+/**
+ * @brief Create default Serial strip configuration
+ * @return New SerialStripConfig with driver-specific defaults
+ */
+PhysicalStripConfig* PIO_NeoPixel_Serial::createDefaultConfig() const
+{
+    SerialStripConfig* cfg = new SerialStripConfig();
+
+    // Set defaults from current instance (if available)
+    if (_inst)
+    {
+        cfg->setColorOrder(_inst->colorOrder);
+        // TimingMode is in PIO instance, but SerialStripConfig uses custom timing
+        // For now, just set default timing mode
+        cfg->setTimingMode(TimingMode::AUTO);
+    }
+
+    return cfg;
+}
+
+/**
+ * @brief Apply configuration to driver
+ * @param config SerialStripConfig to apply
+ * @return true if applied successfully
+ */
+bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
+{
+    if (!_inst || !config) return false;
+
+    // Type check - must be SerialStripConfig
+    const SerialStripConfig* serialCfg = dynamic_cast<const SerialStripConfig*>(config);
+    if (!serialCfg) return false;
+
+    // Apply ColorOrder
+    _inst->colorOrder = serialCfg->getColorOrder();
+
+    // Timing parameters could be applied here if needed
+    // For now, timing is set at init() based on TimingMode
+    // Future: add custom timing support (t0h, t0l, t1h, t1l, resetTime)
+
+    return true;
 }
 
 /**

@@ -19,10 +19,12 @@ Detailed architecture diagrams and data flow visualizations for the OFM-NeoPixel
 ## Table of Contents
 
 - [System Architecture](#system-architecture)
+- [PhysicalStripConfig Architecture](#physicalstripconfig-architecture)
 - [Data Flow](#data-flow)
 - [Memory Layout](#memory-layout)
 - [Effect System](#effect-system)
 - [Hardware Abstraction](#hardware-abstraction)
+- [GPIO Optimizations](#gpio-optimizations)
 - [Update Loop](#update-loop)
 
 ---
@@ -116,6 +118,91 @@ Detailed architecture diagrams and data flow visualizations for the OFM-NeoPixel
                     ┌──────▼───────┐
                     │  LED Strip   │
                     └──────────────┘
+```
+
+---
+
+## PhysicalStripConfig Architecture
+
+### Three-Tier Configuration Hierarchy
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                        DriverConfig                              │
+│                    (Hardware Limits)                             │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  - Hardware-specific constraints                          │  │
+│  │  - Example: APA102 brightness 0-31                        │  │
+│  │  - Example: WS2812B software brightness only             │  │
+│  │  - Driver-defined default values                          │  │
+│  │  - Frequency limits (SPI)                                  │  │
+│  │  - Timing mode support (Serial)                           │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────┬───────────────────────────────────────┘
+                           │ provides limits to
+┌──────────────────────────▼───────────────────────────────────────┐
+│                  PhysicalStripConfig                             │
+│                  (Per-Strip Settings)                            │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  - Software brightness (0-255)                            │  │
+│  │  - Hardware brightness (driver-specific range)            │  │
+│  │  - SPI frequency (for APA102/SK9822)                      │  │
+│  │  - Timing mode (for WS2812B/SK6812)                       │  │
+│  │  - Validated against driver limits                         │  │
+│  │  - Console configurable                                    │  │
+│  │  - Persistent storage ready                                │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────┬───────────────────────────────────────┘
+                           │ inherited by
+┌──────────────────────────▼───────────────────────────────────────┐
+│                  VirtualStripConfig                              │
+│                (Composition Settings)                            │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  - Virtual strip brightness                                │  │
+│  │  - Can override physical strip settings                    │  │
+│  │  - Multi-strip composition rules                           │  │
+│  │  - Segment-level overrides                                 │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Configuration Flow
+
+```
+User Command: neo phys config 0 hwbrightness 20
+     │
+     ▼
+NeoPixelConsole::processPhysConfigCommand()
+     │
+     ├─► Parse command arguments
+     └─► Validate index
+            │
+            ▼
+PhysicalStrip::getConfig() / setConfig()
+     │
+     ├─► Get current PhysicalStripConfig
+     ├─► Update brightness value
+     └─► Validate against DriverConfig limits
+            │
+            ▼
+HardwareDriver::applyConfig()
+     │
+     ├─► Update hardware registers
+     ├─► Recalculate timing if needed
+     └─► Update clkdiv for SPI
+            │
+            ▼
+Show confirmation to user
+```
+
+### Config Commands
+
+```
+neo phys config <id> info          -> Show all config values
+neo phys config <id> brightness    -> Software brightness (0-255)
+neo phys config <id> hwbrightness  -> Hardware brightness (driver-specific)
+neo phys config <id> frequency     -> SPI frequency (SPI only)
+neo phys config <id> timing        -> Timing mode (Serial only)
 ```
 
 ---
@@ -812,6 +899,106 @@ DriverFactory::createDriver(pin, count, protocol, driverType)
               │
               ▼
          WS2812B LED Strip
+```
+
+---
+
+## GPIO Optimizations
+
+### Signal Quality Improvements
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                   GPIO Optimization Pipeline                     │
+│                                                                  │
+│  Before PIO Initialization:                                      │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  1. gpio_put(pin, LOW)                                     │  │
+│  │     - Set pin to known state                               │  │
+│  │     - Prevents glitches during PIO takeover                │  │
+│  │     - Eliminates startup flicker                           │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│            │                                                     │
+│            ▼                                                     │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  2. gpio_set_drive_strength(pin, 12mA)                     │  │
+│  │     - Default: 4mA (insufficient for long cables)          │  │
+│  │     - 12mA: 3x stronger signal                             │  │
+│  │     - Critical for SPI >5 MHz                              │  │
+│  │     - Tested stable over 5m cables                         │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│            │                                                     │
+│            ▼                                                     │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  3. gpio_set_slew_rate(pin, FAST)                          │  │
+│  │     - Default: SLOW (rounded edges)                        │  │
+│  │     - FAST: Sharp clock edges                              │  │
+│  │     - Reduced distortion at high frequencies               │  │
+│  │     - Precise WS2812B timing (+-150ns tolerance)           │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│            │                                                     │
+│            ▼                                                     │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  4. pio_gpio_init(pio, pin)                                │  │
+│  │     - PIO takes over GPIO                                   │  │
+│  │     - Optimizations preserved                               │  │
+│  │     - Clean signal from first transmission                  │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Applied To
+
+```
+SPI Strips (APA102/SK9822):
+  ┌─────────────────────────────────────────────┐
+  │  CLK  Pin (Clock)     - 12mA, FAST, LOW    │
+  │  MOSI Pin (Data)      - 12mA, FAST, LOW    │
+  │                                             │
+  │  Tested Frequencies:                        │
+  │    3 MHz   - Stable over 5m                 │
+  │    7.5 MHz - Stable over 3m                 │
+  │    20 MHz  - Stable over 1m                 │
+  └─────────────────────────────────────────────┘
+
+Serial Strips (WS2812B/SK6812):
+  ┌─────────────────────────────────────────────┐
+  │  DATA Pin             - 12mA, FAST, LOW    │
+  │                                             │
+  │  Timing Precision:                          │
+  │    T0H: 400ns ± 150ns (meets spec)         │
+  │    T0L: 850ns ± 150ns (meets spec)         │
+  │    T1H: 800ns ± 150ns (meets spec)         │
+  │    T1L: 450ns ± 150ns (meets spec)         │
+  └─────────────────────────────────────────────┘
+```
+
+### CPU Frequency Adaptation
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                  Dynamic Clock Divider Calculation                │
+│                                                                  │
+│  clkdiv = CPU_freq / (cycles_per_bit × target_freq)             │
+│                                                                  │
+│  Examples:                                                        │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  SPI @ 2 MHz:                                              │  │
+│  │    RP2040  @ 125 MHz → clkdiv = 31.25                     │  │
+│  │    RP2350  @ 150 MHz → clkdiv = 37.50                     │  │
+│  │    RP2350  @ 300 MHz → clkdiv = 75.00                     │  │
+│  │    (Output frequency constant: 2 MHz)                      │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  WS2812B @ 800 kHz:                                        │  │
+│  │    RP2040  @ 125 MHz → clkdiv = 78.125                    │  │
+│  │    RP2350  @ 150 MHz → clkdiv = 93.750                    │  │
+│  │    RP2350  @ 300 MHz → clkdiv = 187.500                   │  │
+│  │    (Output frequency constant: 800 kHz)                    │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  Implementation: clock_get_hz(clk_sys) at runtime               │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ---

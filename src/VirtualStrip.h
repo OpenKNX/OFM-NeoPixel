@@ -81,16 +81,24 @@ class VirtualStrip
     // Sync & Transfer
     // ====================================================================
     inline bool waitForCompletion(uint32_t timeoutMs = 0); // Wait for all physical strips to complete
-    bool syncToPhysical(uint8_t hardwareBrightness = 255); // Sync buffer to physical strips (with optional hardware brightness)
+    bool syncToPhysical();                                 // Sync buffer to physical strips
     bool show();
     bool isAnyBusy() const;
 
     // ====================================================================
     // Power Management
     // ====================================================================
-    void setPowerManager(PowerManager* pm) { _powerManager = pm; }        // Set power manager for current limiting
-    PowerManager* getPowerManager() const { return _powerManager; }       // Get power manager
-    uint8_t getHardwareBrightness() const { return _hardwareBrightness; } // Get hardware brightness for power calculation
+    void setPowerManager(PowerManager* pm) { _powerManager = pm; }  // Set power manager for current limiting
+    PowerManager* getPowerManager() const { return _powerManager; } // Get power manager
+
+    /**
+     * @brief Get hardware brightness for power calculation
+     * @return Brightness value: For SPI strips (16-30 from config), for Serial strips (255 = full)
+     *
+     * NOTE: For SPI strips, reads from PhysicalStrip config. For others, returns 255.
+     * Use 'neo phys config <id> brightness <16-30>' to change SPI strip brightness.
+     */
+    uint8_t getHardwareBrightness() const;
 
     // ====================================================================
     // State & Properties
@@ -111,7 +119,6 @@ class VirtualStrip
     uint8_t _bytesPerLed;                                  // Bytes per LED (3 for RGB, 4 for RGBW)
     bool _dirty;                                           // Buffer modified?
     PowerManager* _powerManager;                           // Optional power manager for current limiting
-    uint8_t _hardwareBrightness;                           // Hardware brightness for APA102/SK9822 (0-255, default 255)
 
     PhysicalStrip* findPhysicalAtIndex(uint16_t virtualIndex, uint16_t& outPhysicalIndex) const;
     void writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);

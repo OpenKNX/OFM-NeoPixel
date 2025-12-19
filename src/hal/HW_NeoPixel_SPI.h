@@ -51,6 +51,16 @@ struct hw_neopixel_spi_inst
 
     uint32_t spiFrequency; // SPI Frequency (Hz)
 
+    // ===== Extended SPI Configuration (SK9822/APA102 Support) =====
+    uint8_t dummyLedMode;       // Dummy LED mode: 0=none, 1=physical (sacrifice LED#0), 2=virtual (LED#0 forced black)
+    uint8_t startFrameCount;    // Number of start frames (1-8, default: 8)
+    uint8_t endFrameCount;      // Number of end frames (1-80, default: 1 for APA102, varies for SK9822)
+    uint32_t startFrameDelayUs; // Delay after start frames in microseconds (0-1000, default: 0)
+    uint8_t endFramePattern;    // End frame pattern: 0x00 (APA102) or 0xFF (SK9822), default: 0x00
+    LedProtocol detectedChip;   // Detected chip type after auto-detect (APA102 or SK9822)
+    bool autoDetectChip;        // Auto-detect chip type on init (default: false)
+    uint8_t hwBrightness;       // Current hardware brightness (16-30, default: 30)
+
     bool initialized;   // Initialized?
     volatile bool busy; // Transfer in progress?
 };
@@ -107,13 +117,67 @@ class HW_NeoPixel_SPI : public IHardwareDriver
      */
     SPIClass* getSPI() const { return _inst ? _inst->spi : nullptr; }
 
+    // ===== Extended SPI Configuration API =====
+
+    /**
+     * @brief Set dummy LED mode (requires re-init)
+     * @param mode 0=none (first LED wrong color), 1=physical (sacrifice LED#0), 2=virtual (LED#0 forced black)
+     */
+    void setDummyLedMode(uint8_t mode);
+    uint8_t getDummyLedMode() const { return _inst ? _inst->dummyLedMode : 1; }
+
+    /**
+     * @brief Set start frame count (1-8, default: 8)
+     */
+    void setStartFrameCount(uint8_t count);
+    uint8_t getStartFrameCount() const { return _inst ? _inst->startFrameCount : 8; }
+
+    /**
+     * @brief Set end frame count (1-80, default: 1)
+     */
+    void setEndFrameCount(uint8_t count);
+    uint8_t getEndFrameCount() const { return _inst ? _inst->endFrameCount : 1; }
+
+    /**
+     * @brief Set delay after start frames in microseconds (0-1000, default: 0)
+     */
+    void setStartFrameDelayUs(uint32_t delayUs);
+    uint32_t getStartFrameDelayUs() const { return _inst ? _inst->startFrameDelayUs : 0; }
+
+    /**
+     * @brief Set end frame pattern (0x00 for APA102, 0xFF for SK9822)
+     */
+    void setEndFramePattern(uint8_t pattern);
+    uint8_t getEndFramePattern() const { return _inst ? _inst->endFramePattern : 0x00; }
+
+    /**
+     * @brief Enable/disable chip auto-detection
+     */
+    void setAutoDetectChip(bool enable);
+    bool getAutoDetectChip() const { return _inst ? _inst->autoDetectChip : false; }
+
+    /**
+     * @brief Get detected chip type (after auto-detect or manual set)
+     */
+    LedProtocol getDetectedChip() const { return _inst ? _inst->detectedChip : _inst->protocol; }
+
+    /**
+     * @brief Run chip auto-detection (APA102 vs SK9822)
+     * @return Detected chip type
+     */
+    LedProtocol detectChipType();
+
+    // Configuration management (IHardwareDriver interface)
+    PhysicalStripConfig* createDefaultConfig() const override;
+    bool applyConfig(const PhysicalStripConfig* config) override;
+
   private:
     hw_neopixel_spi_inst_t* _inst;
 
     SPIClass* selectSPI();
     void sendStartFrame();
     void sendEndFrame();
-    void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t brightness = 31);
+    void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
 
     static bool _spi0Used; // Track SPI0 usage
     static bool _spi1Used; // Track SPI1 usage

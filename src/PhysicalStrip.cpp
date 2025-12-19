@@ -1,5 +1,6 @@
 #include "PhysicalStrip.h"
 #include "hal/DriverFactory.h"
+#include "hal/HW_NeoPixel_SPI.h"
 #include <Arduino.h>
 
 #ifdef ARDUINO_ARCH_RP2040
@@ -27,7 +28,8 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _protocol(protocol),
       _initialized(false),
       _colorOrder(ColorOrder::NONE),
-      _hardwareBrightness(255),
+      _hasColorOrder(false),
+      _config(nullptr),
       _timingMode(timingMode)
 {
     createDriver(driverType);
@@ -50,7 +52,8 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _protocol(protocol),
       _initialized(false),
       _colorOrder(ColorOrder::NONE),
-      _hardwareBrightness(255),
+      _hasColorOrder(false),
+      _config(nullptr),
       _timingMode(timingMode)
 {
     createDriver(driverType);
@@ -74,7 +77,8 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _protocol(protocol),
       _initialized(false),
       _colorOrder(ColorOrder::NONE),
-      _hardwareBrightness(255),
+      _hasColorOrder(false),
+      _config(nullptr),
       _timingMode(TimingMode::AUTO)
 {
 #ifdef ARDUINO_ARCH_RP2040
@@ -110,6 +114,11 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
  */
 PhysicalStrip::~PhysicalStrip()
 {
+    if (_config)
+    {
+        delete _config;
+        _config = nullptr;
+    }
     if (_driver)
     {
         delete _driver;
@@ -130,6 +139,12 @@ bool PhysicalStrip::createDriver(DriverType driverType)
         _driver = nullptr;
     }
 
+    if (_config)
+    {
+        delete _config;
+        _config = nullptr;
+    }
+
     // Use DriverFactory for creation, pass timingMode parameter
     _driver = DriverFactory::create(
         _dataPin,
@@ -140,6 +155,12 @@ bool PhysicalStrip::createDriver(DriverType driverType)
         _clockPin,  // SCK = clockPin
         _timingMode // Pass through
     );
+
+    // Create default config from driver
+    if (_driver)
+    {
+        _config = _driver->createDefaultConfig();
+    }
 
     // Set default ColorOrder based on protocol (if not already set by user)
     // Driver will use these defaults via setColorOrder() call
@@ -170,6 +191,16 @@ bool PhysicalStrip::createDriver(DriverType driverType)
         }
     }
 
+    // Apply ColorOrder to config
+    if (_config && _colorOrder != ColorOrder::NONE)
+    {
+        _config->setColorOrder(_colorOrder);
+        if (_driver)
+        {
+            _driver->applyConfig(_config);
+        }
+    }
+
     return _driver != nullptr;
 }
 
@@ -187,6 +218,12 @@ bool PhysicalStrip::init()
     }
 
     if (_initialized) return true;
+
+    // Create config if not already present (for strips loaded from storage)
+    if (!_config && _driver)
+    {
+        _config = _driver->createDefaultConfig();
+    }
 
     if (!_driver->init())
     {
@@ -216,20 +253,14 @@ bool PhysicalStrip::isInitialized() const
  * @return true on success
  *
  * Passes logical RGB values directly to driver.
- * Driver handles ColorOrder mapping in rgbToBuffer().
- * For APA102/SK9822: Applies _hardwareBrightness automatically.
+ * Driver handles ColorOrder mapping and reads hwBrightness from config.
  */
 bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
     if (!_driver || !isInitialized()) return false;
 
-    // Pass RGB directly to driver - driver handles ColorOrder mapping
-    // No conversion here to avoid double-mapping!
-    if (supportsHardwareBrightness())
-    {
-        return _driver->setPixel(index, r, g, b, _hardwareBrightness);
-    }
-
+    // Pass RGB directly to driver
+    // Driver handles ColorOrder mapping and brightness from config
     return _driver->setPixel(index, r, g, b);
 }
 
@@ -506,23 +537,22 @@ bool PhysicalStrip::setTimingMode(TimingMode mode)
     return false;
 }
 
-/**
- * @brief Set hardware brightness for APA102/SK9822 (0-255)
- * Only effective for SPI protocols with global brightness support
- * Silently ignored for WS2812B, SK6812, etc.
- *
- * @param brightness Brightness value (0-255, will be scaled to 5-bit: 0-31 for APA102)
- */
-void PhysicalStrip::setHardwareBrightness(uint8_t brightness)
+// ============================================================================
+// Hardware Configuration (NEW API)
+// ============================================================================
+
+bool PhysicalStrip::isSpiStrip() const
 {
-    _hardwareBrightness = brightness;
+    return dynamic_cast<const SpiStripConfig*>(_config) != nullptr;
 }
 
-/**
- * @brief Check if this strip supports hardware brightness
- * @return true for APA102/SK9822, false for WS2812B/SK6812/etc.
- */
-bool PhysicalStrip::supportsHardwareBrightness() const
+bool PhysicalStrip::isSerialStrip() const
 {
-    return (_protocol == LedProtocol::APA102 || _protocol == LedProtocol::SK9822);
+    return dynamic_cast<const SerialStripConfig*>(_config) != nullptr;
+}
+
+bool PhysicalStrip::applyConfig()
+{
+    if (!_driver || !_config) return false;
+    return _driver->applyConfig(_config);
 }

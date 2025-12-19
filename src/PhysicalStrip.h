@@ -19,6 +19,7 @@
  */
 
 #include "IHardwareDriver.h"
+#include "PhysicalStripConfig.h"
 #include "TimingMode.h"
 #include <cstdint>
 #include <stddef.h>
@@ -86,16 +87,48 @@ class PhysicalStrip
     ColorOrder getColorOrder() const { return _colorOrder; }
 
     // ====================================================================
-    // Hardware Brightness (APA102/SK9822 only)
+    // Hardware Configuration (NEW API)
     // ====================================================================
     /**
-     * @brief Set hardware brightness for APA102/SK9822 (0-255)
-     * Only effective for SPI protocols with global brightness support
-     * Silently ignored for WS2812B, SK6812, etc.
+     * @brief Get hardware configuration object
+     * @return Config pointer (PhysicalStripConfig base class)
+     * @note Cast to SpiStripConfig* or SerialStripConfig* as needed
+     *
+     * Example:
+     *   auto* cfg = strip->getConfig();
+     *   if (auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg)) {
+     *       spiCfg->setHwBrightness(25);
+     *       strip->applyConfig();
+     *   }
      */
-    void setHardwareBrightness(uint8_t brightness);
-    uint8_t getHardwareBrightness() const { return _hardwareBrightness; }
-    bool supportsHardwareBrightness() const;
+    PhysicalStripConfig* getConfig() { return _config; }
+    const PhysicalStripConfig* getConfig() const { return _config; }
+
+    /**
+     * @brief Check if this is a SPI strip (APA102/SK9822)
+     * @return true if SPI strip, false otherwise
+     */
+    bool isSpiStrip() const;
+
+    /**
+     * @brief Check if this is a Serial strip (WS2812B/SK6812)
+     * @return true if Serial strip, false otherwise
+     */
+    bool isSerialStrip() const;
+
+    /**
+     * @brief Apply current config to driver
+     * @return true if config applied successfully
+     * @note Call this after modifying config via getConfig()
+     *
+     * Example:
+     *   auto* cfg = strip->getConfig();
+     *   if (auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg)) {
+     *       spiCfg->setHwBrightness(25);
+     *       strip->applyConfig();  // Apply changes to hardware
+     *   }
+     */
+    bool applyConfig();
 
     // ====================================================================
     // Advanced
@@ -110,16 +143,16 @@ class PhysicalStrip
     bool setTimingMode(TimingMode mode);
 
   private:
-    IHardwareDriver* _driver;    // Underlying driver
-    uint32_t _dataPin;           // GPIO pin (MOSI/Data)
-    uint32_t _clockPin;          // GPIO pin (Clock for SPI)
-    uint16_t _ledCount;          // Number of LEDs
-    LedProtocol _protocol;       // LED protocol
-    bool _initialized;           // Initialized?
-    ColorOrder _colorOrder;      // Color order for this strip
-    bool _hasColorOrder;         // Whether ColorOrder was explicitly set
-    uint8_t _hardwareBrightness; // Hardware brightness (0-255, default 255 = max, only APA102/SK9822)
-    TimingMode _timingMode;      // Timing mode for clock divider calculation
+    IHardwareDriver* _driver;     // Underlying driver
+    uint32_t _dataPin;            // GPIO pin (MOSI/Data)
+    uint32_t _clockPin;           // GPIO pin (Clock for SPI)
+    uint16_t _ledCount;           // Number of LEDs
+    LedProtocol _protocol;        // LED protocol
+    bool _initialized;            // Initialized?
+    ColorOrder _colorOrder;       // Color order for this strip
+    bool _hasColorOrder;          // Whether ColorOrder was explicitly set
+    PhysicalStripConfig* _config; // Hardware configuration (SpiStripConfig or SerialStripConfig)
+    TimingMode _timingMode;       // Timing mode for clock divider calculation
 
     bool createDriver(DriverType driverType); // Create appropriate driver
 };

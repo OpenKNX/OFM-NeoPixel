@@ -597,9 +597,9 @@ void NeoPixelManager::syncAll()
             VirtualStrip* vstrip = segment->getVirtualStrip();
             if (vstrip->isDirty())
             {
-                // Propagate Hardware-Brightness from Segment to PhysicalStrips
-                uint8_t hwBrightness = segment->getHardwareBrightness();
-                vstrip->syncToPhysical(hwBrightness);
+                // Hardware brightness is now managed via PhysicalStripConfig
+                // Use 'neo phys config <id> brightness <16-30>' to change it for SPI strips
+                vstrip->syncToPhysical();
             }
         }
     }

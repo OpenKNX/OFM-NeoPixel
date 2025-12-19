@@ -38,8 +38,7 @@ VirtualStrip::VirtualStrip(uint16_t totalLeds, ColorOrder colorOrder)
     : _totalLeds(totalLeds),
       _bytesPerLed((colorOrder == ColorOrder::RGBW || colorOrder == ColorOrder::GRBW) ? 4 : 3),
       _dirty(false),
-      _powerManager(nullptr),
-      _hardwareBrightness(255)
+      _powerManager(nullptr)
 {
     // Allocate unified buffer (always RGB/RGBW format)
     _bufferSize = (size_t)totalLeds * _bytesPerLed;
@@ -61,6 +60,45 @@ VirtualStrip::~VirtualStrip()
         _buffer = nullptr;
     }
     _physicalStrips.clear();
+}
+
+/**
+ * @brief Get hardware brightness for power calculation
+ * @return For SPI strips: actual config value (16-30), for others: 255 (full power)
+ *
+ * Reads brightness from first attached SPI strip's config.
+ * For Serial strips or if no SPI strip attached, returns 255.
+ */
+uint8_t VirtualStrip::getHardwareBrightness() const
+{
+    // Check all attached physical strips for SPI config
+    for (const auto& mapping : _physicalStrips)
+    {
+        PhysicalStrip* pstrip = mapping.physicalStrip;
+        if (!pstrip) continue;
+
+        if (pstrip->isSpiStrip())
+        {
+            auto* cfg = pstrip->getConfig();
+            auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+            if (spiCfg)
+            {
+                // Convert config brightness to 0-255 scale for power calc
+                uint8_t hwBright = spiCfg->getHwBrightness();
+                uint8_t minBright = spiCfg->getHwBrightnessMin();
+                uint8_t maxBright = spiCfg->getHwBrightnessMax();
+
+                // Scale from [min..max] to [0..255]
+                uint8_t range = maxBright - minBright;
+                if (range == 0) return 255; // Avoid division by zero
+
+                return ((uint32_t)(hwBright - minBright) * 255) / range;
+            }
+        }
+    }
+
+    // Serial strips or no SPI strips: full power
+    return 255;
 }
 
 /**
@@ -365,15 +403,12 @@ bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, 
  * 4. PhysicalStrip converts RGB to hardware ColorOrder (GRB, BGR, etc.)
  * 5. Hardware driver writes converted bytes to LED strip
  */
-bool VirtualStrip::syncToPhysical(uint8_t hardwareBrightness)
+bool VirtualStrip::syncToPhysical()
 {
     if (_physicalStrips.empty())
     {
         return true; // Nothing to synchronize
     }
-
-    // Store hardware brightness for power calculation
-    _hardwareBrightness = hardwareBrightness;
 
     // Send RGB data to each attached PhysicalStrip
     for (const auto& mapping : _physicalStrips)
@@ -381,8 +416,9 @@ bool VirtualStrip::syncToPhysical(uint8_t hardwareBrightness)
         PhysicalStrip* pstrip = mapping.physicalStrip;
         if (!pstrip) continue;
 
-        // Set hardware brightness (only effective for APA102/SK9822)
-        pstrip->setHardwareBrightness(hardwareBrightness);
+        // Hardware brightness is now managed via PhysicalStripConfig
+        // VirtualStrip's hardwareBrightness is ignored for SPI strips
+        // Use 'neo phys config <id> brightness <16-30>' to change it
 
         uint16_t offset = mapping.virtualOffset;
         uint16_t count = mapping.physicalLedCount;

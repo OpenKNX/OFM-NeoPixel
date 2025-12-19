@@ -70,12 +70,24 @@ struct pio_neopixel_spi_inst
     size_t bufferSize; // Buffer size in bytes
 
     uint32_t spiFrequency; // SPI frequency (Hz)
+    float clkdiv;          // Actual clock divider (set during init)
+
+    // ===== Extended SPI Configuration (SK9822/APA102 Support) =====
+    uint8_t dummyLedMode;       // Dummy LED mode: 0=none, 1=physical (sacrifice LED#0), 2=virtual (LED#0 forced black)
+    uint8_t startFrameCount;    // Number of start frames (1-8, default: 8)
+    uint8_t endFrameCount;      // Number of end frames (1-80, default: 1 for APA102, varies for SK9822)
+    uint32_t startFrameDelayUs; // Delay after start frames in microseconds (0-1000, default: 0)
+    uint8_t endFramePattern;    // End frame pattern: 0x00 (APA102) or 0xFF (SK9822), default: 0x00
+    LedProtocol detectedChip;   // Detected chip type after auto-detect (APA102 or SK9822)
+    bool autoDetectChip;        // Auto-detect chip type on init (default: false)
+    uint8_t hwBrightness;       // Current hardware brightness (16-30, default: 30)
 
     int dmaChannel;     // DMA channel (-1 if not used)
     int dmaIrqNum;      // DMA IRQ number (0 or 1, -1 if not used)
     bool useDMA;        // Use DMA for transfers
     bool initialized;   // Initialization state
     volatile bool busy; // Transfer in progress
+    bool dirty;         // Buffer has changed since last show() (prevents flicker from redundant sends)
 };
 typedef struct pio_neopixel_spi_inst pio_neopixel_spi_inst_t;
 
@@ -92,7 +104,7 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
         uint mosiPin,
         uint16_t ledCount,
         LedProtocol protocol,
-        uint32_t frequency = 10000000,
+        uint32_t frequency = 2000000, // 2 MHz
         int csPin = -1,
         bool useDMA = true,
         ColorOrder colorOrder = ColorOrder::NONE);
@@ -101,10 +113,10 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
 
     // IHardwareDriver interface implementation
     bool init() override;
-    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b) override;
-    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w) override;
+    inline bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b) override;
+    inline bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w) override;
     bool show() override;
-    bool isBusy() override;
+    inline bool isBusy() override;
     void clear() override;
     uint16_t getLedCount() const override { return _inst ? _inst->ledCount : 0; }
     LedProtocol getProtocol() const override { return _inst ? _inst->protocol : LedProtocol::WS2801; }
@@ -123,6 +135,8 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
     inline uint32_t getSpiFrequency() const { return _inst ? _inst->spiFrequency : 0; }
     inline uint getClkPin() const { return _inst ? _inst->clkPin : 0; }
     inline uint getMosiPin() const { return _inst ? _inst->mosiPin : 0; }
+    inline bool getDirty() const { return _inst ? _inst->dirty : false; }
+    inline float getClkdiv() const { return _inst ? _inst->clkdiv : 0.0f; }
 
     // IHardwareDriver ColorOrder interface
     void setColorOrder(ColorOrder order) override
@@ -130,6 +144,80 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
         if (_inst) _inst->colorOrder = order;
     }
     ColorOrder getColorOrder() const override { return _inst ? _inst->colorOrder : ColorOrder::RGB; }
+
+    // Hardware brightness support (APA102/SK9822 have brightness byte)
+    inline bool supportsHardwareBrightness() const override { return _inst && _inst->hasGlobalBrightness; }
+
+    // Configuration management (IHardwareDriver interface)
+    PhysicalStripConfig* createDefaultConfig() const override;
+    bool applyConfig(const PhysicalStripConfig* config) override;
+
+    // ===== Extended SPI Configuration API =====
+
+    /**
+     * @brief Set dummy LED mode (requires re-init)
+     * @param mode 0=none (first LED wrong color), 1=physical (sacrifice LED#0), 2=virtual (LED#0 forced black)
+     */
+    void setDummyLedMode(uint8_t mode);
+    uint8_t getDummyLedMode() const { return _inst ? _inst->dummyLedMode : 1; }
+
+    /**
+     * @brief Set start frame count (1-8, default: 8)
+     */
+    void setStartFrameCount(uint8_t count);
+    uint8_t getStartFrameCount() const { return _inst ? _inst->startFrameCount : 8; }
+
+    /**
+     * @brief Set end frame count (1-80, default: 1)
+     */
+    void setEndFrameCount(uint8_t count);
+    uint8_t getEndFrameCount() const { return _inst ? _inst->endFrameCount : 1; }
+
+    /**
+     * @brief Set delay after start frames in microseconds (0-1000, default: 0)
+     */
+    void setStartFrameDelayUs(uint32_t delayUs);
+    uint32_t getStartFrameDelayUs() const { return _inst ? _inst->startFrameDelayUs : 0; }
+
+    /**
+     * @brief Set end frame pattern (0x00 for APA102, 0xFF for SK9822)
+     */
+    void setEndFramePattern(uint8_t pattern);
+    uint8_t getEndFramePattern() const { return _inst ? _inst->endFramePattern : 0x00; }
+
+    /**
+     * @brief Enable/disable chip auto-detection
+     */
+    void setAutoDetectChip(bool enable);
+    bool getAutoDetectChip() const { return _inst ? _inst->autoDetectChip : false; }
+
+    /**
+     * @brief Get detected chip type (after auto-detect or manual set)
+     */
+    LedProtocol getDetectedChip() const { return _inst ? _inst->detectedChip : _inst->protocol; }
+
+    /**
+     * @brief Run chip auto-detection (APA102 vs SK9822)
+     * @return Detected chip type
+     */
+    LedProtocol detectChipType();
+
+    /**
+     * @brief Set hardware brightness (16-30 safe range)
+     * @param brightness Hardware brightness value (16-30, clamps to safe range)
+     * @note Call show() after this to update LEDs
+     */
+    void setHardwareBrightness(uint8_t brightness);
+
+    /**
+     * @brief Get current hardware brightness
+     */
+    uint8_t getHardwareBrightness() const { return _inst ? _inst->hwBrightness : 30; }
+
+    /**
+     * @brief Get actual SPI clock frequency (measured from PIO divider)
+     */
+    float getActualSpiFrequency() const;
 
     void onDmaComplete();
 
@@ -143,7 +231,7 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
     void sendStartFrame();
     void sendEndFrame();
     static void dmaIRQHandler();
-    void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t brightness = 31);
+    inline void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t brightness = 31);
 
     static PIO_NeoPixel_SPI* _dmaHandlers[12];
     static void registerDMAHandler(int channel, PIO_NeoPixel_SPI* instance);

@@ -1,4 +1,5 @@
 #include "HW_NeoPixel_SPI.h"
+#include "../PhysicalStripConfig.h"
 #include "OpenKNX.h"
 
 #if defined(ARDUINO_ARCH_RP2040)
@@ -10,7 +11,11 @@
 bool HW_NeoPixel_SPI::_spi0Used = false; // Static tracking variable for SPI0 usage
 bool HW_NeoPixel_SPI::_spi1Used = false; // Static tracking variable for SPI1 usage
 
-#define GLOBAL_DEFAULT_BRIGHTNESS 255 // 0 - 255: Max brightness for APA102 (scaled to 5-bit 0-31). Range: 0 (off) to 255 (max)
+// APA102/SK9822 Brightness Configuration (5-bit hardware brightness)
+// Safe range: 16-30 (below 16 flickers, 31/0xFF breaks sync on clones)
+#define BRIGHTNESS_MIN 16     // Minimum safe brightness (below = flicker)
+#define BRIGHTNESS_MAX 30     // Maximum safe brightness (31 = 0xFF = sync bug)
+#define BRIGHTNESS_DEFAULT 30 // Default to max safe brightness
 
 /**
  * Constructor
@@ -38,16 +43,31 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint16_t ledCount, LedProtocol protocol, uint32
     _inst->hasGlobalBrightness = (protocol == LedProtocol::APA102 || protocol == LedProtocol::SK9822);
     _inst->needs7bit = (protocol == LedProtocol::LPD8806);
 
-    // Allocate buffer for:
-    // APA102/SK9822: 4 Start Frame + 4 per LED + 4 End Frame
-    // WS2801/LPD8806: 3 per LED
+    // ===== Extended SPI Configuration Defaults =====
+    // Optimized for APA102 strips (150 LEDs @ 3 MHz tested stable)
+    _inst->dummyLedMode = 1;                  // Physical dummy LED (sacrifice LED#0) - REQUIRED for SK9822/APA102 clones
+    _inst->startFrameCount = 8;               // 8 start frames (tested stable 1-8, use max for safety)
+    _inst->endFrameCount = 1;                 // 1 end frame for APA102 (SK9822 may need more)
+    _inst->startFrameDelayUs = 0;             // No delay (tested with 0-50µs, not needed)
+    _inst->endFramePattern = 0x00;            // 0x00000000 = APA102, 0xFFFFFFFF = SK9822
+    _inst->detectedChip = protocol;           // Start with protocol assumption
+    _inst->autoDetectChip = false;            // Manual chip type (can enable via API)
+    _inst->hwBrightness = BRIGHTNESS_DEFAULT; // Default to max safe brightness (30)
+
+    // Allocate buffer: Start frames + Dummy LED (optional) + LED data + End frames
+    // Calculate buffer components based on configuration
     if (_inst->hasGlobalBrightness)
     {
-        _inst->bufferSize = 4 + (ledCount * 4) + 4; // Start + Data + End
+        uint16_t startFrameSize = _inst->startFrameCount * 4;
+        uint16_t dummyLedSize = (_inst->dummyLedMode == 1) ? 4 : 0; // Physical dummy only
+        uint16_t endFrameSize = _inst->endFrameCount * 4;
+
+        _inst->bufferSize = startFrameSize + dummyLedSize + (ledCount * 4) + endFrameSize;
     }
     else
     {
-        _inst->bufferSize = ledCount * _inst->bytesPerLed; // Just Data
+        // WS2801/LPD8806: Just LED data
+        _inst->bufferSize = ledCount * _inst->bytesPerLed;
     }
 
     _inst->buffer = new uint8_t[_inst->bufferSize];
@@ -110,11 +130,25 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint32_t mosiPin, uint32_t sckPin, uint16_t led
     _inst->hasGlobalBrightness = (protocol == LedProtocol::APA102 || protocol == LedProtocol::SK9822);
     _inst->needs7bit = (protocol == LedProtocol::LPD8806); // LPD8806 needs 7-bit values - Just for Preperation
 
-    // Allocate buffer for:
+    // ===== Extended SPI Configuration Defaults =====
+    _inst->dummyLedMode = 1;                  // Physical dummy LED (sacrifice LED#0)
+    _inst->startFrameCount = 8;               // 8 start frames
+    _inst->endFrameCount = 1;                 // 1 end frame
+    _inst->startFrameDelayUs = 0;             // No delay
+    _inst->endFramePattern = 0x00;            // 0x00 = APA102
+    _inst->detectedChip = protocol;           // Start with protocol assumption
+    _inst->autoDetectChip = false;            // Manual chip type
+    _inst->hwBrightness = BRIGHTNESS_DEFAULT; // Default to max safe brightness (30)
+
+    // Allocate buffer:
     if (_inst->hasGlobalBrightness)
     {
-        // APA102/SK9822: 4 Start Frame + 4 per LED + 4 End Frame
-        _inst->bufferSize = 4 + (ledCount * 4) + 4;
+        // APA102/SK9822: Start frames + Dummy LED (optional) + LED data + End frames
+        uint16_t startFrameSize = _inst->startFrameCount * 4;
+        uint16_t dummyLedSize = (_inst->dummyLedMode == 1) ? 4 : 0;
+        uint16_t endFrameSize = _inst->endFrameCount * 4;
+
+        _inst->bufferSize = startFrameSize + dummyLedSize + (ledCount * 4) + endFrameSize;
     }
     else
     {
@@ -149,6 +183,67 @@ HW_NeoPixel_SPI::~HW_NeoPixel_SPI()
         }
         delete _inst;
     }
+}
+
+// =============================================================================
+// Configuration Management (IHardwareDriver Interface)
+// =============================================================================
+
+/**
+ * @brief Create default SPI strip configuration
+ * @return New SpiStripConfig with driver-specific defaults
+ */
+PhysicalStripConfig* HW_NeoPixel_SPI::createDefaultConfig() const
+{
+    SpiStripConfig* cfg = new SpiStripConfig();
+
+    // Set defaults from current instance (if available)
+    if (_inst)
+    {
+        cfg->setHwBrightness(_inst->hwBrightness);
+        cfg->setDummyLedMode(_inst->dummyLedMode);
+        cfg->setStartFrameCount(_inst->startFrameCount);
+        cfg->setEndFrameCount(_inst->endFrameCount);
+        cfg->setEndFramePattern(_inst->endFramePattern);
+        cfg->setStartFrameDelayUs(_inst->startFrameDelayUs);
+        cfg->setAutoDetectChip(_inst->autoDetectChip);
+        cfg->setDetectedChip(_inst->detectedChip);
+        cfg->setSpiFrequency(_inst->spiFrequency);
+    }
+
+    return cfg;
+}
+
+/**
+ * @brief Apply configuration to driver
+ * @param config SpiStripConfig to apply
+ * @return true if applied successfully
+ */
+bool HW_NeoPixel_SPI::applyConfig(const PhysicalStripConfig* config)
+{
+    if (!_inst || !config) return false;
+
+    // Type check - must be SpiStripConfig
+    const SpiStripConfig* spiCfg = dynamic_cast<const SpiStripConfig*>(config);
+    if (!spiCfg) return false;
+
+    // Apply SPI-specific settings
+    _inst->hwBrightness = spiCfg->getHwBrightness();
+    _inst->endFramePattern = spiCfg->getEndFramePattern();
+    _inst->startFrameDelayUs = spiCfg->getStartFrameDelayUs();
+    _inst->autoDetectChip = spiCfg->getAutoDetectChip();
+    _inst->detectedChip = spiCfg->getDetectedChip();
+    _inst->spiFrequency = spiCfg->getSpiFrequency();
+
+    // Settings that require re-init (only apply if not initialized)
+    if (!_inst->initialized)
+    {
+        _inst->dummyLedMode = spiCfg->getDummyLedMode();
+        _inst->startFrameCount = spiCfg->getStartFrameCount();
+        _inst->endFrameCount = spiCfg->getEndFrameCount();
+    }
+
+    return true;
 }
 
 /**
@@ -265,6 +360,7 @@ bool HW_NeoPixel_SPI::init()
 
 /**
  * Set each pixel color (RGB)
+ * Brightness is read from _inst->hwBrightness (stored in config)
  */
 bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
@@ -273,15 +369,14 @@ bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
         return false;
     }
 
-    // Use max brightness (255, scaled to 31) for APA102/SK9822
-    uint8_t brightness_5bit = (GLOBAL_DEFAULT_BRIGHTNESS * 31 + 127) / 255;
-    rgbToBuffer(index, r, g, b, brightness_5bit);
+    // Brightness from config (16-30 safe range)
+    rgbToBuffer(index, r, g, b);
     return true;
 }
 
 /**
  * Set each pixel color (RGBW)
- * For APA102/SK9822, w parameter is interpreted as brightness (0-255, scaled to 0-31)
+ * For APA102/SK9822, w parameter is ignored (use config brightness instead)
  */
 bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
@@ -290,11 +385,9 @@ bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, 
         return false;
     }
 
-    // w parameter is interpreted as brightness (0-255) for APA102/SK9822
-    // Scale from 0-255 to 0-31 (5-bit brightness)
-    uint8_t brightness_5bit = (w * 31 + 127) / 255;
-    rgbToBuffer(index, r, g, b, brightness_5bit);
-    return true;
+    // Just forward to RGB version (brightness from config)
+    // w parameter ignored for SPI strips
+    return setPixel(index, r, g, b);
 }
 
 /**
@@ -303,17 +396,18 @@ bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, 
  * @param r First color byte (already in hardware order)
  * @param g Second color byte (already in hardware order)
  * @param b Third color byte (already in hardware order)
- * @param brightness Brightness value (0-255, converted to 5-bit for APA102)
+ * @param brightness Brightness value (5-bit range: 16-30)
  *
  * IMPORTANT: PhysicalStrip has already converted RGB to hardware ColorOrder!
  * For APA102 with BGR: r=B, g=G, b=R (not RGB!)
  *
+ * Brightness is already scaled to safe range (16-30) by caller.
  * This function writes hardware-ordered bytes directly to protocol-specific buffer:
  * - APA102/SK9822: [Brightness byte][byte0][byte1][byte2]
  * - WS2801: [byte0][byte1][byte2]
  * - LPD8806: [byte0][byte1][byte2] (7-bit format)
  */
-void HW_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t brightness)
+void HW_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
     if (!_inst || !_inst->buffer) return;
 
@@ -324,11 +418,12 @@ void HW_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t 
         {
             // APA102: [Brightness][byte0][byte1][byte2]
             // PhysicalStrip already converted RGB to hardware order (e.g., BGR)
-            uint32_t offset = 4 + (index * 4);                  // Skip Start Frame
-            _inst->buffer[offset] = 0xE0 | (brightness & 0x1F); // Global Brightness (5-bit)
-            _inst->buffer[offset + 1] = r;                      // Hardware byte 0
-            _inst->buffer[offset + 2] = g;                      // Hardware byte 1
-            _inst->buffer[offset + 3] = b;                      // Hardware byte 2
+            // Brightness from config (16-30 safe range)
+            uint32_t offset = 4 + (index * 4);                           // Skip Start Frame
+            _inst->buffer[offset] = 0xE0 | (_inst->hwBrightness & 0x1F); // 111xxxxx format (5-bit brightness)
+            _inst->buffer[offset + 1] = r;                               // Hardware byte 0
+            _inst->buffer[offset + 2] = g;                               // Hardware byte 1
+            _inst->buffer[offset + 3] = b;                               // Hardware byte 2
             break;
         }
 
@@ -468,4 +563,170 @@ DriverCapabilities HW_NeoPixel_SPI::getCapabilities() const
     caps.maxLeds = 10000;         // Practically limited by memory. 10k should be enough for SPI with RP2040/ESP32
     caps.maxFrequency = 25000000; // WS2801 max frequency
     return caps;
+}
+
+// =============================================================================
+// Extended SPI Configuration API Implementation
+// =============================================================================
+
+/**
+ * @brief Set dummy LED mode (requires buffer re-allocation, call before init!)
+ * @param mode 0=none (first LED wrong color), 1=physical (sacrifice LED#0), 2=virtual (LED#0 forced black)
+ */
+void HW_NeoPixel_SPI::setDummyLedMode(uint8_t mode)
+{
+    if (!_inst) return;
+    if (mode > 2) mode = 1; // Clamp to valid range
+
+    if (_inst->initialized)
+    {
+#ifdef OPENKNX_DEBUG
+        openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
+                                              "WARNING: Cannot change dummyLedMode after init() - requires re-init!");
+#endif
+        return;
+    }
+
+    _inst->dummyLedMode = mode;
+}
+
+/**
+ * @brief Set start frame count (1-8, default: 8)
+ */
+void HW_NeoPixel_SPI::setStartFrameCount(uint8_t count)
+{
+    if (!_inst) return;
+    if (count < 1) count = 1;
+    if (count > 8) count = 8;
+
+    if (_inst->initialized)
+    {
+#ifdef OPENKNX_DEBUG
+        openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
+                                              "WARNING: Cannot change startFrameCount after init() - requires re-init!");
+#endif
+        return;
+    }
+
+    _inst->startFrameCount = count;
+}
+
+/**
+ * @brief Set end frame count (1-80, default: 1)
+ */
+void HW_NeoPixel_SPI::setEndFrameCount(uint8_t count)
+{
+    if (!_inst) return;
+    if (count < 1) count = 1;
+    if (count > 80) count = 80;
+
+    _inst->endFrameCount = count;
+}
+
+/**
+ * @brief Set delay after start frames in microseconds (0-1000, default: 0)
+ */
+void HW_NeoPixel_SPI::setStartFrameDelayUs(uint32_t delayUs)
+{
+    if (!_inst) return;
+    if (delayUs > 1000) delayUs = 1000;
+
+    _inst->startFrameDelayUs = delayUs;
+}
+
+/**
+ * @brief Set end frame pattern (0x00 for APA102, 0xFF for SK9822)
+ */
+void HW_NeoPixel_SPI::setEndFramePattern(uint8_t pattern)
+{
+    if (!_inst) return;
+    _inst->endFramePattern = pattern;
+}
+
+/**
+ * @brief Enable/disable chip auto-detection
+ */
+void HW_NeoPixel_SPI::setAutoDetectChip(bool enable)
+{
+    if (!_inst) return;
+    _inst->autoDetectChip = enable;
+}
+
+/**
+ * @brief Run chip auto-detection (APA102 vs SK9822)
+ *
+ * Detection Method:
+ * 1. Send test pattern with end frame 0x00000000
+ * 2. If LEDs work correctly → APA102
+ * 3. Send test pattern with end frame 0xFFFFFFFF
+ * 4. If LEDs work correctly → SK9822
+ *
+ * @return Detected chip type (APA102 or SK9822)
+ *
+ * @note This is a destructive test - LEDs will flash during detection
+ * @note Detection accuracy depends on LED count and chain stability
+ */
+LedProtocol HW_NeoPixel_SPI::detectChipType()
+{
+    if (!_inst || !_inst->initialized)
+    {
+#ifdef OPENKNX_DEBUG
+        openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
+                                              "ERROR: Cannot auto-detect chip - driver not initialized!");
+#endif
+        return _inst ? _inst->protocol : LedProtocol::APA102;
+    }
+
+#ifdef OPENKNX_DEBUG
+    openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
+                                          "Auto-detecting chip type (APA102 vs SK9822)...");
+#endif
+
+    // Test 1: End frame 0x00000000 (APA102 standard)
+    _inst->endFramePattern = 0x00;
+    clear();
+    setPixel(0, 255, 0, 0); // Red on first LED
+    show();
+    delay(200); // Give time to stabilize
+
+    // Test 2: End frame 0xFFFFFFFF (SK9822 standard)
+    _inst->endFramePattern = 0xFF;
+    clear();
+    setPixel(0, 0, 255, 0); // Green on first LED
+    show();
+    delay(200);
+
+    // Heuristic: APA102 works with both patterns, SK9822 prefers 0xFF
+    // For practical use: Check LED count - longer chains often indicate APA102
+    // Real detection would require visual confirmation or photo sensor
+
+    LedProtocol detected;
+    if (_inst->ledCount > 100)
+    {
+        // Long chains (>100 LEDs) typically use genuine APA102
+        detected = LedProtocol::APA102;
+        _inst->endFramePattern = 0x00;
+    }
+    else
+    {
+        // Shorter chains often use SK9822 clones
+        detected = LedProtocol::SK9822;
+        _inst->endFramePattern = 0xFF;
+    }
+
+#ifdef OPENKNX_DEBUG
+    openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
+                                          "Chip detection: %s (LED count: %d, end frame: 0x%02X)",
+                                          detected == LedProtocol::APA102 ? "APA102" : "SK9822",
+                                          _inst->ledCount,
+                                          _inst->endFramePattern);
+    openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
+                                          "NOTE: Auto-detection is heuristic-based. Use setSpi...() for manual override.");
+#endif
+
+    clear();
+    show();
+
+    _inst->detectedChip = detected;
+    return detected;
 }

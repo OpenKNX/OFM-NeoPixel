@@ -16,6 +16,7 @@ A high-performance, hardware-optimized LED control library for addressable RGB/R
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
   - [System Overview](#system-overview)
+  - [PhysicalStripConfig Architecture](#physicalstripconfig-architecture)
   - [Data Flow with Global Power Management](#data-flow-with-global-power-management)
   - [Memory Layout](#memory-layout)
   - [ColorOrder Architecture](#colororder-architecture)
@@ -26,9 +27,11 @@ A high-performance, hardware-optimized LED control library for addressable RGB/R
   - [Wiring](#wiring)
   - [Power Considerations](#power-considerations)
   - [Timing Modes](#timing-modes)
+  - [GPIO Optimizations](#gpio-optimizations)
 - [Console Commands](#console-commands)
   - [Core Commands](#core-commands)
   - [Physical Strip Commands](#physical-strip-commands)
+  - [Physical Strip Config Commands](#physical-strip-config-commands)
   - [Virtual Strip Commands](#virtual-strip-commands)
   - [Segment Commands](#segment-commands)
   - [Effect Commands](#effect-commands)
@@ -72,7 +75,16 @@ This design enables complex LED configurations with minimal CPU overhead through
 
 ## Key Features
 
-### Timing Modes (NEW)
+### PhysicalStripConfig Architecture (NEW)
+
+- **Three-Tier Hierarchy**: DriverConfig -> PhysicalStripConfig -> VirtualStripConfig
+- **Driver-Defined Limits**: Hardware-specific constraints (e.g. APA102 brightness 0-31)
+- **Type-Safe Configuration**: Validated config structs with range checking
+- **Persistent Storage Ready**: EEPROM/Flash support for config persistence
+- **Console Configuration**: Runtime changes via `neo phys config` commands
+- **Config Versioning**: Future-proof config format with version tracking
+
+### Timing Modes
 
 - **11 Timing Modes**: AUTO, AUTO_LEGACY, SLOW_5-20%, FAST_5-25%
 - **RP2350/RP2040 Compatible**: AUTO_LEGACY mode for WS2812C/D onboard LEDs (adapts to any CPU frequency)
@@ -80,6 +92,15 @@ This design enables complex LED configurations with minimal CPU overhead through
 - **Overclock Safe**: Automatic CPU frequency detection (125-300+ MHz)
 - **Console Commands**: Inspect and modify timing with `neo phys timing`
 - **Bitrate Range**: 640 kHz (SLOW_20PCT) to 1000 kHz (FAST_25PCT)
+
+### GPIO Optimizations (NEW)
+
+- **12mA Drive Strength**: 3x stronger than default (4mA) for long cables
+- **FAST Slew Rate**: Sharp clock edges, reduced distortion >5 MHz
+- **Glitch Prevention**: Pins set LOW before PIO init to eliminate startup flicker
+- **SPI Optimized**: Tested stable at 3-20 MHz over 5m cables
+- **Serial Optimized**: WS2812B timing precision (+-150ns tolerance)
+- **CPU Frequency Adaptive**: Auto-adjusts clkdiv for 125-300 MHz operation
 
 ### Effect System
 
@@ -962,6 +983,46 @@ neo phys timing <index> info
     # Includes: CPU frequency, PIO details, clock divider, actual bitrate
     # Example:
     neo phys timing 0 info
+```
+
+### Physical Strip Config Commands
+
+```bash
+neo phys config <index> info
+    # Show complete config for physical strip
+    # Displays: Protocol, timing, brightness, hardware brightness, GPIO pins,
+    #           PIO/SM allocation, DMA channel, frequency + clkdiv
+    # Example output:
+    #   Type: SPI Strip (APA102/SK9822)
+    #   Pins: CLK=GPIO2, MOSI=GPIO4
+    #   Hardware: PIO0/SM0 (SPI), DMA Ch7
+    #   SPI Frequency: 3 MHz (clkdiv: 50.00)
+    #   HW Brightness: 18 (range: 0-31, default: 16)
+    neo phys config 0 info
+
+neo phys config <index> brightness [value]
+    # Get/Set software brightness (0-255)
+    neo phys config 0 brightness        # Show current value
+    neo phys config 0 brightness 128    # Set to 50%
+
+neo phys config <index> hwbrightness [value]
+    # Get/Set hardware brightness (driver-specific range)
+    # APA102/SK9822: 0-31 (safe range: 16-30)
+    # WS2812B: 0-255 (not used, software only)
+    neo phys config 0 hwbrightness      # Show current + limits
+    neo phys config 0 hwbrightness 20   # Set to 20/31
+
+neo phys config <index> frequency [hz]
+    # Get/Set SPI frequency (SPI strips only)
+    # Tested stable: 3-20 MHz over 5m cables
+    neo phys config 0 frequency          # Show current
+    neo phys config 0 frequency 5000000  # Set to 5 MHz
+
+neo phys config <index> timing [mode]
+    # Get/Set timing mode (Serial strips only)
+    # Same as 'neo phys timing' command
+    neo phys config 0 timing             # Show current
+    neo phys config 0 timing auto_legacy # Set mode
 ```
 
 ### Virtual Strip Commands
