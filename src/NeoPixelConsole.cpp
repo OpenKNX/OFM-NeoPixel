@@ -3784,8 +3784,8 @@ bool NeoPixel::processPhysConfigInfoCommand(uint32_t stripId)
     }
 
     // Check if SPI or Serial
-    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
-    auto* serialCfg = dynamic_cast<SerialStripConfig*>(cfg);
+    SpiStripConfig* spiCfg = cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
+    SerialStripConfig* serialCfg = cfg->isSerialConfig() ? static_cast<SerialStripConfig*>(cfg) : nullptr;
 
     if (spiCfg)
     {
@@ -3795,7 +3795,6 @@ bool NeoPixel::processPhysConfigInfoCommand(uint32_t stripId)
         uint8_t startFrames = spiCfg->getStartFrameCount();
         uint8_t endFrames = spiCfg->getEndFrameCount();
         uint8_t endPattern = spiCfg->getEndFramePattern();
-        uint32_t frequency = spiCfg->getSpiFrequency();
         bool autoDetect = spiCfg->getAutoDetectChip();
         LedProtocol detected = spiCfg->getDetectedChip();
 
@@ -3806,6 +3805,8 @@ bool NeoPixel::processPhysConfigInfoCommand(uint32_t stripId)
         auto driver = strip->getDriver();
         if (driver)
         {
+#ifdef ARDUINO_ARCH_RP2040
+            uint32_t frequency = spiCfg->getSpiFrequency();
             auto spiDriver = dynamic_cast<PIO_NeoPixel_SPI*>(driver);
             if (spiDriver)
             {
@@ -3833,6 +3834,7 @@ bool NeoPixel::processPhysConfigInfoCommand(uint32_t stripId)
                                              frequency / 1000000, clkdiv);
                 openknx.logger.log("");
             }
+#endif // ARDUINO_ARCH_RP2040
         }
 
         uint8_t minBright = spiCfg->getHwBrightnessMin();
@@ -3917,7 +3919,7 @@ bool NeoPixel::processPhysConfigDummyCommand(uint32_t stripId, uint8_t mode)
 
     // Get SPI config and set dummy mode
     auto* cfg = strip->getConfig();
-    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    SpiStripConfig* spiCfg = cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
     if (!spiCfg)
     {
         openknx.logger.log("ERROR: Strip is not SPI type!");
@@ -3925,18 +3927,41 @@ bool NeoPixel::processPhysConfigDummyCommand(uint32_t stripId, uint8_t mode)
         return true;
     }
 
+    // Check if already initialized
+    if (strip->isInitialized())
+    {
+        openknx.logger.log("WARNING: Dummy LED mode change requires strip recreation!");
+        openknx.logger.log("  The strip is already initialized, which means the buffer is already allocated.");
+        openknx.logger.log("  Changing dummy LED mode requires buffer re-allocation.");
+        openknx.logger.log("");
+        openknx.logger.log("  Solution: Restart device or recreate strip:");
+        openknx.logger.logWithValues("    1. neo phys del %d", stripId);
+        openknx.logger.log("    2. Create new strip with correct dummy LED mode");
+        openknx.logger.logWithValues("    3. neo phys config %d dummy %d", stripId, mode);
+        openknx.logger.log("");
+        openknx.logger.log("  Or: Simply restart the device after setting this value.");
+        openknx.logger.log("");
+        
+        // Still set the mode in config so it's applied on next restart/recreation
+        spiCfg->setDummyLedMode(mode);
+        openknx.logger.logWithPrefixAndValues("", "Dummy LED mode set to: %d (%s) - will take effect on next strip creation",
+                                              mode,
+                                              mode == 0 ? "None" : (mode == 1 ? "Physical" : "Virtual"));
+        return true;
+    }
+    
+    // Strip not initialized yet - we can safely change the mode
     spiCfg->setDummyLedMode(mode);
     if (!strip->applyConfig())
     {
         openknx.logger.log("ERROR: Failed to apply config!");
-        openknx.logger.log("  Must be called before init() - requires strip re-creation");
         return true;
     }
 
     openknx.logger.logWithPrefixAndValues("", "Dummy LED mode set to: %d (%s)",
                                           mode,
                                           mode == 0 ? "None" : (mode == 1 ? "Physical" : "Virtual"));
-    openknx.logger.log("Note: Recreate strip for changes to take effect");
+    openknx.logger.log("SUCCESS: Config applied - strip will use this mode when initialized");
 
     return true;
 }
@@ -3967,7 +3992,7 @@ bool NeoPixel::processPhysConfigFramesCommand(uint32_t stripId, uint8_t start, u
 
     // Get SPI config and set frame counts
     auto* cfg = strip->getConfig();
-    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    SpiStripConfig* spiCfg = cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
     if (!spiCfg)
     {
         openknx.logger.log("ERROR: Strip is not SPI type!");
@@ -4011,7 +4036,7 @@ bool NeoPixel::processPhysConfigPatternCommand(uint32_t stripId, uint8_t pattern
 
     // Get SPI config and set pattern
     auto* cfg = strip->getConfig();
-    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    SpiStripConfig* spiCfg = cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
     if (!spiCfg)
     {
         openknx.logger.log("ERROR: Strip is not SPI type!");
@@ -4049,7 +4074,7 @@ bool NeoPixel::processPhysConfigBrightnessCommand(uint32_t stripId, uint8_t brig
 
     // Get config - brightness only available for SPI strips
     auto* cfg = strip->getConfig();
-    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    SpiStripConfig* spiCfg = cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
     if (!spiCfg)
     {
         openknx.logger.log("ERROR: Hardware brightness only available for SPI strips (APA102/SK9822)!");
@@ -4094,7 +4119,7 @@ bool NeoPixel::processPhysConfigFrequencyCommand(uint32_t stripId, uint32_t freq
 
     // Get config - frequency only available for SPI strips
     auto* cfg = strip->getConfig();
-    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    SpiStripConfig* spiCfg = cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
     if (!spiCfg)
     {
         openknx.logger.log("ERROR: SPI frequency only available for SPI strips (APA102/SK9822)!");
@@ -4139,7 +4164,7 @@ bool NeoPixel::processPhysConfigDelayCommand(uint32_t stripId, uint32_t delayUs)
 
     // Get config - delay only available for SPI strips
     auto* cfg = strip->getConfig();
-    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    SpiStripConfig* spiCfg = cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
     if (!spiCfg)
     {
         openknx.logger.log("ERROR: Start frame delay only available for SPI strips (APA102/SK9822)!");
@@ -4181,7 +4206,7 @@ bool NeoPixel::processPhysConfigAutoDetectCommand(uint32_t stripId, bool enable)
 
     // Get config - autodetect only available for SPI strips
     auto* cfg = strip->getConfig();
-    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    SpiStripConfig* spiCfg = cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
     if (!spiCfg)
     {
         openknx.logger.log("ERROR: Auto-detection only available for SPI strips (APA102/SK9822)!");
@@ -4236,7 +4261,7 @@ bool NeoPixel::processPhysConfigDetectCommand(uint32_t stripId)
 
     // Get SPI config and run detection
     auto* cfg = strip->getConfig();
-    auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+    SpiStripConfig* spiCfg = cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
     if (!spiCfg)
     {
         openknx.logger.log("ERROR: Strip is not SPI type!");

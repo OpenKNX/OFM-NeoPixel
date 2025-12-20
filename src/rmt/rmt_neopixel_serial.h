@@ -82,6 +82,10 @@ class RMT_NeoPixel_Serial : public IHardwareDriver
     bool isInitialized() const override { return _inst ? _inst->initialized : false; }
     DriverImplementation getDriverType() const override { return DriverImplementation::RMT_SERIAL; }
 
+    // Configuration interface
+    PhysicalStripConfig* createDefaultConfig() const override;
+    bool applyConfig(const PhysicalStripConfig* config) override;
+
     // ESP32-specific getters for status reporting
     inline rmt_channel_handle_t getRmtChannel() const { return _inst ? _inst->channel : nullptr; }
     inline rmt_encoder_handle_t getRmtEncoder() const { return _inst ? _inst->encoder : nullptr; }

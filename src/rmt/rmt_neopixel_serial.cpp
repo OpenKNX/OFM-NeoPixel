@@ -6,6 +6,7 @@
 #if defined(ARDUINO_ARCH_ESP32)
 
     #include "rmt_neopixel_serial.h"
+    #include "../PhysicalStripConfig.h"
     #include <Arduino.h>
     #include <esp_log.h>
 
@@ -361,6 +362,29 @@ DriverCapabilities RMT_NeoPixel_Serial::getCapabilities() const
     caps.maxFrequency = 400; // ~400Hz update rate
     caps.maxLeds = 2000;
     return caps;
+}
+
+// ============================================================================
+// Configuration Interface
+// ============================================================================
+
+PhysicalStripConfig* RMT_NeoPixel_Serial::createDefaultConfig() const
+{
+    if (!_inst) return nullptr;
+    return new SerialStripConfig();
+}
+
+bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
+{
+    if (!_inst || !config) return false;
+    
+    // Type check - must be SerialStripConfig
+    const SerialStripConfig* serialCfg = config->isSerialConfig() ? static_cast<const SerialStripConfig*>(config) : nullptr;
+    if (!serialCfg) return false;
+    
+    // RMT has no runtime-configurable settings for serial strips
+    // Timing and protocol are fixed at initialization
+    return true;
 }
 
 // ============================================================================

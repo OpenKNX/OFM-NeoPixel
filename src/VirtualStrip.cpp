@@ -82,7 +82,7 @@ uint8_t VirtualStrip::getHardwareBrightness() const
         if (pstrip->isSpiStrip())
         {
             auto* cfg = pstrip->getConfig();
-            auto* spiCfg = dynamic_cast<SpiStripConfig*>(cfg);
+            SpiStripConfig* spiCfg = cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
             if (spiCfg)
             {
                 // Convert config brightness to 0-255 scale for power calc

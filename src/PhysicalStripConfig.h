@@ -45,6 +45,18 @@ struct PhysicalStripConfig
     virtual ~PhysicalStripConfig() = default;
 
     /**
+     * @brief Check if this is an SPI strip config (without RTTI)
+     * @return true if this is SpiStripConfig
+     */
+    virtual bool isSpiConfig() const { return false; }
+
+    /**
+     * @brief Check if this is a Serial strip config (without RTTI)
+     * @return true if this is SerialStripConfig
+     */
+    virtual bool isSerialConfig() const { return false; }
+
+    /**
      * @brief Set color byte order for this strip
      * @param order Color order (RGB, GRB, BGR, RGBW, GRBW, etc.)
      */
@@ -168,6 +180,10 @@ struct PhysicalStripConfig
  */
 struct SpiStripConfig : public PhysicalStripConfig
 {
+    /**
+     * @brief Override to identify this as SPI config without RTTI
+     */
+    bool isSpiConfig() const override { return true; }
 
     // ===== Brightness Control =====
 
@@ -386,6 +402,10 @@ struct SpiStripConfig : public PhysicalStripConfig
  */
 struct SerialStripConfig : public PhysicalStripConfig
 {
+    /**
+     * @brief Override to identify this as Serial config without RTTI
+     */
+    bool isSerialConfig() const override { return true; }
 
     // ===== Timing Mode =====
 

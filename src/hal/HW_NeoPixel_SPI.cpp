@@ -224,7 +224,7 @@ bool HW_NeoPixel_SPI::applyConfig(const PhysicalStripConfig* config)
     if (!_inst || !config) return false;
 
     // Type check - must be SpiStripConfig
-    const SpiStripConfig* spiCfg = dynamic_cast<const SpiStripConfig*>(config);
+    const SpiStripConfig* spiCfg = config->isSpiConfig() ? static_cast<const SpiStripConfig*>(config) : nullptr;
     if (!spiCfg) return false;
 
     // Apply SPI-specific settings

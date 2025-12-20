@@ -1189,8 +1189,8 @@ void PIO_NeoPixel_SPI::setHardwareBrightness(uint8_t brightness)
     if (!_inst) return;
 
     // Clamp to safe range 16-30
-    if (brightness < 16) brightness = 16;
-    if (brightness > 30) brightness = 30;
+    //if (brightness < 16) brightness = 16;
+    //if (brightness > 30) brightness = 30;
 
     _inst->hwBrightness = brightness; // Update global brightness
 

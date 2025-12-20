@@ -549,12 +549,12 @@ bool PhysicalStrip::setTimingMode(TimingMode mode)
 
 bool PhysicalStrip::isSpiStrip() const
 {
-    return dynamic_cast<const SpiStripConfig*>(_config) != nullptr;
+    return _config && _config->isSpiConfig();
 }
 
 bool PhysicalStrip::isSerialStrip() const
 {
-    return dynamic_cast<const SerialStripConfig*>(_config) != nullptr;
+    return _config && _config->isSerialConfig();
 }
 
 bool PhysicalStrip::applyConfig()
