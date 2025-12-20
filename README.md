@@ -83,6 +83,8 @@ This design enables complex LED configurations with minimal CPU overhead through
 - **Persistent Storage Ready**: EEPROM/Flash support for config persistence
 - **Console Configuration**: Runtime changes via `neo phys config` commands
 - **Config Versioning**: Future-proof config format with version tracking
+- **Gamma Correction**: Optional gamma correction for improved color accuracy
+- **Skip First LEDs**: Force first N LEDs to black (useful for dummy/sacrificial LEDs)
 
 ### Timing Modes
 
@@ -240,6 +242,40 @@ neo auto on             # Auto-update at 20 FPS
 # Check performance
 neo perf                # Show CPU usage and frame rate
 ```
+
+### Advanced Configuration Features
+
+#### Gamma Correction
+
+Gamma correction improves color accuracy and perceived brightness linearity, especially for low brightness values:
+
+```cpp
+// Enable gamma correction on a physical strip
+auto strip = neopixel_manager->addStrip(22, 64, LedProtocol::WS2812B);
+auto* cfg = strip->getConfig();
+if (cfg) {
+    cfg->setGammaCorrection(true);  // Enable gamma correction
+    strip->applyConfig();            // Apply changes
+}
+```
+
+#### Skip First LEDs
+
+Force the first N LEDs to black - useful for dummy/sacrificial LEDs or clock/data regeneration:
+
+```cpp
+// Skip first 2 LEDs (force them to black)
+auto* cfg = strip->getConfig();
+if (cfg) {
+    cfg->setSkipFirstLeds(2);       // First 2 LEDs always black
+    strip->applyConfig();
+}
+```
+
+**Use cases:**
+- **Dummy LEDs**: Some WS2812B strips use LED#0 as a signal regenerator
+- **Data integrity**: Skip problematic first LED if signal quality is poor
+- **Clock regeneration**: APA102 strips benefit from a dummy LED for timing
 
 ---
 
