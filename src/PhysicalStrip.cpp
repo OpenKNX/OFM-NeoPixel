@@ -106,6 +106,12 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
 
     // Pass ColorOrder to driver (NONE = driver uses protocol default)
     _driver = new PIO_NeoPixel_SPI(sckPin, pin, ledCount, protocol, frequencyHz, csPin, true, _colorOrder);
+    
+    // Create default config from driver
+    if (_driver)
+    {
+        _config = _driver->createDefaultConfig();
+    }
 #endif
 }
 
