@@ -2695,6 +2695,8 @@ bool NeoPixel::processEffectCommand(const std::string& args)
             case 7: // Cylon
                 effect = EffectPool::getCylon();
                 break;
+
+#ifndef NEOPIXEL_MINIMAL_EFFECTS
             case 8: // SK6812Test
                 effect = EffectPool::getRGBWTest();
                 break;
@@ -2734,6 +2736,7 @@ bool NeoPixel::processEffectCommand(const std::string& args)
             case 20: // Meteor
                 effect = EffectPool::getMeteor();
                 break;
+#endif
             default:
                 openknx.logger.logWithValues("ERROR: Effect ID %d not found!", effId);
                 openknx.logger.log("       Use 'neo effects' to see available effects");

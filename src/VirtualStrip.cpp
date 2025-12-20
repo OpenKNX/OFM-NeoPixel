@@ -425,6 +425,9 @@ bool VirtualStrip::syncToPhysical()
 
         // Read RGB from VirtualStrip buffer, send to PhysicalStrip
         // PhysicalStrip handles ColorOrder conversion based on its hardware
+        // Check if this PHYSICAL strip supports RGBW (not the virtual strip)
+        bool physicalIsRGBW = (pstrip->getColorOrder() >= ColorOrder::RGBW);
+        
         for (uint16_t i = 0; i < count; i++)
         {
             uint16_t virtualIdx = offset + i;
@@ -435,13 +438,16 @@ bool VirtualStrip::syncToPhysical()
             uint8_t g = _buffer[bufferOffset + 1]; // Green
             uint8_t b = _buffer[bufferOffset + 2]; // Blue
 
-            if (_bytesPerLed >= 4)
+            // Send RGBW to RGBW strips, RGB to RGB strips
+            if (physicalIsRGBW && _bytesPerLed >= 4)
             {
+                // Physical strip supports RGBW and virtual buffer has W channel
                 uint8_t w = _buffer[bufferOffset + 3]; // White or Brightness
                 pstrip->setPixel(i, r, g, b, w);
             }
             else
             {
+                // Physical strip is RGB only, send RGB (ignore W channel if present)
                 pstrip->setPixel(i, r, g, b);
             }
         }

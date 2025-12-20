@@ -27,6 +27,9 @@ static ConfettiEffect* s_confetti = nullptr;
 static JuggleEffect* s_juggle = nullptr;
 static BPMEffect* s_bpm = nullptr;
 static CylonEffect* s_cylon = nullptr;
+
+#ifndef NEOPIXEL_MINIMAL_EFFECTS
+// Advanced effects - excluded when NEOPIXEL_MINIMAL_EFFECTS is defined
 static RGBWTestEffect* s_rgbwTest = nullptr;
 static GarageDoorEffect* s_garageDoor = nullptr;
 static FireEffect* s_fire = nullptr;
@@ -40,6 +43,7 @@ static StrobeEffect* s_strobe = nullptr;
 static PulseEffect* s_pulse = nullptr;
 static CometEffect* s_comet = nullptr;
 static MeteorEffect* s_meteor = nullptr;
+#endif
 //
 // -----------------------------------------------------------
 
@@ -146,6 +150,9 @@ Effect* EffectPool::getCylon()
     }
     return s_cylon;
 }
+
+#ifndef NEOPIXEL_MINIMAL_EFFECTS
+// Advanced effects - excluded when NEOPIXEL_MINIMAL_EFFECTS is defined
 
 /**
  * @brief Get SK6812 Test Effect singleton
@@ -315,3 +322,5 @@ Effect* EffectPool::getMeteor()
     }
     return s_meteor;
 }
+
+#endif // NEOPIXEL_MINIMAL_EFFECTS
