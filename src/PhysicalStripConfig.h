@@ -46,8 +46,25 @@ struct PhysicalStripConfig
      */
     ColorOrder getColorOrder() const { return _colorOrder; }
 
+    /**
+     * @brief Set how many first LEDs to skip (force to black)
+     * @param count Number of LEDs to skip (0-255)
+     * @note Works for all strip types (WS2812B, SK6812, APA102, etc.)
+     */
+    void setSkipFirstLeds(uint8_t count)
+    {
+        _skipFirstLeds = count;
+    }
+
+    /**
+     * @brief Get how many first LEDs are skipped
+     * @return Number of LEDs forced to black (0 = none)
+     */
+    uint8_t getSkipFirstLeds() const { return _skipFirstLeds; }
+
   protected:
     ColorOrder _colorOrder = ColorOrder::NONE; // NONE = use protocol default
+    uint8_t _skipFirstLeds = 0;                // Default: 0 (no LEDs skipped)
 };
 
 /**

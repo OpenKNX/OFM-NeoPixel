@@ -14,6 +14,7 @@
  */
 
 #include "VirtualStrip.h"
+#include "PhysicalStripConfig.h"
 #include "OpenKNX.h"
 #include "PowerManager.h"
 #include <Arduino.h>
@@ -428,21 +429,43 @@ bool VirtualStrip::syncToPhysical()
         // Check if this PHYSICAL strip supports RGBW (not the virtual strip)
         bool physicalIsRGBW = (pstrip->getColorOrder() >= ColorOrder::RGBW);
         
+        // Check if skipFirstLeds is configured
+        uint8_t skipCount = 0;
+        auto* cfg = pstrip->getConfig();
+        if (cfg)
+        {
+            skipCount = cfg->getSkipFirstLeds();
+        }
+        
         for (uint16_t i = 0; i < count; i++)
         {
-            uint16_t virtualIdx = offset + i;
-            if (virtualIdx >= _totalLeds) break;
+            uint8_t r, g, b, w = 0;
+            
+            // Force skipped LEDs to black (LED#0 is dummy, so skip LED#1 onwards)
+            if (skipCount > 0 && i < skipCount)
+            {
+                r = g = b = w = 0; // Force black
+            }
+            else
+            {
+                // Normal operation: read from virtual buffer
+                uint16_t virtualIdx = offset + i;
+                if (virtualIdx >= _totalLeds) break;
 
-            size_t bufferOffset = (size_t)virtualIdx * _bytesPerLed;
-            uint8_t r = _buffer[bufferOffset];     // Red
-            uint8_t g = _buffer[bufferOffset + 1]; // Green
-            uint8_t b = _buffer[bufferOffset + 2]; // Blue
+                size_t bufferOffset = (size_t)virtualIdx * _bytesPerLed;
+                r = _buffer[bufferOffset];     // Red
+                g = _buffer[bufferOffset + 1]; // Green
+                b = _buffer[bufferOffset + 2]; // Blue
+                if (_bytesPerLed >= 4)
+                {
+                    w = _buffer[bufferOffset + 3]; // White or Brightness
+                }
+            }
 
             // Send RGBW to RGBW strips, RGB to RGB strips
             if (physicalIsRGBW && _bytesPerLed >= 4)
             {
                 // Physical strip supports RGBW and virtual buffer has W channel
-                uint8_t w = _buffer[bufferOffset + 3]; // White or Brightness
                 pstrip->setPixel(i, r, g, b, w);
             }
             else
