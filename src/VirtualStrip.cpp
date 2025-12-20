@@ -226,7 +226,7 @@ void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
 
     size_t offset = (size_t)index * _bytesPerLed;
 
-#ifdef OPENKNX_TRACE1
+#ifdef OPENKNX_NEOPIXEL_TRACE1
     if (index == 0)
     {
         openknx.logger.logWithPrefixAndValues("VirtualStrip",
@@ -244,7 +244,7 @@ void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
         _buffer[offset + 3] = w; // White channel or brightness
     }
 
-#ifdef OPENKNX_TRACE1
+#ifdef OPENKNX_NEOPIXEL_TRACE1
     if (index == 0)
     {
         if (_bytesPerLed >= 4)

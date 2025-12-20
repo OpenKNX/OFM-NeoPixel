@@ -680,9 +680,10 @@ void setup() {
 ```ini
 build_flags =
     -DNEOPIXEL_MODULE
-    ; Optional: Enable tests and benchmarks
+    ; Optional: Enable tests, benchmarks, and debug output
     ; -DOPENKNX_NEOPIXEL_TESTS
     ; -DOPENKNX_NEOPIXEL_BENCHMARK
+    ; -DOPENKNX_NEOPIXEL_TRACE1
 ```
 
 ---
@@ -1195,6 +1196,18 @@ neo benchmark update            # Benchmark update performance
 neo benchmark driver            # Test different driver types
 neo benchmark effect            # Compare effect performance
 ```
+
+### Debug Output
+
+Available when compiled with `-DOPENKNX_NEOPIXEL_TRACE1`:
+
+Enables detailed debug logging for:
+- Hardware initialization (PIO/RMT allocation, GPIO configuration)
+- Configuration validation (color order, timing parameters)
+- Performance metrics (update times, frame rates)
+- Driver-specific operations (SPI transfers, PIO state machine setup)
+
+Output is sent to the serial console at 115200 baud.
 
 ---
 

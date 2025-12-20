@@ -658,7 +658,7 @@ inline void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, 
 
     uint32_t* wordBuffer = (uint32_t*)_inst->buffer;
 
-    #ifdef OPENKNX_TRACE1
+    #ifdef OPENKNX_NEOPIXEL_TRACE1
     if (index < 1) // Only debug first LED
     {
         openknx.logger.logWithPrefixAndValues("PIO NeoPixel Spi",
@@ -703,7 +703,7 @@ inline void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, 
         // Result: [Brightness << 24 | Byte2 << 16 | Byte1 << 8 | Byte0]
         wordBuffer[wordIndex] = ((uint32_t)brightByte << 24) | (rgbValue & 0x00FFFFFF);
 
-    #ifdef OPENKNX_TRACE1
+    #ifdef OPENKNX_NEOPIXEL_TRACE1
         if (index < 1)
         {
             openknx.logger.logWithPrefixAndValues("PIO NeoPixel Spi",
