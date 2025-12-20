@@ -19,6 +19,7 @@
 
 #include "IHardwareDriver.h"
 #include "TimingMode.h"
+#include <cmath>
 #include <stdint.h>
 
 // Forward declaration
@@ -32,6 +33,15 @@ class PhysicalStrip;
  */
 struct PhysicalStripConfig
 {
+    PhysicalStripConfig()
+    {
+        // Initialize lookup table to identity mapping (no gamma correction)
+        for (int i = 0; i < 256; i++)
+        {
+            _gammaLookupTable[i] = (uint8_t)i;
+        }
+    }
+
     virtual ~PhysicalStripConfig() = default;
 
     /**
@@ -62,9 +72,87 @@ struct PhysicalStripConfig
      */
     uint8_t getSkipFirstLeds() const { return _skipFirstLeds; }
 
+    /**
+     * @brief Set gamma correction value
+     * @param gamma Gamma value (typically 2.0-3.0, default: 2.8)
+     * @note Formula: output = input^(1/gamma)
+     * @note Lookup table is calculated once at startup
+     */
+    void setGammaCorrection(float gamma)
+    {
+        if (gamma < 1.0f) gamma = 1.0f;
+        if (gamma > 4.0f) gamma = 4.0f;
+        _gammaCorrection = gamma;
+        _gammaCorrectionEnabled = (gamma != 1.0f); // Disable if gamma=1.0 (linear)
+
+        // Pre-calculate lookup table for this gamma value
+        if (_gammaCorrectionEnabled)
+        {
+            calculateGammaLookupTable();
+        }
+    }
+
+    /**
+     * @brief Get gamma correction value
+     * @return Gamma value (0.0 = disabled, 1.0+ = enabled)
+     */
+    float getGammaCorrection() const { return _gammaCorrection; }
+
+    /**
+     * @brief Check if gamma correction is enabled
+     * @return true if gamma != 1.0
+     */
+    bool isGammaCorrectionEnabled() const { return _gammaCorrectionEnabled; }
+
+    /**
+     * @brief Get gamma-corrected value from lookup table
+     * @param value Input color value (0-255)
+     * @return Gamma-corrected value (0-255)
+     */
+    uint8_t getGammaCorrectedValue(uint8_t value) const
+    {
+        if (!_gammaCorrectionEnabled) return value;
+        return _gammaLookupTable[value];
+    }
+
+  protected:
+    /**
+     * @brief Calculate gamma lookup table using the formula: output = (input/255)^(1/gamma) * 255
+     *
+     * For LED gamma correction (compensating for human eye perception):
+     * - Uses INVERSE gamma (1/gamma) for display/output correction
+     * - Gamma 2.2-2.8 brightens dim values, making gradients more perceptually linear
+     * - Formula: output = input^(1/gamma) - this EXPANDS low values
+     * - Example: gamma=2.2, input=128 → output=186 (brightens mid-tones)
+     */
+    void calculateGammaLookupTable()
+    {
+        if (_gammaCorrection <= 1.0f)
+        {
+            // Linear: no correction
+            for (int i = 0; i < 256; i++)
+            {
+                _gammaLookupTable[i] = i;
+            }
+            return;
+        }
+
+        // Use INVERSE gamma (1/gamma) for LED display correction
+        float gammaInv = 1.0f / _gammaCorrection;
+        for (int i = 0; i < 256; i++)
+        {
+            float normalized = i / 255.0f;
+            float corrected = powf(normalized, gammaInv);
+            _gammaLookupTable[i] = (uint8_t)(corrected * 255.0f + 0.5f);
+        }
+    }
+
   protected:
     ColorOrder _colorOrder = ColorOrder::NONE; // NONE = use protocol default
     uint8_t _skipFirstLeds = 0;                // Default: 0 (no LEDs skipped)
+    float _gammaCorrection = 1.0f;             // Default: 1.0 (linear, no correction)
+    bool _gammaCorrectionEnabled = false;      // Default: disabled
+    uint8_t _gammaLookupTable[256];            // Lookup table calculated at startup
 };
 
 /**
