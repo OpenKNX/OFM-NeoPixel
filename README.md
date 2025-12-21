@@ -247,22 +247,43 @@ neo perf                # Show CPU usage and frame rate
 
 #### Gamma Correction
 
-Gamma correction improves color accuracy and perceived brightness linearity, especially for low brightness values:
+Gamma correction improves color accuracy and perceived brightness linearity. Applies inverse gamma curve to compensate for human eye perception.
 
+**Configuration via API:**
 ```cpp
 // Enable gamma correction on a physical strip
 auto strip = neopixel_manager->addStrip(22, 64, LedProtocol::WS2812B);
 auto* cfg = strip->getConfig();
 if (cfg) {
-    cfg->setGammaCorrection(true);  // Enable gamma correction
+    cfg->setGammaCorrection(2.8f);  // Enable gamma correction (typical: 2.2-3.0)
     strip->applyConfig();            // Apply changes
 }
 ```
 
-#### Skip First LEDs
+**Console commands:**
+```bash
+# Show current gamma setting
+neo phys config 0 gamma
 
-Force the first N LEDs to black - useful for dummy/sacrificial LEDs or clock/data regeneration:
+# Set gamma correction to 2.8 (recommended)
+neo phys config 0 gamma 2.8
 
+# Disable gamma correction (linear, gamma = 1.0)
+neo phys config 0 gamma 1.0
+```
+
+**Technical details:**
+- **Formula**: `output = input^(1/gamma)` → brightens low values, perceptually linear
+- **Lookup Table**: Pre-calculated 256-byte table at init (~0.25ms overhead, once)
+- **Performance**: O(1) array access in hot path (~3 CPU cycles per color channel)
+- **Recommended values**: 2.2 (sRGB), 2.8 (LED strips), 3.0 (dim environments)
+- **Disable**: Set `gamma = 1.0` for linear/no correction
+
+#### Skip First LEDs (Fast Path)
+
+Force the first N LEDs to black - useful for dummy/sacrificial LEDs or signal regeneration.
+
+**Configuration via API:**
 ```cpp
 // Skip first 2 LEDs (force them to black)
 auto* cfg = strip->getConfig();
@@ -272,10 +293,76 @@ if (cfg) {
 }
 ```
 
+**Console commands:**
+```bash
+# Skip first LED
+neo phys config 0 skipfirst 1
+
+# Skip first 3 LEDs
+neo phys config 0 skipfirst 3
+
+# Disable skip (default)
+neo phys config 0 skipfirst 0
+```
+
 **Use cases:**
 - **Dummy LEDs**: Some WS2812B strips use LED#0 as a signal regenerator
 - **Data integrity**: Skip problematic first LED if signal quality is poor
 - **Clock regeneration**: APA102 strips benefit from a dummy LED for timing
+- **Cable runs**: First LED after long cable may have corrupt color
+
+**Performance:** O(1) integer compare (~2 CPU cycles per LED)
+
+#### Skip Mask (Flexible Path)
+
+Skip arbitrary LEDs using an efficient bitset. Useful for complex LED arrangements or broken LEDs.
+
+**Configuration via API:**
+```cpp
+auto* cfg = strip->getConfig();
+if (cfg) {
+    // Initialize skip mask for 64 LEDs
+    cfg->initSkipMask(64);
+    
+    // Mark individual LEDs to skip
+    cfg->setLedSkip(0, true);   // Skip LED#0
+    cfg->setLedSkip(15, true);  // Skip LED#15
+    cfg->setLedSkip(30, true);  // Skip LED#30
+    
+    strip->applyConfig();
+}
+```
+
+**Console commands:**
+```bash
+# Initialize skip mask for current strip LED count
+neo phys config 0 skipmask init
+
+# Skip individual LEDs
+neo phys config 0 skipmask set 0 1    # Skip LED#0
+neo phys config 0 skipmask set 15 1   # Skip LED#15
+neo phys config 0 skipmask set 30 1   # Skip LED#30
+
+# Re-enable LED
+neo phys config 0 skipmask set 15 0   # Enable LED#15
+
+# List all skipped LEDs
+neo phys config 0 skipmask list
+
+# Clear skip mask (frees memory)
+neo phys config 0 skipmask clear
+```
+
+**Use cases:**
+- **Broken LEDs**: Skip individual defective LEDs
+- **Complex patterns**: Create custom LED masks (e.g., checkerboard)
+- **Physical wiring**: Skip LEDs used for other purposes
+- **Matrix layouts**: Disable unused LEDs in irregular matrix shapes
+
+**Performance:**
+- O(1) bitset access (~3 CPU cycles per LED)
+- Memory: ~1 bit per LED (300 LEDs = 38 bytes + 24 bytes std::vector overhead)
+- Only allocated when `initSkipMask()` called (empty = no memory overhead)
 
 ---
 
@@ -1060,6 +1147,40 @@ neo phys config <index> timing [mode]
     # Same as 'neo phys timing' command
     neo phys config 0 timing             # Show current
     neo phys config 0 timing auto_legacy # Set mode
+
+neo phys config <index> gamma [value]
+    # Get/Set gamma correction value (1.0-4.0)
+    # 1.0 = disabled (linear), 2.2 = sRGB, 2.8 = recommended for LEDs
+    neo phys config 0 gamma              # Show current value
+    neo phys config 0 gamma 2.8          # Set gamma to 2.8
+    neo phys config 0 gamma 1.0          # Disable (linear)
+
+neo phys config <index> skipfirst [count]
+    # Get/Set how many first LEDs to skip (force to black)
+    # Useful for dummy/sacrificial LEDs (0-255)
+    neo phys config 0 skipfirst          # Show current value
+    neo phys config 0 skipfirst 1        # Skip first LED
+    neo phys config 0 skipfirst 0        # Disable (default)
+
+neo phys config <index> skipmask init
+    # Initialize skip mask for flexible LED skipping
+    # Allocates bitset (1 bit per LED)
+    neo phys config 0 skipmask init
+
+neo phys config <index> skipmask set <led> <0|1>
+    # Set skip status for individual LED
+    # 1 = skip (force black), 0 = enable
+    neo phys config 0 skipmask set 0 1   # Skip LED#0
+    neo phys config 0 skipmask set 15 1  # Skip LED#15
+    neo phys config 0 skipmask set 15 0  # Re-enable LED#15
+
+neo phys config <index> skipmask list
+    # List all skipped LEDs in mask
+    neo phys config 0 skipmask list
+
+neo phys config <index> skipmask clear
+    # Clear skip mask and free memory
+    neo phys config 0 skipmask clear
 ```
 
 ### Virtual Strip Commands

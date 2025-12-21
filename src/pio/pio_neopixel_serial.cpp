@@ -63,20 +63,15 @@ static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, u
 {
     // ===== GPIO OPTIMIZATION FOR HIGH-SPEED SERIAL (800 kHz - 1.25 MHz) =====
 
-    // 1. Set pin LOW before init (prevents glitches during initialization)
-    gpio_put(pin, 0);
-
-    // 2. Set GPIO drive strength to maximum (12mA) for sharp edges
-    //    Critical for WS2812B timing accuracy (300-900ns pulses)
+    // 1. Set GPIO drive strength and slew rate FIRST (persist through pio_gpio_init)
     gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_12MA);
-
-    // 3. Set slew rate to FAST for precise timing
-    //    WS2812B timing is strict: ±150ns tolerance
     gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
 
-    // Initialize GPIO pin for PIO control
+    // 2. Transfer pin to PIO control (before setting state!)
     pio_gpio_init(pio, pin);
-    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true); // Set pin as output
+    
+    // 3. Set pin as output under PIO control
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
 
     pio_sm_config c = pio_get_default_sm_config();
     sm_config_set_wrap(&c, offset + ws2812_wrap_target, offset + ws2812_wrap);
@@ -90,6 +85,11 @@ static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, u
 
     sm_config_set_clkdiv(&c, clkdiv);
 
+    // 4. Set initial pin state to LOW (WS2812B reset state)
+    //    CRITICAL: Must be BEFORE pio_sm_init() and AFTER pio_gpio_init()
+    pio_sm_set_pins_with_mask(pio, sm, 0, (1u << pin));
+
+    // 5. Initialize and start state machine
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_set_enabled(pio, sm, true);
     #ifdef OPENKNX_DEBUG

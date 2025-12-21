@@ -194,6 +194,11 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("config <i> delay <us>", "Set start frame delay in microseconds (SPI only, 0-1000)");
         openknx.console.printHelpLine("config <i> autodetect <on|off>", "Enable/disable chip auto-detection on init (SPI only)");
         openknx.console.printHelpLine("config <i> detect", "Auto-detect chip type now (SPI: APA102 vs SK9822)");
+        openknx.console.printHelpLine("config <i> skipfirst <n>", "Skip first N LEDs (force to black, dummy LED)");
+        openknx.console.printHelpLine("config <i> skipmask init", "Initialize flexible skip mask (arbitrary LED skipping)");
+        openknx.console.printHelpLine("config <i> skipmask clear", "Clear skip mask and free memory");
+        openknx.console.printHelpLine("config <i> skipmask set <idx> <0|1>", "Enable (0) or skip (1) individual LED");
+        openknx.console.printHelpLine("config <i> skipmask list", "List all skipped LEDs");
         printDetailHelpSeparator();
         printDetailHelpParameter("<i>=ID/Index, <n>=LED Count, <gpio>=Pin, <clk>=Clock Pin, <data>=Data Pin");
         printDetailHelpExample("neo phys add 22 64 ws2812b     Create 1-Wire strip on GPIO22 with 64 LEDs");
@@ -201,6 +206,9 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         printDetailHelpExample("neo phys timing 0 auto         Set strip 0 to auto timing");
         printDetailHelpExample("neo phys config 0 detect       Auto-detect APA102 vs SK9822");
         printDetailHelpExample("neo phys config 0 brightness 25 Set hardware brightness to 25");
+        printDetailHelpExample("neo phys config 0 skipfirst 1  Skip LED#0 (dummy LED)");
+        printDetailHelpExample("neo phys config 0 skipmask init Init mask, then set individual LEDs");
+        printDetailHelpExample("neo phys config 0 skipmask set 5 1 Mark LED#5 as defective (skip)");
         printDetailHelpEnd();
         return true;
     }
@@ -2674,29 +2682,29 @@ bool NeoPixel::processEffectCommand(const std::string& args)
             case 0: // Solid
                 effect = EffectPool::getSolid();
                 break;
-            case 1: // Wipe
-                effect = EffectPool::getWipe();
-                break;
-            case 2: // Rainbow
-                effect = EffectPool::getRainbow();
-                break;
-            case 3: // Pride2015
-                effect = EffectPool::getPride();
-                break;
-            case 4: // Confetti
-                effect = EffectPool::getConfetti();
-                break;
-            case 5: // Juggle
-                effect = EffectPool::getJuggle();
-                break;
-            case 6: // BPM
-                effect = EffectPool::getBPM();
-                break;
-            case 7: // Cylon
+            case 1: // Cylon
                 effect = EffectPool::getCylon();
                 break;
 
 #ifndef NEOPIXEL_MINIMAL_EFFECTS
+            case 2: // Wipe
+                effect = EffectPool::getWipe();
+                break;
+            case 3: // Rainbow
+                effect = EffectPool::getRainbow();
+                break;
+            case 4: // Pride2015
+                effect = EffectPool::getPride();
+                break;
+            case 5: // Confetti
+                effect = EffectPool::getConfetti();
+                break;
+            case 6: // Juggle
+                effect = EffectPool::getJuggle();
+                break;
+            case 7: // BPM
+                effect = EffectPool::getBPM();
+                break;
             case 8: // SK6812Test
                 effect = EffectPool::getRGBWTest();
                 break;
@@ -3749,6 +3757,26 @@ bool NeoPixel::processPhysConfigCommand(const std::string& args)
     {
         return processPhysConfigDetectCommand(stripId);
     }
+    else if (subCmd == "skipfirst")
+    {
+        int count;
+        if (!(iss >> count))
+        {
+            openknx.logger.log("ERROR: Usage: neo phys config <id> skipfirst <count>");
+            return true;
+        }
+        return processPhysConfigSkipFirstCommand(stripId, (uint8_t)count);
+    }
+    else if (subCmd == "skipmask")
+    {
+        std::string maskCmd;
+        if (!(iss >> maskCmd))
+        {
+            openknx.logger.log("ERROR: Usage: neo phys config <id> skipmask <init|clear|set|list>");
+            return true;
+        }
+        return processPhysConfigSkipMaskCommand(stripId, maskCmd, iss);
+    }
     else
     {
         openknx.logger.log("ERROR: Unknown config subcommand. Use 'neo phys ?' for help.");
@@ -3892,6 +3920,20 @@ bool NeoPixel::processPhysConfigInfoCommand(uint32_t stripId)
     {
         openknx.logger.log("ERROR: Unknown config type");
         return false;
+    }
+
+    // Display common config (skipFirstLeds, skipMask)
+    uint8_t skipFirst = cfg->getSkipFirstLeds();
+    if (skipFirst > 0)
+    {
+        openknx.logger.logWithValues("Skip First LEDs: %d (forced to black)", skipFirst);
+    }
+
+    if (cfg->hasSkipMask())
+    {
+        uint16_t skipCount = cfg->getSkipMaskCount();
+        openknx.logger.logWithValues("Skip Mask: Active (%d LEDs marked)", skipCount);
+        openknx.logger.log("  Use 'neo phys config <id> skipmask list' to see details");
     }
 
     openknx.logger.log("");
@@ -4282,6 +4324,120 @@ bool NeoPixel::processPhysConfigDetectCommand(uint32_t stripId)
     openknx.logger.log("");
     openknx.logger.log("Note: Detection is heuristic-based (LED count + pattern test)");
     openknx.logger.log("      Use 'neo phys config <id> pattern <0x00|0xFF>' for manual override");
+
+    return true;
+}
+/**
+ * @brief Process 'neo phys config <id> skipfirst <count>' command
+ */
+bool NeoPixel::processPhysConfigSkipFirstCommand(uint32_t stripId, uint8_t count)
+{
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.log("ERROR: Strip ID not found!");
+        return true;
+    }
+
+    auto* cfg = strip->getConfig();
+    if (!cfg)
+    {
+        openknx.logger.log("ERROR: No config available for this strip");
+        return true;
+    }
+
+    cfg->setSkipFirstLeds(count);
+    openknx.logger.logWithPrefixAndValues("", "Skip first %d LEDs (forced to black)", count);
+
+    return true;
+}
+
+/**
+ * @brief Process 'neo phys config <id> skipmask <init|clear|set|list>' command
+ */
+bool NeoPixel::processPhysConfigSkipMaskCommand(uint32_t stripId, const std::string& maskCmd, std::istringstream& iss)
+{
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.log("ERROR: Strip ID not found!");
+        return true;
+    }
+
+    auto* cfg = strip->getConfig();
+    if (!cfg)
+    {
+        openknx.logger.log("ERROR: No config available for this strip");
+        return true;
+    }
+
+    if (maskCmd == "init")
+    {
+        uint16_t ledCount = strip->getLedCount();
+        cfg->initSkipMask(ledCount);
+        openknx.logger.logWithPrefixAndValues("", "Skip mask initialized for %d LEDs", ledCount);
+        openknx.logger.log("Use 'neo phys config <id> skipmask set <index> <0|1>' to mark LEDs");
+    }
+    else if (maskCmd == "clear")
+    {
+        cfg->clearSkipMask();
+        openknx.logger.log("Skip mask cleared and memory freed");
+    }
+    else if (maskCmd == "set")
+    {
+        uint16_t index;
+        int value;
+        if (!(iss >> index >> value))
+        {
+            openknx.logger.log("ERROR: Usage: neo phys config <id> skipmask set <index> <0|1>");
+            return true;
+        }
+
+        if (!cfg->hasSkipMask())
+        {
+            openknx.logger.log("ERROR: Skip mask not initialized. Use 'skipmask init' first");
+            return true;
+        }
+
+        cfg->setLedSkip(index, value != 0);
+        const char* status = (value != 0) ? "SKIPPED" : "ENABLED";
+        openknx.logger.logWithPrefixAndValues("", "LED#%d: %s", index, status);
+    }
+    else if (maskCmd == "list")
+    {
+        if (!cfg->hasSkipMask())
+        {
+            openknx.logger.log("Skip mask not initialized");
+            return true;
+        }
+
+        uint16_t count = cfg->getSkipMaskCount();
+        openknx.logger.log("");
+        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+        openknx.logger.logWithPrefixAndValues("", "Skip Mask - %d LEDs marked for skipping", count);
+        openknx.logger.color(0);
+
+        if (count == 0)
+        {
+            openknx.logger.log("No LEDs marked for skipping");
+        }
+        else
+        {
+            openknx.logger.log("Skipped LEDs:");
+            uint16_t ledCount = strip->getLedCount();
+            for (uint16_t i = 0; i < ledCount; i++)
+            {
+                if (cfg->isLedSkipped(i))
+                {
+                    openknx.logger.logWithPrefixAndValues("  ", "LED#%d", i);
+                }
+            }
+        }
+    }
+    else
+    {
+        openknx.logger.log("ERROR: Unknown skipmask command. Use init|clear|set|list");
+    }
 
     return true;
 }

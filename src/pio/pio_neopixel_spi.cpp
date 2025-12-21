@@ -74,25 +74,17 @@ static inline void pio_spi_program_init(PIO pio, uint sm, uint offset, uint clk_
 {
     // ===== GPIO OPTIMIZATION FOR HIGH-SPEED SPI (3-20 MHz) =====
 
-    // 1. Set pins LOW before init (prevents glitches during initialization)
-    gpio_put(clk_pin, 0);
-    gpio_put(data_pin, 0);
-
-    // 2. Set GPIO drive strength to maximum (12mA) for clean signals at high frequencies
-    //    Default 4mA is insufficient for fast edges and long traces
+    // 1. Set GPIO drive strength and slew rate FIRST (persist through pio_gpio_init)
     gpio_set_drive_strength(clk_pin, GPIO_DRIVE_STRENGTH_12MA);
     gpio_set_drive_strength(data_pin, GPIO_DRIVE_STRENGTH_12MA);
-
-    // 3. Set slew rate to FAST for sharp edges (reduces signal distortion)
-    //    Important for frequencies above 5 MHz
     gpio_set_slew_rate(clk_pin, GPIO_SLEW_RATE_FAST);
     gpio_set_slew_rate(data_pin, GPIO_SLEW_RATE_FAST);
 
-    // Initialize GPIO pins for PIO control
+    // 2. Transfer pins to PIO control (before setting state!)
     pio_gpio_init(pio, clk_pin);
     pio_gpio_init(pio, data_pin);
 
-    // Set pins as outputs
+    // 3. Set pins as outputs under PIO control
     pio_sm_set_consecutive_pindirs(pio, sm, data_pin, 1, true); // MOSI as output
     pio_sm_set_consecutive_pindirs(pio, sm, clk_pin, 1, true);  // CLK as output
 
@@ -127,10 +119,12 @@ static inline void pio_spi_program_init(PIO pio, uint sm, uint offset, uint clk_
 
     sm_config_set_clkdiv(&c, div);
 
-    // Store actual clkdiv for diagnostics (will be set in caller)
-    // Note: This is just for init calculation, actual value set in initImpl()
+    // 4. Set initial pin states to LOW (SPI Mode 0 idle: CLK=LOW, MOSI=LOW)
+    //    CRITICAL: Must be BEFORE pio_sm_init() and AFTER pio_gpio_init()
+    pio_sm_set_pins_with_mask(pio, sm, 0, (1u << clk_pin) | (1u << data_pin));
 
-    // Initialize state machine
+    // 5. Initialize and start state machine
+    //    pio_sm_init() will use pin states set above
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_set_enabled(pio, sm, true);
 

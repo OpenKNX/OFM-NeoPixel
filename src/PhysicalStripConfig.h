@@ -21,6 +21,7 @@
 #include "TimingMode.h"
 #include <cmath>
 #include <stdint.h>
+#include <vector>
 
 // Forward declaration
 class PhysicalStrip;
@@ -83,6 +84,76 @@ struct PhysicalStripConfig
      * @return Number of LEDs forced to black (0 = none)
      */
     uint8_t getSkipFirstLeds() const { return _skipFirstLeds; }
+
+    /**
+     * @brief Initialize skip mask for arbitrary LED skipping
+     * @param ledCount Number of LEDs in the strip
+     * @note Allocates bitset (1 bit per LED). Call clearSkipMask() to free memory.
+     */
+    void initSkipMask(uint16_t ledCount)
+    {
+        _skipMask.clear();
+        _skipMask.resize(ledCount, false); // All LEDs enabled by default
+    }
+
+    /**
+     * @brief Clear skip mask (frees memory)
+     * @note After clearing, isLedSkipped() returns false for all LEDs
+     */
+    void clearSkipMask()
+    {
+        _skipMask.clear();
+        _skipMask.shrink_to_fit(); // Free allocated memory
+    }
+
+    /**
+     * @brief Set skip status for individual LED
+     * @param index LED index (0-based)
+     * @param skip true = skip LED (force black), false = enable LED
+     * @note Skip mask must be initialized first with initSkipMask()
+     */
+    void setLedSkip(uint16_t index, bool skip)
+    {
+        if (index < _skipMask.size())
+        {
+            _skipMask[index] = skip;
+        }
+    }
+
+    /**
+     * @brief Check if LED should be skipped (flexible mask)
+     * @param index LED index (0-based)
+     * @return true if LED should be forced to black
+     * @note Returns false if skip mask is not initialized
+     */
+    bool isLedSkipped(uint16_t index) const
+    {
+        if (_skipMask.empty() || index >= _skipMask.size())
+        {
+            return false; // No mask or out of bounds
+        }
+        return _skipMask[index];
+    }
+
+    /**
+     * @brief Get number of skipped LEDs in mask
+     * @return Count of LEDs marked for skipping
+     */
+    uint16_t getSkipMaskCount() const
+    {
+        uint16_t count = 0;
+        for (bool skip : _skipMask)
+        {
+            if (skip) count++;
+        }
+        return count;
+    }
+
+    /**
+     * @brief Check if skip mask is initialized
+     * @return true if mask is allocated
+     */
+    bool hasSkipMask() const { return !_skipMask.empty(); }
 
     /**
      * @brief Set gamma correction value
@@ -162,6 +233,7 @@ struct PhysicalStripConfig
   protected:
     ColorOrder _colorOrder = ColorOrder::NONE; // NONE = use protocol default
     uint8_t _skipFirstLeds = 0;                // Default: 0 (no LEDs skipped)
+    std::vector<bool> _skipMask;               // Flexible skip mask (empty = disabled)
     float _gammaCorrection = 1.0f;             // Default: 1.0 (linear, no correction)
     bool _gammaCorrectionEnabled = false;      // Default: disabled
     uint8_t _gammaLookupTable[256];            // Lookup table calculated at startup

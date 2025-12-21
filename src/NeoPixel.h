@@ -132,6 +132,8 @@ class NeoPixel : public OpenKNX::Module
     bool processPhysConfigDelayCommand(uint32_t stripId, uint32_t delayUs);
     bool processPhysConfigAutoDetectCommand(uint32_t stripId, bool enable);
     bool processPhysConfigDetectCommand(uint32_t stripId);
+    bool processPhysConfigSkipFirstCommand(uint32_t stripId, uint8_t count);
+    bool processPhysConfigSkipMaskCommand(uint32_t stripId, const std::string& maskCmd, std::istringstream& iss);
 
     // VirtualStrip management commands
     bool processVirtCommand(const std::string& args);

@@ -430,54 +430,21 @@ bool VirtualStrip::syncToPhysical()
         // Check if this PHYSICAL strip supports RGBW (not the virtual strip)
         bool physicalIsRGBW = (pstrip->getColorOrder() >= ColorOrder::RGBW);
 
-        // Get configuration for skipFirstLeds and gamma correction
-        uint8_t skipCount = 0;
-        float gammaCorrection = 1.0f;
-        bool gammaEnabled = false;
-        auto* cfg = pstrip->getConfig();
-        if (cfg)
-        {
-            skipCount = cfg->getSkipFirstLeds();
-            gammaCorrection = cfg->getGammaCorrection();
-            gammaEnabled = cfg->isGammaCorrectionEnabled();
-        }
-
         for (uint16_t i = 0; i < count; i++)
         {
             uint8_t r, g, b, w = 0;
 
-            // Force skipped LEDs to black (LED#0 is dummy, so skip LED#1 onwards)
-            if (skipCount > 0 && i < skipCount)
-            {
-                r = g = b = w = 0; // Force black
-            }
-            else
-            {
-                // Normal operation: read from virtual buffer
-                uint16_t virtualIdx = offset + i;
-                if (virtualIdx >= _totalLeds) break;
+            // Normal operation: read from virtual buffer
+            uint16_t virtualIdx = offset + i;
+            if (virtualIdx >= _totalLeds) break;
 
-                size_t bufferOffset = (size_t)virtualIdx * _bytesPerLed;
-                r = _buffer[bufferOffset];     // Red
-                g = _buffer[bufferOffset + 1]; // Green
-                b = _buffer[bufferOffset + 2]; // Blue
-                if (_bytesPerLed >= 4)
-                {
-                    w = _buffer[bufferOffset + 3]; // White or Brightness
-                }
-
-                // Apply gamma correction if enabled (using pre-calculated lookup table)
-                if (gammaEnabled && gammaCorrection != 1.0f)
-                {
-                    // Use lookup table for fast O(1) gamma correction
-                    r = cfg->getGammaCorrectedValue(r);
-                    g = cfg->getGammaCorrectedValue(g);
-                    b = cfg->getGammaCorrectedValue(b);
-                    if (_bytesPerLed >= 4)
-                    {
-                        w = cfg->getGammaCorrectedValue(w);
-                    }
-                }
+            size_t bufferOffset = (size_t)virtualIdx * _bytesPerLed;
+            r = _buffer[bufferOffset];     // Red
+            g = _buffer[bufferOffset + 1]; // Green
+            b = _buffer[bufferOffset + 2]; // Blue
+            if (_bytesPerLed >= 4)
+            {
+                w = _buffer[bufferOffset + 3]; // White or Brightness
             }
 
             // Send RGBW to RGBW strips, RGB to RGB strips

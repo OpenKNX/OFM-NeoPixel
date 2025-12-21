@@ -265,6 +265,28 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
     if (!_driver || !isInitialized()) return false;
 
+    // Check if this LED should be skipped (forced to black)
+    if (_config)
+    {
+        // Fast path: First N LEDs (O(1), ~2 cycles)
+        if (index < _config->getSkipFirstLeds())
+        {
+            r = g = b = 0;
+        }
+        // Flexible path: Bitset (O(1), ~3 cycles, only if mask initialized)
+        else if (_config->isLedSkipped(index))
+        {
+            r = g = b = 0;
+        }
+        // Apply gamma correction if enabled (O(1) lookup table)
+        else if (_config->isGammaCorrectionEnabled())
+        {
+            r = _config->getGammaCorrectedValue(r);
+            g = _config->getGammaCorrectedValue(g);
+            b = _config->getGammaCorrectedValue(b);
+        }
+    }
+
     // Pass RGB directly to driver
     // Driver handles ColorOrder mapping and brightness from config
     return _driver->setPixel(index, r, g, b);
@@ -282,6 +304,29 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
     if (!_driver || !isInitialized()) return false;
+
+    // Check if this LED should be skipped (forced to black)
+    if (_config)
+    {
+        // Fast path: First N LEDs (O(1), ~2 cycles)
+        if (index < _config->getSkipFirstLeds())
+        {
+            r = g = b = w = 0;
+        }
+        // Flexible path: Bitset (O(1), ~3 cycles, only if mask initialized)
+        else if (_config->isLedSkipped(index))
+        {
+            r = g = b = w = 0;
+        }
+        // Apply gamma correction if enabled (O(1) lookup table)
+        else if (_config->isGammaCorrectionEnabled())
+        {
+            r = _config->getGammaCorrectedValue(r);
+            g = _config->getGammaCorrectedValue(g);
+            b = _config->getGammaCorrectedValue(b);
+            w = _config->getGammaCorrectedValue(w);
+        }
+    }
 
     // Pass RGB directly to driver - driver handles ColorOrder mapping
     // No conversion here to avoid double-mapping!
