@@ -281,6 +281,54 @@ struct SpiStripConfig : public PhysicalStripConfig
     inline uint8_t getHwBrightnessMax() const { return _hwBrightnessMax; }
     inline uint8_t getHwBrightnessDefault() const { return _hwBrightnessDefault; }
 
+    // ===== RGB Value Clamping (Clone Chip Workaround) =====
+
+    /**
+     * @brief Set minimum RGB value (workaround for clone chip update bug)
+     * @param minValue Minimum RGB value (0-255, default 0)
+     * @note Some APA102/SK9822 clones don't update LEDs when RGB < 6-8.
+     *       Set to 8 for APA102_CLONE protocol to prevent color artifacts.
+     */
+    void setMinRgbValue(uint8_t minValue) { _minRgbValue = minValue; }
+
+    /**
+     * @brief Get minimum RGB value
+     * @return Minimum RGB value (0=no clamping, 8=clone chip workaround)
+     */
+    uint8_t getMinRgbValue() const { return _minRgbValue; }
+
+    /**
+     * @brief Set maximum RGB value (for power limiting)
+     * @param maxValue Maximum RGB value (0-255, default 255)
+     * @note Can limit max RGB to reduce power consumption
+     */
+    void setMaxRgbValue(uint8_t maxValue) { _maxRgbValue = maxValue; }
+
+    /**
+     * @brief Get maximum RGB value
+     * @return Maximum RGB value (255=no clamping)
+     */
+    uint8_t getMaxRgbValue() const { return _maxRgbValue; }
+
+    /**
+     * @brief Set hardware brightness range (for clone chip compatibility)
+     * @param min Minimum brightness (0-31, default 0)
+     * @param max Maximum brightness (0-31, default 31)
+     * @note Clone chips: min=16 (prevents flicker), max=30 (prevents sync issues)
+     */
+    void setHwBrightnessRange(uint8_t min, uint8_t max)
+    {
+        if (min > 31) min = 31;
+        if (max > 31) max = 31;
+        if (min > max) min = max;
+        _hwBrightnessMin = min;
+        _hwBrightnessMax = max;
+        _hwBrightnessDefault = (min + max) / 2;
+        // Clamp current brightness to new range
+        if (_hwBrightness < _hwBrightnessMin) _hwBrightness = _hwBrightnessMin;
+        if (_hwBrightness > _hwBrightnessMax) _hwBrightness = _hwBrightnessMax;
+    }
+
     // ===== Protocol Framing =====
 
     /**
@@ -464,6 +512,8 @@ struct SpiStripConfig : public PhysicalStripConfig
     bool _autoDetectChip = false;                    // Default: Manual chip selection
     LedProtocol _detectedChip = LedProtocol::APA102; // Default: APA102
     uint32_t _spiFrequency = 7500000;                // Default: 7.5MHz (safe for clones)
+    uint8_t _minRgbValue = 0;                        // Default: 0 (no clamping). Clone chips may need 6-8
+    uint8_t _maxRgbValue = 255;                      // Default: 255 (no clamping). Can limit for power management
 };
 
 /**

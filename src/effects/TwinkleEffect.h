@@ -114,6 +114,11 @@ class TwinkleEffect : public Effect
     {
         return "Twinkle";
     }
+
+    const char* getDescription() override
+    {
+        return "Random LEDs twinkling on and off";
+    }
 };
 
 /**
@@ -222,5 +227,10 @@ class SparkleEffect : public Effect
     const char* getName() override
     {
         return "Sparkle";
+    }
+
+    const char* getDescription() override
+    {
+        return "Fast random sparkles with party vibe";
     }
 };

@@ -22,6 +22,7 @@ class PrideEffect : public Effect
     PrideEffect() = default;
 
     const char* getName() override { return "Pride2015"; }
+    const char* getDescription() override { return "Rainbow colors with dynamic brightness waves"; }
 
     // ====================================================================
     // Parameter API (Pride has no adjustable params - it's a fixed pattern)

@@ -183,8 +183,9 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     // Set ColorOrder: Use provided value, or protocol-dependent default
     if (colorOrder == ColorOrder::NONE)
     {
-        // Protocol defaults: APA102=BGR, SK9822=RGB
-        _inst->colorOrder = (protocol == LedProtocol::APA102) ? ColorOrder::BGR : ColorOrder::RGB;
+        // Protocol defaults: APA102=BGR, APA102_CLONE=BGR, SK9822=RGB
+        _inst->colorOrder = (protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE) 
+                            ? ColorOrder::BGR : ColorOrder::RGB;
     }
     else
     {
@@ -200,15 +201,34 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     _inst->dummyLedMode = 1;        // Physical dummy LED: sacrifice LED#0 to fix first LED color
     _inst->startFrameCount = 8;     // 8 start frames (0x00000000) for data sync
     _inst->endFrameCount = 1;       // 1 end frame to latch data (varies by chip)
-    _inst->hwBrightness = 16;       // Default brightness (safe range 16-30, below 16=flicker, 31=sync bug)
     _inst->startFrameDelayUs = 0;   // No delay after start frames (can add if needed)
     _inst->endFramePattern = 0x00;  // End frame pattern: 0x00 = APA102, 0xFF = SK9822
     _inst->detectedChip = protocol; // Start with user-provided protocol
     _inst->autoDetectChip = false;  // Chip auto-detection disabled by default
+    
+    // Protocol-specific defaults (safe ranges for clone chips)
+    if (protocol == LedProtocol::APA102_CLONE)
+    {
+        // Clone chips: Safe ranges to prevent flicker and sync issues
+        _inst->minRgbValue = 8;         // RGB < 8 doesn't update on clones
+        _inst->maxRgbValue = 255;       // No upper limit (can be set for power management)
+        _inst->hwBrightnessMin = 16;    // Below 16 causes flicker on clones
+        _inst->hwBrightnessMax = 30;    // 31 breaks sync on some clones
+        _inst->hwBrightness = 24;       // Default: 75% of safe range (16-30)
+    }
+    else
+    {
+        // Original chips: Full range available
+        _inst->minRgbValue = 0;         // No RGB clamping
+        _inst->maxRgbValue = 255;       // No RGB clamping
+        _inst->hwBrightnessMin = 0;     // Full range 0-31
+        _inst->hwBrightnessMax = 31;    // Full range 0-31
+        _inst->hwBrightness = 16;       // Default: 50% brightness
+    }
 
     // Determine bytes per LED and capabilities based on protocol
-    _inst->bytesPerLed = 4; // APA102, SK9822: 4 bytes (brightness + RGB)
-    _inst->hasGlobalBrightness = (protocol == LedProtocol::APA102 || protocol == LedProtocol::SK9822);
+    _inst->bytesPerLed = 4; // APA102, APA102_CLONE, SK9822: 4 bytes (brightness + RGB)
+    _inst->hasGlobalBrightness = (protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE || protocol == LedProtocol::SK9822);
 
     // ===== Buffer Allocation =====
     // Buffer layout: [START_FRAMES] [DUMMY_LED] [LED_DATA] [END_FRAMES]
@@ -218,21 +238,25 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     // - LED Data: ledCount * 4 bytes each [111bbbbb][C1][C2][C3] - actual LED colors
     // - End Frames: M * 4 bytes (pattern 0x00 or 0xFF) - latch data to LEDs
 
-    uint16_t startFrameSize = _inst->startFrameCount * 4;       // Typically 8 frames = 32 bytes
-    uint16_t dummyLedSize = (_inst->dummyLedMode == 1) ? 4 : 0; // 4 bytes if physical dummy
-    uint16_t endFrameSize = _inst->endFrameCount * 4;           // Typically 1 frame = 4 bytes
+    // CRITICAL: Use size_t for intermediate calculations to prevent overflow!
+    // With uint16_t: ledCount=20000 * 4 = 80000 > 65535 → OVERFLOW!
+    size_t startFrameSize = (size_t)_inst->startFrameCount * 4;       // Typically 8 frames = 32 bytes
+    size_t dummyLedSize = (_inst->dummyLedMode == 1) ? 4 : 0;         // 4 bytes if physical dummy
+    size_t endFrameSize = (size_t)_inst->endFrameCount * 4;           // Typically 1 frame = 4 bytes
 
-    _inst->bufferSize = startFrameSize + dummyLedSize + (ledCount * _inst->bytesPerLed) + endFrameSize;
+    _inst->bufferSize = startFrameSize + dummyLedSize + ((size_t)ledCount * _inst->bytesPerLed) + endFrameSize;
 
     // CRITICAL: Allocate as uint32_t aligned (DMA and atomic writes require this)
     // Buffer must be 32-bit aligned for direct word writes (no byte-by-byte access)
-    size_t wordCount = _inst->bufferSize / 4;
-    uint32_t* wordBuffer = (uint32_t*)malloc(wordCount * sizeof(uint32_t));
+    // Round UP to nearest word boundary to prevent buffer underallocation
+    _inst->bufferWordCount = (_inst->bufferSize + 3) / 4; // Round up: (size + 3) / 4
+    uint32_t* wordBuffer = (uint32_t*)malloc(_inst->bufferWordCount * sizeof(uint32_t));
     _inst->buffer = (uint8_t*)wordBuffer; // Keep uint8_t* for compatibility
 
     if (_inst->buffer)
     {
-        memset(_inst->buffer, 0, _inst->bufferSize);
+        // Clear the ENTIRE allocated buffer (use word count, not logical byte size)
+        memset(_inst->buffer, 0, _inst->bufferWordCount * 4);
 
         // Re-cast for word-based initialization
         uint32_t* words = (uint32_t*)_inst->buffer;
@@ -308,9 +332,11 @@ PIO_NeoPixel_SPI::~PIO_NeoPixel_SPI()
         if (_inst->buffer)
         {
             free(_inst->buffer);
+            _inst->buffer = nullptr;
         }
 
         free(_inst);
+        _inst = nullptr;
     }
 }
 
@@ -442,6 +468,12 @@ bool PIO_NeoPixel_SPI::initPIO()
                     _inst->clkdiv = sys_clk / (2.0f * (float)_inst->spiFrequency);
                     if (_inst->clkdiv < 1.0f) _inst->clkdiv = 1.0f;
 
+                    // CRITICAL: Clear and reset state machine before init (prevents garbage after reboot!)
+                    pio_sm_set_enabled(pio, sm, false);  // Disable first
+                    pio_sm_restart(pio, sm);              // Reset PC to start
+                    pio_sm_clear_fifos(pio, sm);          // Clear any old data
+                    pio_sm_clkdiv_restart(pio, sm);       // Reset clock divider
+
                     // Initialize SPI program
                     pio_spi_program_init(pio, sm, _inst->offset,
                                          _inst->clkPin, _inst->mosiPin,
@@ -524,7 +556,7 @@ bool PIO_NeoPixel_SPI::initDMA()
         &c,
         &_inst->pio->txf[_inst->sm], // Destination: PIO TX FIFO (32-bit register)
         _inst->buffer,               // Source: Main buffer (direct transfer, no intermediate copy)
-        _inst->bufferSize / 4,       // Transfer count in 32-bit words (e.g., 408 bytes / 4 = 102 words)
+        _inst->bufferWordCount,      // Transfer count in 32-bit words (stored during allocation)
         false                        // Don't start yet (triggered by show() → sendDataDMA())
     );
 
@@ -573,6 +605,10 @@ bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
     if (!_inst || index >= _inst->ledCount) return false;
 
+    // CRITICAL: Don't modify buffer while DMA transfer is in progress!
+    // This prevents flickering from partial buffer updates during DMA read
+    if (_inst->busy) return false;
+
     // Use current hardware brightness (default: 30, adjustable via setHardwareBrightness())
     // Brightness range: 16-30 (below 16 flickers, 31/0xFF breaks sync)
     rgbToBuffer(index, r, g, b, _inst->hwBrightness);
@@ -600,6 +636,10 @@ bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
     if (!_inst || index >= _inst->ledCount) return false;
+
+    // CRITICAL: Don't modify buffer while DMA transfer is in progress!
+    // This prevents flickering from partial buffer updates during DMA read
+    if (_inst->busy) return false;
 
     // Interpret w parameter as brightness (0-255) for APA102/SK9822
     // Map to safe range 16-30: below 16 flickers, 31/0xFF breaks sync on clones
@@ -639,6 +679,28 @@ inline void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, 
                                               index, _inst->ledCount - 1);
     #endif
         return;
+    }
+
+    // CRITICAL FIX: APA102/SK9822 clone chips have bugs:
+    // 1. RGB values below threshold (~6-8) don't update → retain previous color
+    // 2. High brightness values (31) can break sync on some clones
+    // Solution: Clamp RGB to safe range from config (minRgbValue, maxRgbValue)
+    // Note: Values are configurable per strip (0=disabled)
+    uint8_t minRgbValue = _inst->minRgbValue;
+    uint8_t maxRgbValue = _inst->maxRgbValue;
+    
+    if (minRgbValue > 0)
+    {
+        if (r > 0 && r < minRgbValue) r = minRgbValue;
+        if (g > 0 && g < minRgbValue) g = minRgbValue;
+        if (b > 0 && b < minRgbValue) b = minRgbValue;
+    }
+    
+    if (maxRgbValue < 255)
+    {
+        if (r > maxRgbValue) r = maxRgbValue;
+        if (g > maxRgbValue) g = maxRgbValue;
+        if (b > maxRgbValue) b = maxRgbValue;
     }
 
     // Buffer layout: [START_FRAMES(N words)] [DUMMY_LED(1 word if mode=1)] [LED_DATA(N words)] [END_FRAMES(M words)]
@@ -695,7 +757,22 @@ inline void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, 
 
         // Write complete 32-bit word (atomic operation, DMA-safe)
         // Result: [Brightness << 24 | Byte2 << 16 | Byte1 << 8 | Byte0]
+        
+        // CRITICAL: Memory barrier BEFORE write to ensure previous operations complete
+        __dmb();
+        
         wordBuffer[wordIndex] = ((uint32_t)brightByte << 24) | (rgbValue & 0x00FFFFFF);
+        
+        // CRITICAL: Memory barrier AFTER write to ensure write is visible before busy check
+        __dmb();
+        
+        // CRITICAL: Double-check busy flag AFTER write to detect race with show()
+        // If DMA started between our initial check and write, invalidate this write
+        if (_inst->busy)
+        {
+            // DMA started during our write - mark buffer dirty so next show() will resend
+            _inst->dirty = true;
+        }
 
     #ifdef OPENKNX_NEOPIXEL_TRACE1
         if (index < 1)
@@ -710,7 +787,20 @@ inline void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, 
     else
     {
         // WS2801: Simple 24-bit RGB word [R << 16 | G << 8 | B]
+        
+        // CRITICAL: Memory barrier BEFORE write
+        __dmb();
+        
         wordBuffer[wordIndex] = (r << 16) | (g << 8) | b;
+        
+        // CRITICAL: Memory barrier AFTER write + busy double-check
+        __dmb();
+        
+        // Double-check busy flag to detect race with show()
+        if (_inst->busy)
+        {
+            _inst->dirty = true; // Mark for resend
+        }
     }
 }
 
@@ -771,13 +861,16 @@ void PIO_NeoPixel_SPI::sendDataPIO()
 {
     if (!_inst) return;
 
-    // Calculate word count (buffer must be 4-byte aligned)
-    size_t wordCount = _inst->bufferSize / 4; // e.g., 408 bytes / 4 = 102 words
+    // CRITICAL: Memory barrier to ensure all buffer writes are visible to PIO!
+    __dmb(); // Data Memory Barrier
+
+    // Use stored word count (already calculated during allocation)
+    // CRITICAL: Must use bufferWordCount, NOT bufferSize/4 (can cause rounding errors)
     uint32_t* wordBuffer = (uint32_t*)_inst->buffer;
 
     // Send data as 32-bit words to PIO TX FIFO
     // pio_sm_put_blocking() waits for FIFO space (max 8 words deep)
-    for (size_t i = 0; i < wordCount; i++)
+    for (size_t i = 0; i < _inst->bufferWordCount; i++)
     {
         pio_sm_put_blocking(_inst->pio, _inst->sm, wordBuffer[i]); // Blocks if FIFO full
     }
@@ -809,6 +902,10 @@ void PIO_NeoPixel_SPI::sendDataDMA()
         _inst->busy = false;
         return;
     }
+
+    // CRITICAL: Memory barrier to ensure all buffer writes are visible to DMA!
+    // Without this, the CPU might reorder buffer writes AFTER the DMA starts
+    __dmb(); // Data Memory Barrier (ARM Cortex-M0+ instruction)
 
     // Trigger DMA transfer (last parameter true = start immediately)
     // DMA reads from _inst->buffer and writes to PIO TX FIFO
@@ -842,6 +939,13 @@ void PIO_NeoPixel_SPI::clear()
 {
     if (!_inst || !_inst->buffer) return;
 
+    // CRITICAL: Don't modify buffer while DMA transfer is in progress!
+    // Wait for transfer to complete before clearing
+    if (_inst->busy) return;
+
+    // CRITICAL: Memory barrier before buffer access
+    __dmb();
+
     uint32_t* wordBuffer = (uint32_t*)_inst->buffer;
 
     if (_inst->hasGlobalBrightness)
@@ -871,6 +975,10 @@ void PIO_NeoPixel_SPI::clear()
             wordBuffer[firstLedWordIdx + i] = 0x00000000;
         }
     }
+    
+    // CRITICAL: Memory barrier after buffer writes
+    __dmb();
+    
     _inst->dirty = true;
 }
 
@@ -946,6 +1054,9 @@ PhysicalStripConfig* PIO_NeoPixel_SPI::createDefaultConfig() const
         cfg->setAutoDetectChip(_inst->autoDetectChip);
         cfg->setDetectedChip(_inst->detectedChip);
         cfg->setSpiFrequency(_inst->spiFrequency);
+        cfg->setMinRgbValue(_inst->minRgbValue);  // Clone chip workaround
+        cfg->setMaxRgbValue(_inst->maxRgbValue);  // Power limiting / clone workaround
+        cfg->setHwBrightnessRange(_inst->hwBrightnessMin, _inst->hwBrightnessMax);  // Clone chip safe range
     }
 
     return cfg;
@@ -973,6 +1084,10 @@ bool PIO_NeoPixel_SPI::applyConfig(const PhysicalStripConfig* config)
     _inst->startFrameDelayUs = spiCfg->getStartFrameDelayUs();
     _inst->autoDetectChip = spiCfg->getAutoDetectChip();
     _inst->detectedChip = spiCfg->getDetectedChip();
+    _inst->minRgbValue = spiCfg->getMinRgbValue();  // Clone chip workaround
+    _inst->maxRgbValue = spiCfg->getMaxRgbValue();  // Power limiting / clone workaround
+    _inst->hwBrightnessMin = spiCfg->getHwBrightnessMin();  // Clone chip safe range
+    _inst->hwBrightnessMax = spiCfg->getHwBrightnessMax();  // Clone chip safe range
 
     // Apply SPI frequency (can be changed live if initialized)
     uint32_t newFreq = spiCfg->getSpiFrequency();
@@ -1052,12 +1167,22 @@ void PIO_NeoPixel_SPI::setStartFrameCount(uint8_t count)
 
 /**
  * @brief Set end frame count (1-80, default: 1)
+ * WARNING: Cannot be changed after init() - requires buffer re-allocation!
  */
 void PIO_NeoPixel_SPI::setEndFrameCount(uint8_t count)
 {
     if (!_inst) return;
     if (count < 1) count = 1;
     if (count > 80) count = 80;
+
+    if (_inst->initialized)
+    {
+    #ifdef OPENKNX_DEBUG
+        openknx.logger.logWithPrefixAndValues("PIO NeoPixel SPI",
+                                              "WARNING: Cannot change endFrameCount after init() - requires re-init!");
+    #endif
+        return;
+    }
 
     _inst->endFrameCount = count;
 }
@@ -1181,6 +1306,10 @@ LedProtocol PIO_NeoPixel_SPI::detectChipType()
 void PIO_NeoPixel_SPI::setHardwareBrightness(uint8_t brightness)
 {
     if (!_inst) return;
+
+    // CRITICAL: Don't modify buffer while DMA transfer is in progress!
+    // This prevents flickering from partial buffer updates during DMA read
+    if (_inst->busy) return;
 
     // Clamp to safe range 16-30
     //if (brightness < 16) brightness = 16;

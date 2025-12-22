@@ -75,6 +75,10 @@ class EffectPool
     static Effect* getMeteor();
     //
     // -----------------------------------------------------------
+    
+    // Dynamic effect registry access
+    static uint8_t getEffectCount();
+    static Effect* getEffectByIndex(uint8_t index);
 
   private:
     EffectPool() = delete;

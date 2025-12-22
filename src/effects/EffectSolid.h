@@ -22,6 +22,7 @@ class EffectSolid : public Effect
 
     void update(Segment* segment, uint32_t deltaTime) override;
     const char* getName() override { return "Solid"; }
+    const char* getDescription() override { return "Static solid color"; }
 
     // ====================================================================
     // Parameter API (Solid has no params - uses config color components)

@@ -554,7 +554,18 @@ void NeoPixelManager::applyPowerLimit()
                 // Scale all pixels in this VirtualStrip
                 for (uint16_t i = 0; i < ledCount; i++)
                 {
-                    uint16_t offset = i * bytesPerPixel;
+                    // CRITICAL: Cast to size_t to prevent overflow (i * bytesPerPixel can exceed uint16_t)
+                    size_t offset = (size_t)i * bytesPerPixel;
+                    
+                    // CRITICAL: Bounds check to prevent buffer overflow
+                    size_t bufferSize = vstrip->getBufferSize();
+                    if (offset + bytesPerPixel > bufferSize)
+                    {
+                        logErrorP("NeoPixelManager: Power limiting buffer overflow! LED %u, offset %u, bufferSize %u",
+                                  i, (uint32_t)offset, (uint32_t)bufferSize);
+                        break; // Skip remaining LEDs for this strip
+                    }
+                    
                     buffer[offset] = (uint8_t)(buffer[offset] * globalScale);         // R
                     buffer[offset + 1] = (uint8_t)(buffer[offset + 1] * globalScale); // G
                     buffer[offset + 2] = (uint8_t)(buffer[offset + 2] * globalScale); // B
@@ -620,13 +631,25 @@ bool NeoPixelManager::showAll()
     uint32_t startTime = millis();
     bool allSuccess = true;
 
-    // Starte alle Transfers
+    // CRITICAL: Send strips SEQUENTIALLY to prevent buffer corruption!
+    // Each strip must finish DMA transfer before next one starts
     for (auto strip : _strips)
     {
         if (strip)
         {
+            // Start transfer
             if (!strip->show())
             {
+                allSuccess = false;
+                _errorCount++;
+                continue; // Skip wait if show() failed
+            }
+
+            // CRITICAL: Wait for this strip to finish before starting next one!
+            // Timeout: 100ms (sufficient for typical strips up to 1000 LEDs)
+            if (!strip->waitForTransfer(100))
+            {
+                // Transfer timed out - mark as error but continue
                 allSuccess = false;
                 _errorCount++;
             }

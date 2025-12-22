@@ -175,7 +175,7 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
     void onDmaComplete();
 
   private:
-    pio_neopixel_serial_inst_t* _inst;
+    pio_neopixel_serial_inst_t* volatile _inst;
 
     bool initPIO();
     bool initDMA();

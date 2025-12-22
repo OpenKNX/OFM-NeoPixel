@@ -23,6 +23,7 @@ class JuggleEffect : public Effect
     JuggleEffect() = default;
 
     const char* getName() override { return "Juggle"; }
+    const char* getDescription() override { return "Multiple colored dots bouncing and fading"; }
 
     // ====================================================================
     // Parameter API

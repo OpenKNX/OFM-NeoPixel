@@ -118,6 +118,11 @@ class BreathingEffect : public Effect
     {
         return "Breathing";
     }
+
+    const char* getDescription() override
+    {
+        return "Smooth breathing effect - fade in and out";
+    }
 };
 
 /**
@@ -229,6 +234,11 @@ class StrobeEffect : public Effect
     {
         return "Strobe";
     }
+
+    const char* getDescription() override
+    {
+        return "Fast on/off flashing strobe light";
+    }
 };
 
 /**
@@ -321,5 +331,10 @@ class PulseEffect : public Effect
     const char* getName() override
     {
         return "Pulse";
+    }
+
+    const char* getDescription() override
+    {
+        return "Dramatic pulse with adjustable width";
     }
 };

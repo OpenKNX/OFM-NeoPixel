@@ -38,10 +38,11 @@ enum class LedProtocol
     GS8208,  // 12V RGB, 800kHz, GRB order
 
     // SPI Protocols (Separate clock and data)
-    APA102,  // 5V RGB+Brightness, up to 20MHz
-    SK9822,  // 5V RGB+Brightness, up to 15MHz (APA102 clone)
-    WS2801,  // 5V RGB, up to 25MHz
-    LPD8806, // 5V RGB (7-bit), up to 20MHz
+    APA102,       // 5V RGB+Brightness, up to 20MHz (original chip)
+    APA102_CLONE, // 5V RGB+Brightness, clone chips with RGB update bug (requires minRgbValue workaround)
+    SK9822,       // 5V RGB+Brightness, up to 15MHz (APA102 clone)
+    WS2801,       // 5V RGB, up to 25MHz
+    LPD8806,      // 5V RGB (7-bit), up to 20MHz
 };
 
 /**

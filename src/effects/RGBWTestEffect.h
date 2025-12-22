@@ -118,6 +118,11 @@ class RGBWTestEffect : public Effect
         return "RGBW_Test";
     }
 
+    const char* getDescription() override
+    {
+        return "Test pattern for RGBW LED strips";
+    }
+
   private:
     /**
      * @brief Test pure color (one channel at a time)

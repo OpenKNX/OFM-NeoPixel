@@ -1,49 +1,185 @@
 #include "EffectPool.h"
-#include "BPMEffect.h"
-#include "BreathingEffect.h"
-#include "CometEffect.h"
-#include "ConfettiEffect.h"
-#include "CylonEffect.h"
+
+// ============================================================================
+// Effect Selection - Individual Effect Control
+// ============================================================================
+// Define these to DISABLE specific effects (saves flash memory)
+// Solid effect cannot be disabled (always included)
+//
+// #define NEOPIXEL_DISABLE_WIPE
+// #define NEOPIXEL_DISABLE_RAINBOW
+// #define NEOPIXEL_DISABLE_PRIDE
+// #define NEOPIXEL_DISABLE_CONFETTI
+// #define NEOPIXEL_DISABLE_JUGGLE
+// #define NEOPIXEL_DISABLE_BPM
+// #define NEOPIXEL_DISABLE_CYLON
+// #define NEOPIXEL_DISABLE_RGBWTEST
+// #define NEOPIXEL_DISABLE_GARAGEDOOR
+// #define NEOPIXEL_DISABLE_FIRE
+// #define NEOPIXEL_DISABLE_THEATERCHASE
+// #define NEOPIXEL_DISABLE_THEATERCHASERAINBOW
+// #define NEOPIXEL_DISABLE_SINELON
+// #define NEOPIXEL_DISABLE_TWINKLE
+// #define NEOPIXEL_DISABLE_SPARKLE
+// #define NEOPIXEL_DISABLE_BREATHING
+// #define NEOPIXEL_DISABLE_STROBE
+// #define NEOPIXEL_DISABLE_PULSE
+// #define NEOPIXEL_DISABLE_COMET
+// #define NEOPIXEL_DISABLE_METEOR
+// ============================================================================
+
 #include "EffectSolid.h"
+
+#ifndef NEOPIXEL_DISABLE_WIPE
 #include "EffectWipe.h"
-#include "FireEffect.h"
-#include "GarageDoorEffect.h"
-#include "JuggleEffect.h"
-#include "PrideEffect.h"
-#include "RGBWTestEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_RAINBOW
 #include "RainbowEffect.h"
-#include "SinelonEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_PRIDE
+#include "PrideEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_CONFETTI
+#include "ConfettiEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_JUGGLE
+#include "JuggleEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_BPM
+#include "BPMEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_CYLON
+#include "CylonEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_RGBWTEST
+#include "RGBWTestEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_GARAGEDOOR
+#include "GarageDoorEffect.h"
+#endif
+
+#ifndef NEOPIXEL_MINIMAL_EFFECTS
+
+#ifndef NEOPIXEL_DISABLE_FIRE
+#include "FireEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_THEATERCHASE
 #include "TheaterChaseEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_SINELON
+#include "SinelonEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_TWINKLE
 #include "TwinkleEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_BREATHING
+#include "BreathingEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_COMET
+#include "CometEffect.h"
+#endif
+
+#endif // NEOPIXEL_MINIMAL_EFFECTS
+
 // -----------------------------------------------------------
 // Static singleton instances - (Initialized on first use)
 // Add here for each new effect type to be included in the pool
 //
 static EffectSolid* s_solid = nullptr;
+
+#ifndef NEOPIXEL_DISABLE_WIPE
 static EffectWipe* s_wipe = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_RAINBOW
 static RainbowEffect* s_rainbow = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_PRIDE
 static PrideEffect* s_pride = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_CONFETTI
 static ConfettiEffect* s_confetti = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_JUGGLE
 static JuggleEffect* s_juggle = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_BPM
 static BPMEffect* s_bpm = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_CYLON
 static CylonEffect* s_cylon = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_RGBWTEST
+static RGBWTestEffect* s_rgbwTest = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_GARAGEDOOR
+static GarageDoorEffect* s_garageDoor = nullptr;
+#endif
 
 #ifndef NEOPIXEL_MINIMAL_EFFECTS
-// Advanced effects - excluded when NEOPIXEL_MINIMAL_EFFECTS is defined
-static RGBWTestEffect* s_rgbwTest = nullptr;
-static GarageDoorEffect* s_garageDoor = nullptr;
+
+#ifndef NEOPIXEL_DISABLE_FIRE
 static FireEffect* s_fire = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_THEATERCHASE
 static TheaterChaseEffect* s_theaterChase = nullptr;
 static TheaterChaseRainbowEffect* s_theaterChaseRainbow = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_SINELON
 static SinelonEffect* s_sinelon = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_TWINKLE
 static TwinkleEffect* s_twinkle = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_SPARKLE
 static SparkleEffect* s_sparkle = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_BREATHING
 static BreathingEffect* s_breathing = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_STROBE
 static StrobeEffect* s_strobe = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_PULSE
 static PulseEffect* s_pulse = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_COMET
 static CometEffect* s_comet = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_METEOR
 static MeteorEffect* s_meteor = nullptr;
 #endif
+
+#endif // NEOPIXEL_MINIMAL_EFFECTS
 //
 // -----------------------------------------------------------
 
@@ -324,3 +460,155 @@ Effect* EffectPool::getMeteor()
 }
 
 #endif // NEOPIXEL_MINIMAL_EFFECTS
+// ============================================================================
+// Dynamic Effect Registry
+// ============================================================================
+
+/**
+ * @brief Get total number of available effects
+ * @return Number of effects in pool
+ */
+uint8_t EffectPool::getEffectCount()
+{
+    uint8_t count = 1; // Solid always included
+    
+#ifndef NEOPIXEL_DISABLE_WIPE
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_RAINBOW
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_PRIDE
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_CONFETTI
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_JUGGLE
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_BPM
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_CYLON
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_RGBWTEST
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_GARAGEDOOR
+    count++;
+#endif
+
+#ifndef NEOPIXEL_MINIMAL_EFFECTS
+#ifndef NEOPIXEL_DISABLE_FIRE
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_THEATERCHASE
+    count += 2; // TheaterChase + TheaterChaseRainbow
+#endif
+#ifndef NEOPIXEL_DISABLE_SINELON
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_TWINKLE
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_SPARKLE
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_BREATHING
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_STROBE
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_PULSE
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_COMET
+    count++;
+#endif
+#ifndef NEOPIXEL_DISABLE_METEOR
+    count++;
+#endif
+#endif // NEOPIXEL_MINIMAL_EFFECTS
+
+    return count;
+}
+
+/**
+ * @brief Get effect instance by index
+ * @param index Logical effect index (0-based)
+ * @return Effect instance or nullptr if invalid index
+ */
+Effect* EffectPool::getEffectByIndex(uint8_t index)
+{
+    uint8_t currentIndex = 0;
+    
+    // Index 0: Solid (always included)
+    if (index == currentIndex++) return getSolid();
+    
+#ifndef NEOPIXEL_DISABLE_WIPE
+    if (index == currentIndex++) return getWipe();
+#endif
+#ifndef NEOPIXEL_DISABLE_RAINBOW
+    if (index == currentIndex++) return getRainbow();
+#endif
+#ifndef NEOPIXEL_DISABLE_PRIDE
+    if (index == currentIndex++) return getPride();
+#endif
+#ifndef NEOPIXEL_DISABLE_CONFETTI
+    if (index == currentIndex++) return getConfetti();
+#endif
+#ifndef NEOPIXEL_DISABLE_JUGGLE
+    if (index == currentIndex++) return getJuggle();
+#endif
+#ifndef NEOPIXEL_DISABLE_BPM
+    if (index == currentIndex++) return getBPM();
+#endif
+#ifndef NEOPIXEL_DISABLE_CYLON
+    if (index == currentIndex++) return getCylon();
+#endif
+#ifndef NEOPIXEL_DISABLE_RGBWTEST
+    if (index == currentIndex++) return getRGBWTest();
+#endif
+#ifndef NEOPIXEL_DISABLE_GARAGEDOOR
+    if (index == currentIndex++) return getGarageDoor();
+#endif
+
+#ifndef NEOPIXEL_MINIMAL_EFFECTS
+#ifndef NEOPIXEL_DISABLE_FIRE
+    if (index == currentIndex++) return getFire();
+#endif
+#ifndef NEOPIXEL_DISABLE_THEATERCHASE
+    if (index == currentIndex++) return getTheaterChase();
+    if (index == currentIndex++) return getTheaterChaseRainbow();
+#endif
+#ifndef NEOPIXEL_DISABLE_SINELON
+    if (index == currentIndex++) return getSinelon();
+#endif
+#ifndef NEOPIXEL_DISABLE_TWINKLE
+    if (index == currentIndex++) return getTwinkle();
+#endif
+#ifndef NEOPIXEL_DISABLE_SPARKLE
+    if (index == currentIndex++) return getSparkle();
+#endif
+#ifndef NEOPIXEL_DISABLE_BREATHING
+    if (index == currentIndex++) return getBreathing();
+#endif
+#ifndef NEOPIXEL_DISABLE_STROBE
+    if (index == currentIndex++) return getStrobe();
+#endif
+#ifndef NEOPIXEL_DISABLE_PULSE
+    if (index == currentIndex++) return getPulse();
+#endif
+#ifndef NEOPIXEL_DISABLE_COMET
+    if (index == currentIndex++) return getComet();
+#endif
+#ifndef NEOPIXEL_DISABLE_METEOR
+    if (index == currentIndex++) return getMeteor();
+#endif
+#endif // NEOPIXEL_MINIMAL_EFFECTS
+
+    return nullptr; // Index out of range
+}

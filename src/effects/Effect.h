@@ -59,6 +59,12 @@ class Effect
     virtual const char* getName() { return "Unknown"; }
 
     /**
+     * Get effect description
+     * @return Brief description of what the effect does
+     */
+    virtual const char* getDescription() { return "No description"; }
+
+    /**
      * @brief Check if effect is done
      *
      * For finite effects (e.g. one-shot): true when done

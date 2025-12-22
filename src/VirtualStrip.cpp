@@ -225,6 +225,14 @@ void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
     if (index >= _totalLeds) return;
 
     size_t offset = (size_t)index * _bytesPerLed;
+    
+    // CRITICAL: Bounds check to prevent buffer overflow
+    if (offset + _bytesPerLed > _bufferSize)
+    {
+        logErrorP("VirtualStrip: Buffer overflow prevented! Index %u, Offset %u, BufferSize %u",
+                  index, (uint32_t)offset, (uint32_t)_bufferSize);
+        return;
+    }
 
 #ifdef OPENKNX_NEOPIXEL_TRACE1
     if (index == 0)
@@ -350,6 +358,9 @@ bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) 
     if (index >= _totalLeds) return false;
 
     size_t offset = (size_t)index * _bytesPerLed;
+    
+    // CRITICAL: Bounds check to prevent buffer overflow
+    if (offset + 2 >= _bufferSize) return false;
 
     // Read RGB directly from buffer (always in RGB format)
     r = _buffer[offset];     // Red
@@ -375,6 +386,9 @@ bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, 
     if (index >= _totalLeds) return false;
 
     size_t offset = (size_t)index * _bytesPerLed;
+    
+    // CRITICAL: Bounds check to prevent buffer overflow
+    if (offset + _bytesPerLed > _bufferSize) return false;
 
     // Read RGBW directly from buffer (always in RGB/RGBW format)
     r = _buffer[offset];     // Red

@@ -23,6 +23,7 @@ class ConfettiEffect : public Effect
     ConfettiEffect() = default;
 
     const char* getName() override { return "Confetti"; }
+    const char* getDescription() override { return "Random colored pixels fading over time"; }
 
     // ====================================================================
     // Parameter API

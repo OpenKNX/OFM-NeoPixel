@@ -111,6 +111,11 @@ class TheaterChaseEffect : public Effect
     {
         return "Theater Chase";
     }
+
+    const char* getDescription() override
+    {
+        return "Movie theater chase light effect";
+    }
 };
 
 /**
@@ -217,5 +222,10 @@ class TheaterChaseRainbowEffect : public Effect
     const char* getName() override
     {
         return "Theater Chase Rainbow";
+    }
+
+    const char* getDescription() override
+    {
+        return "Theater chase with rainbow colors";
     }
 };

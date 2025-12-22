@@ -105,7 +105,8 @@ class GarageDoorEffect : public Effect
      * Get effect name
      */
     const char* getName() override { return "GarageDoor"; }
-
+    
+    const char* getDescription() override { return "Opening/closing garage door animation"; }
     /**
      * Update effect - called every frame
      */

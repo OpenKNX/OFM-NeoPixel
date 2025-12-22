@@ -28,8 +28,8 @@ class PIO_NeoPixel_SPI;    // Forward declaration for SPI strips
 
 // Global DMA handler registries (shared between Serial and SPI)
 //
-inline PIO_NeoPixel_Serial* g_serialHandlers[12] = {nullptr};
-inline PIO_NeoPixel_SPI* g_spiHandlers[12] = {nullptr};
+inline PIO_NeoPixel_Serial* volatile g_serialHandlers[12] = {nullptr};
+inline PIO_NeoPixel_SPI* volatile g_spiHandlers[12] = {nullptr};
 
 void unifiedDmaIRQHandler(); // Unified DMA IRQ Handler declaration
 

@@ -138,4 +138,9 @@ class SinelonEffect : public Effect
     {
         return "Sinelon";
     }
+
+    const char* getDescription() override
+    {
+        return "Single LED moving with sine wave motion";
+    }
 };

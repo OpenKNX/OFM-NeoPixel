@@ -1,6 +1,6 @@
 /**
  * @file CometEffect.h
- * @brief Comet/Meteor effect - Moving dot with trailing tail
+ * @brief Comet/Meteor effect - Moving dot with trailing tail 
  *
  * Creates a comet or meteor effect with a bright head and fading tail.
  * Based on common LED effect patterns.
@@ -191,6 +191,11 @@ class CometEffect : public Effect
     {
         return "Comet";
     }
+
+    const char* getDescription() override
+    {
+        return "Comet flying through space with tail";
+    }
 };
 
 /**
@@ -341,5 +346,10 @@ class MeteorEffect : public Effect
     const char* getName() override
     {
         return "Meteor";
+    }
+
+    const char* getDescription() override
+    {
+        return "Random meteor shower with variable size";
     }
 };

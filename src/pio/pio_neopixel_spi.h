@@ -66,8 +66,9 @@ struct pio_neopixel_spi_inst
     // Example: brightness=31 -> 0xFF(11111111) (full brightness), brightness=0 -> 0xE0(11100000) (off)
     bool hasGlobalBrightness; // APA102/SK9822 have global brightness
 
-    uint8_t* buffer;   // LED data buffer
-    size_t bufferSize; // Buffer size in bytes
+    uint8_t* buffer;     // LED data buffer
+    size_t bufferSize;   // Buffer size in bytes (logical)
+    size_t bufferWordCount; // Buffer size in 32-bit words (actual allocation)
 
     uint32_t spiFrequency; // SPI frequency (Hz)
     float clkdiv;          // Actual clock divider (set during init)
@@ -81,13 +82,17 @@ struct pio_neopixel_spi_inst
     LedProtocol detectedChip;   // Detected chip type after auto-detect (APA102 or SK9822)
     bool autoDetectChip;        // Auto-detect chip type on init (default: false)
     uint8_t hwBrightness;       // Current hardware brightness (16-30, default: 30)
+    uint8_t minRgbValue;        // Minimum RGB value (0-255, default: 0 for APA102, 8 for APA102_CLONE)
+    uint8_t maxRgbValue;        // Maximum RGB value (0-255, default: 255)
+    uint8_t hwBrightnessMin;    // Min hardware brightness (0-31, default: 0 for APA102, 16 for clones)
+    uint8_t hwBrightnessMax;    // Max hardware brightness (0-31, default: 31 for APA102, 30 for clones)
 
     int dmaChannel;     // DMA channel (-1 if not used)
     int dmaIrqNum;      // DMA IRQ number (0 or 1, -1 if not used)
     bool useDMA;        // Use DMA for transfers
     bool initialized;   // Initialization state
     volatile bool busy; // Transfer in progress
-    bool dirty;         // Buffer has changed since last show() (prevents flicker from redundant sends)
+    volatile bool dirty;         // Buffer has changed since last show() (prevents flicker from redundant sends)
 };
 typedef struct pio_neopixel_spi_inst pio_neopixel_spi_inst_t;
 
@@ -222,7 +227,7 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
     void onDmaComplete();
 
   private:
-    pio_neopixel_spi_inst_t* _inst;
+    pio_neopixel_spi_inst_t* volatile _inst;
 
     bool initPIO();
     bool initDMA();

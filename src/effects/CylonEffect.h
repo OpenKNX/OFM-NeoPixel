@@ -26,6 +26,7 @@ class CylonEffect : public Effect
     CylonEffect() = default;
 
     const char* getName() override { return "Cylon"; }
+    const char* getDescription() override { return "Bouncing eye with trailing fade (KITT/BSG)"; }
 
     // ====================================================================
     // Parameter API

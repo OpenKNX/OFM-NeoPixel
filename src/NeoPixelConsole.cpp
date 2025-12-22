@@ -132,7 +132,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.logger.color(0);
         openknx.console.printHelpLine("neo power ?", "Show detailed Power commands");
         openknx.console.printHelpLine("neo power status", "Show current consumption and power limit");
-        openknx.console.printHelpLine("neo power on|off", "Enable/disable current limiting");
+        openknx.console.printHelpLine("neo  |off", "Enable/disable current limiting");
 
         openknx.logger.log("");
         openknx.logger.color(CONSOLE_HEADLINE_COLOR);
@@ -2493,29 +2493,25 @@ bool NeoPixel::processEffectsCommand()
     openknx.logger.log("  Available Effects");
     openknx.logger.log("══════════════════════════════════════════════════════════");
     openknx.logger.color(0);
-    openknx.logger.log("ID │ Name                 │ Type    │ Description");
-    openknx.logger.log("───┼──────────────────────┼─────────┼─────────────────────────────");
-    openknx.logger.log(" 0 │ Solid                │ Basic   │ Static color");
-    openknx.logger.log(" 1 │ Wipe                 │ Basic   │ Color wipe animation");
-    openknx.logger.log(" 2 │ Rainbow              │ FastLED │ Smooth rainbow gradient");
-    openknx.logger.log(" 3 │ Pride2015            │ FastLED │ Moving rainbow waves");
-    openknx.logger.log(" 4 │ Confetti             │ FastLED │ Random colored pixels");
-    openknx.logger.log(" 5 │ Juggle               │ FastLED │ Weaving colored dots");
-    openknx.logger.log(" 6 │ BPM                  │ FastLED │ Pulsing stripes");
-    openknx.logger.log(" 7 │ Cylon                │ FastLED │ Bouncing LED eye");
-    openknx.logger.log(" 8 │ RGBW Test            │ Test    │ RGBW test pattern");
-    openknx.logger.log(" 9 │ GarageDoor           │ Custom  │ 3-phase garage animation");
-    openknx.logger.log("10 │ Fire                 │ FastLED │ Realistic fire simulation");
-    openknx.logger.log("11 │ Theater Chase        │ FastLED │ Theater marquee chase");
-    openknx.logger.log("12 │ Theater Chase Rainbow│ FastLED │ Rainbow theater chase");
-    openknx.logger.log("13 │ Sinelon              │ FastLED │ Smooth sine wave sweep");
-    openknx.logger.log("14 │ Twinkle              │ FastLED │ Twinkling stars");
-    openknx.logger.log("15 │ Sparkle              │ FastLED │ Party sparkles");
-    openknx.logger.log("16 │ Breathing            │ Basic   │ Smooth breathing pattern");
-    openknx.logger.log("17 │ Strobe               │ Basic   │ Fast on/off flashing");
-    openknx.logger.log("18 │ Pulse                │ Basic   │ Dramatic pulsing");
-    openknx.logger.log("19 │ Comet                │ FastLED │ Comet with trailing tail");
-    openknx.logger.log("20 │ Meteor               │ FastLED │ Falling meteor");
+    openknx.logger.log("ID │ Name                      │ Description");
+    openknx.logger.log("───┼───────────────────────────┼──────────────────────────────────────────");
+    
+    // Dynamically list all effects from EffectPool
+    uint8_t effectCount = EffectPool::getEffectCount();
+    for (uint8_t i = 0; i < effectCount; i++)
+    {
+        Effect* effect = EffectPool::getEffectByIndex(i);
+        if (effect)
+        {
+            char line[120];
+            snprintf(line, sizeof(line), "%2d │ %-25s │ %s",
+                     i,
+                     effect->getName(),
+                     effect->getDescription());
+            openknx.logger.log(line);
+        }
+    }
+    
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
     openknx.logger.log("══════════════════════════════════════════════════════════");
     openknx.logger.color(0);
@@ -2677,33 +2673,31 @@ bool NeoPixel::processEffectCommand(const std::string& args)
     if (action.compare("set") == 0)
     {
         Effect* effect = nullptr;
-        switch (effId) // Get effect from pool
+        switch (effId) // Get effect from pool - matches ETS enumeration values
         {
             case 0: // Solid
                 effect = EffectPool::getSolid();
                 break;
-            case 1: // Cylon
-                effect = EffectPool::getCylon();
-                break;
-
-#ifndef NEOPIXEL_MINIMAL_EFFECTS
-            case 2: // Wipe
+            case 1: // Wipe
                 effect = EffectPool::getWipe();
                 break;
-            case 3: // Rainbow
+            case 2: // Rainbow
                 effect = EffectPool::getRainbow();
                 break;
-            case 4: // Pride2015
+            case 3: // Pride2015
                 effect = EffectPool::getPride();
                 break;
-            case 5: // Confetti
+            case 4: // Confetti
                 effect = EffectPool::getConfetti();
                 break;
-            case 6: // Juggle
+            case 5: // Juggle
                 effect = EffectPool::getJuggle();
                 break;
-            case 7: // BPM
+            case 6: // BPM
                 effect = EffectPool::getBPM();
+                break;
+            case 7: // Cylon
+                effect = EffectPool::getCylon();
                 break;
             case 8: // SK6812Test
                 effect = EffectPool::getRGBWTest();
@@ -2711,6 +2705,7 @@ bool NeoPixel::processEffectCommand(const std::string& args)
             case 9: // GarageDoor
                 effect = EffectPool::getGarageDoor();
                 break;
+#ifndef NEOPIXEL_MINIMAL_EFFECTS
             case 10: // Fire
                 effect = EffectPool::getFire();
                 break;
@@ -3986,9 +3981,8 @@ bool NeoPixel::processPhysConfigDummyCommand(uint32_t stripId, uint8_t mode)
         
         // Still set the mode in config so it's applied on next restart/recreation
         spiCfg->setDummyLedMode(mode);
-        openknx.logger.logWithPrefixAndValues("", "Dummy LED mode set to: %d (%s) - will take effect on next strip creation",
-                                              mode,
-                                              mode == 0 ? "None" : (mode == 1 ? "Physical" : "Virtual"));
+        openknx.logger.logWithValues("Dummy LED mode set to: %d (%s) - will take effect on next strip creation",
+                                      mode, mode == 0 ? "None" : (mode == 1 ? "Physical" : "Virtual"));
         return true;
     }
     
@@ -4000,7 +3994,7 @@ bool NeoPixel::processPhysConfigDummyCommand(uint32_t stripId, uint8_t mode)
         return true;
     }
 
-    openknx.logger.logWithPrefixAndValues("", "Dummy LED mode set to: %d (%s)",
+    openknx.logger.logWithValues("Dummy LED mode set to: %d (%s)",
                                           mode,
                                           mode == 0 ? "None" : (mode == 1 ? "Physical" : "Virtual"));
     openknx.logger.log("SUCCESS: Config applied - strip will use this mode when initialized");

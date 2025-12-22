@@ -190,7 +190,8 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     _inst->frequency = ProtocolHelper::getDefaultFrequency(protocol);
 
     // Allocate buffers
-    _inst->bufferSize = ledCount * _inst->bytesPerLed;
+    // CRITICAL: Cast to size_t to prevent overflow (e.g., 22000 * 3 = 66000 > uint16_t max 65535)
+    _inst->bufferSize = (size_t)ledCount * _inst->bytesPerLed;
     _inst->buffer = new uint8_t[_inst->bufferSize];
 
     if (_inst->buffer)
@@ -205,7 +206,8 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     if (useDMA)
     {
         // Calculate DMA buffer size: ledCount pixels, rounded up for partial uint32_t
-        _inst->dmaBufferSize = ledCount * (((_inst->bytesPerLed + 3) / 4));
+        // CRITICAL: Cast to size_t to prevent overflow
+        _inst->dmaBufferSize = (size_t)ledCount * (((_inst->bytesPerLed + 3) / 4));
         _inst->dmaBuffer = new uint32_t[_inst->dmaBufferSize];
         if (_inst->dmaBuffer)
         {
@@ -256,10 +258,12 @@ PIO_NeoPixel_Serial::~PIO_NeoPixel_Serial()
         if (_inst->dmaBuffer)
         {
             delete[] _inst->dmaBuffer;
+            _inst->dmaBuffer = nullptr;
         }
         if (_inst->buffer)
         {
             delete[] _inst->buffer;
+            _inst->buffer = nullptr;
         }
 
         delete _inst;
@@ -390,8 +394,8 @@ bool PIO_NeoPixel_Serial::initPIO()
     // slightly faster timing than standard 800 kHz. Automatically calculates the
     // correct clkdiv for any CPU frequency to maintain consistent 960 kHz output.
     float actual_sys_clk = (float)clock_get_hz(clk_sys);
-    float clkdiv;
-    float actual_bitrate;
+    float clkdiv = 1.0f;           // Initialize to safe default
+    float actual_bitrate = 0.0f;   // Initialize to safe default
     float bitrate_multiplier = 1.0f;
     const char* mode_name = "AUTO";
 
@@ -522,6 +526,12 @@ bool PIO_NeoPixel_Serial::initPIO()
 
     #endif
 
+    // CRITICAL: Clear and reset state machine before init (prevents garbage after reboot!)
+    pio_sm_set_enabled(_inst->pio, _inst->sm, false); // Disable first
+    pio_sm_restart(_inst->pio, _inst->sm);             // Reset PC to start
+    pio_sm_clear_fifos(_inst->pio, _inst->sm);         // Clear any old data
+    pio_sm_clkdiv_restart(_inst->pio, _inst->sm);      // Reset clock divider
+
     // Initialize the PIO program with calculated clock divider
     neopixel_serial_program_init(_inst->pio, _inst->sm, _inst->offset, _inst->pin, clkdiv, rgbw);
 
@@ -625,6 +635,9 @@ bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
 {
     if (!_inst || !_inst->buffer || index >= _inst->ledCount) return false;
 
+    // CRITICAL: Don't modify buffer while DMA transfer is in progress!
+    if (_inst->busy) return false;
+
     rgbToBuffer(index, r, g, b, 0);
     return true;
 }
@@ -647,6 +660,9 @@ bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
     if (!_inst || !_inst->buffer || index >= _inst->ledCount) return false;
     if (_inst->bytesPerLed < 4) return false; // Not RGBW
 
+    // CRITICAL: Don't modify buffer while DMA transfer is in progress!
+    if (_inst->busy) return false;
+
     rgbToBuffer(index, r, g, b, w);
     return true;
 }
@@ -667,7 +683,20 @@ void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
 {
     if (!_inst || !_inst->buffer) return;
 
-    uint32_t offset = index * _inst->bytesPerLed;
+    // CRITICAL: Cast to size_t to prevent overflow (index * bytesPerLed can exceed uint16_t)
+    // Example: index=22000, bytesPerLed=3 → 66000 > 65535 → OVERFLOW!
+    size_t offset = (size_t)index * _inst->bytesPerLed;
+
+    // CRITICAL: Bounds check to prevent buffer overflow
+    if (offset + _inst->bytesPerLed > _inst->bufferSize)
+    {
+    #ifdef OPENKNX_DEBUG
+        openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial",
+                                              "ERROR: Buffer overflow prevented! Index %d, Offset %u, BufferSize %u",
+                                              index, (uint32_t)offset, (uint32_t)_inst->bufferSize);
+    #endif
+        return;
+    }
 
     switch (_inst->colorOrder)
     {
@@ -764,6 +793,9 @@ void PIO_NeoPixel_Serial::sendDataPIO()
     // PIO autopull LSB-first (shift_right=false means shift LEFT, output from LSB!)
     // Pack REVERSED: Byte2<<24 | Byte1<<16 | Byte0<<8 so LSB (Byte0) is sent first!
 
+    // CRITICAL: Memory barrier to ensure all buffer writes are visible to PIO!
+    __dmb(); // Data Memory Barrier
+
     uint32_t bytesPerTransfer = _inst->bytesPerLed;
     uint32_t numTransfers = _inst->bufferSize / bytesPerTransfer;
     uint8_t* buf = _inst->buffer;
@@ -811,6 +843,9 @@ void PIO_NeoPixel_Serial::sendDataDMA()
 
     // Pack RGB/RGBW bytes → 32-bit words
     packDataToDMABuffer();
+
+    // CRITICAL: Memory barrier to ensure all buffer writes are visible to DMA!
+    __dmb(); // Data Memory Barrier
 
     // Start DMA transfer (non-blocking!)
     dma_channel_set_read_addr(_inst->dmaChannel, _inst->dmaBuffer, true);
@@ -885,6 +920,10 @@ bool PIO_NeoPixel_Serial::isBusy()
 void PIO_NeoPixel_Serial::clear()
 {
     if (!_inst || !_inst->buffer) return;
+
+    // CRITICAL: Don't modify buffer while DMA transfer is in progress!
+    if (_inst->busy) return;
+
     memset(_inst->buffer, 0, _inst->bufferSize);
 }
 

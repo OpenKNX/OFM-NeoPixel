@@ -158,6 +158,11 @@ class FireEffect : public Effect
         return "Fire";
     }
 
+    const char* getDescription() override
+    {
+        return "Realistic fire simulation with flickering";
+    }
+
   private:
     /**
      * Convert heat value to fire color (black->red->yellow->white)

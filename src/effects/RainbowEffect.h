@@ -24,6 +24,7 @@ class RainbowEffect : public Effect
     RainbowEffect() = default;
 
     const char* getName() override { return "Rainbow"; }
+    const char* getDescription() override { return "Full spectrum rainbow cycle"; }
 
     // ====================================================================
     // Parameter API
