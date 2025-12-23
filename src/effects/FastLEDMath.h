@@ -208,6 +208,33 @@ namespace FastLEDMath
         return t;
     }
 
+    /**
+     * @brief Linear interpolation between a and b by amount
+     * @param a First value
+     * @param b Second value
+     * @param frac Amount (0-255, where 0=all a, 255=all b)
+     */
+    inline uint8_t lerp8by8(uint8_t a, uint8_t b, uint8_t frac)
+    {
+        if (frac == 0) return a;
+        if (frac == 255) return b;
+
+        uint8_t result;
+        if (b > a)
+        {
+            uint8_t delta = b - a;
+            uint8_t scaled = scale8(delta, frac);
+            result = a + scaled;
+        }
+        else
+        {
+            uint8_t delta = a - b;
+            uint8_t scaled = scale8(delta, frac);
+            result = a - scaled;
+        }
+        return result;
+    }
+
     // ============================================================================
     // HSV to RGB Conversion
     // ============================================================================
@@ -228,73 +255,48 @@ namespace FastLEDMath
         // it has to be rendered brighter than all other
         // colors. Level Y1 is a moderate boost, the default.
 
-        const uint8_t Y1 = 1;
-        const uint8_t Y2 = 0; // Yellow boost level 2 (0=off for most LEDs)
+        const uint8_t Y1 = 1; // moderate yellow boost (default)
+        const uint8_t Y2 = 0; // optional extra yellow boost (0=off for most LEDs)
 
         // G2/Gscale: Color correction for specific LED types (currently unused)
         // In FastLED these were used for LEDs with oversaturated green
         // Keep for future LED type color correction support
-        [[maybe_unused]] const uint8_t G2 = 0;     // Green divide by 2
-        [[maybe_unused]] const uint8_t Gscale = 0; // Green scaling
+        const uint8_t G2 = 0;     // 1 => divide green by 2
+        const uint8_t Gscale = 0; // 1..255 => scale green; 0 => off
 
-        uint8_t offset = h & 0x1F; // 0-31
+        // 8 hue sections (32 steps each) for a continuous rainbow.
+        const uint8_t section = h >> 5;       // 0..7
+        const uint8_t frac = (h & 0x1F) << 3; // 0..248
 
-        uint8_t offset8 = offset << 3;
+        // Endpoints per section (continuous rainbow)
+        static const uint8_t r0[8] = {255, 255, 255, 0, 0, 0, 255, 255};
+        static const uint8_t g0[8] = {0, 128, 255, 255, 255, 0, 0, 0};
+        static const uint8_t b0[8] = {0, 0, 0, 0, 255, 255, 255, 128};
 
-        uint8_t third = scale8(offset8, (256 / 3));
+        static const uint8_t r1[8] = {255, 255, 0, 0, 0, 255, 255, 255};
+        static const uint8_t g1[8] = {128, 255, 255, 255, 0, 0, 0, 0};
+        static const uint8_t b1[8] = {0, 0, 0, 255, 255, 255, 128, 0};
 
-        uint8_t r, g, b;
+        uint8_t r = lerp8by8(r0[section], r1[section], frac);
+        uint8_t g = lerp8by8(g0[section], g1[section], frac);
+        uint8_t b = lerp8by8(b0[section], b1[section], frac);
 
-        if (!(h & 0x80))
+        // Yellow brightness compensation: boost green only in the R+G band (orange/yellow).
+        if (b == 0 && r != 0 && g != 0)
         {
-            if (!(h & 0x40))
-            {
-                // 0-63: red to yellow-ish
-                r = 255 - third;
-                g = third;
-                b = 0;
-            }
-            else
-            {
-                // 64-127: yellow-ish to green
-                r = 171;
-                g = 85 + third;
-                b = 0;
-            }
-            if (Y1 == 1)
-            {
-                r = (r * 3) >> 2;
-            }
-            if (Y2 == 1)
-            {
-                r = r >> 1;
-            }
+            if (Y1) g = qadd8(g, (g >> 1)); // +50% (moderate)
+            if (Y2) g = qadd8(g, (g >> 2)); // +25% extra (optional)
         }
-        else
-        {
-            if (!(h & 0x40))
-            {
-                // 128-191: green to cyan-ish
-                r = 0;
-                g = 255 - third;
-                b = third;
-            }
-            else
-            {
-                // 192-255: cyan-ish to blue
-                r = 0;
-                g = 171 - third;
-                b = 85 + third;
-            }
-        }
+
+        // Optional green correction knobs (off by default)
+        if (G2) g >>= 1;
+        if (Gscale) g = scale8(g, Gscale);
 
         if (s != 255)
         {
             if (s == 0)
             {
-                r = 255;
-                b = 255;
-                g = 255;
+                r = g = b = 255;
             }
             else
             {
@@ -325,9 +327,7 @@ namespace FastLEDMath
             }
             else
             {
-                r = 0;
-                g = 0;
-                b = 0;
+                r = g = b = 0;
             }
         }
 
@@ -384,33 +384,6 @@ namespace FastLEDMath
         uint32_t r = random16();
         r = (r * uint32_t(lim)) >> 16;
         return uint16_t(r);
-    }
-
-    /**
-     * @brief Linear interpolation between a and b by amount
-     * @param a First value
-     * @param b Second value
-     * @param frac Amount (0-255, where 0=all a, 255=all b)
-     */
-    inline uint8_t lerp8by8(uint8_t a, uint8_t b, uint8_t frac)
-    {
-        if (frac == 0) return a;
-        if (frac == 255) return b;
-
-        uint8_t result;
-        if (b > a)
-        {
-            uint8_t delta = b - a;
-            uint8_t scaled = scale8(delta, frac);
-            result = a + scaled;
-        }
-        else
-        {
-            uint8_t delta = a - b;
-            uint8_t scaled = scale8(delta, frac);
-            result = a - scaled;
-        }
-        return result;
     }
 
     // ============================================================================
