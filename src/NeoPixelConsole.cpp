@@ -80,10 +80,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     if (command == "neo ?" || command == "neo help" || command.length() == 3)
     {
         openknx.logger.begin();
-        openknx.logger.log("");
-        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-        openknx.logger.log("═════════════════════ NeoPixel LED Control Module ═══════════════════════════════");
-        openknx.logger.color(0);
+        printHelpSectionHeader("NeoPixel LED Control Module");
         openknx.logger.log("Command(s)               Description");
         openknx.logger.log("─────────────────────────────────────────────────────────────────────────────────");
 
@@ -97,10 +94,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("neo auto on|off", "Enable/disable auto-update mode");
         openknx.console.printHelpLine("neo perf", "Show performance statistics (requires auto-update)");
 
-        openknx.logger.log("");
-        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-        openknx.logger.log("═════════════════════ PhysicalStrip Management ══════════════════════════════════");
-        openknx.logger.color(0);
+        printHelpSectionHeader("PhysicalStrip Management");
         openknx.console.printHelpLine("neo phys ?", "Show detailed PhysicalStrip commands");
         openknx.console.printHelpLine("neo phys list", "List all physical strips");
         openknx.console.printHelpLine("neo phys add ?", "Create new physical strip (1-Wire or SPI)");
@@ -108,46 +102,31 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("neo phys timing ?", "Configure timing modes");
         openknx.console.printHelpLine("neo phys config ?", "Configure strip settings (SPI/Serial)");
 
-        openknx.logger.log("");
-        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-        openknx.logger.log("═════════════════════ VirtualStrip Management ═══════════════════════════════════");
-        openknx.logger.color(0);
+        printHelpSectionHeader("VirtualStrip Management");
         openknx.console.printHelpLine("neo virt ?", "Show detailed VirtualStrip commands");
         openknx.console.printHelpLine("neo virt list", "List all virtual strips");
         openknx.console.printHelpLine("neo virt add ?", "Create virtual strip (RGB or RGBW)");
         openknx.console.printHelpLine("neo virt del <i>", "Delete virtual strip by ID");
 
-        openknx.logger.log("");
-        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-        openknx.logger.log("═════════════════════ Segment Management ════════════════════════════════════════");
-        openknx.logger.color(0);
+        printHelpSectionHeader("Segment Management");
         openknx.console.printHelpLine("neo seg ?", "Show detailed Segment commands");
         openknx.console.printHelpLine("neo seg list", "List all segments");
         openknx.console.printHelpLine("neo seg add ?", "Create segment on virtual strip");
         openknx.console.printHelpLine("neo seg del <i>", "Delete segment by ID");
 
-        openknx.logger.log("");
-        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-        openknx.logger.log("═════════════════════ Power Management ══════════════════════════════════════════");
-        openknx.logger.color(0);
+        printHelpSectionHeader("Power Management");
         openknx.console.printHelpLine("neo power ?", "Show detailed Power commands");
         openknx.console.printHelpLine("neo power status", "Show current consumption and power limit");
         openknx.console.printHelpLine("neo  |off", "Enable/disable current limiting");
 
-        openknx.logger.log("");
-        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-        openknx.logger.log("═════════════════════ Effect Control ════════════════════════════════════════════");
-        openknx.logger.color(0);
+        printHelpSectionHeader("Effect Control");
         openknx.console.printHelpLine("neo effect ?", "Show detailed Effect commands");
         openknx.console.printHelpLine("neo effects", "List all available effects");
         openknx.console.printHelpLine("neo color ?", "Set segment colors");
         openknx.console.printHelpLine("neo brightness ?", "Set brightness levels");
 
 #ifdef OPENKNX_NEOPIXEL_TESTS
-        openknx.logger.log("");
-        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-        openknx.logger.log("═════════════════════ Animation Test Commands ═══════════════════════════════════");
-        openknx.logger.color(0);
+        printHelpSectionHeader("Animation Test Commands");
         openknx.console.printHelpLine("neo anim start", "Start/Resume animation test (virtual 9x8 mode)");
         openknx.console.printHelpLine("neo anim stop", "Stop animation test (LEDs turn off)");
         openknx.console.printHelpLine("neo anim stats", "Show animation statistics");
@@ -157,10 +136,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
 #endif
 
 #ifdef OPENKNX_NEOPIXEL_BENCHMARK
-        openknx.logger.log("");
-        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-        openknx.logger.log("═════════════════════ Benchmark Commands ════════════════════════════════════════");
-        openknx.logger.color(0);
+        printHelpSectionHeader("Benchmark Commands");
         openknx.console.printHelpLine("neo bench", "Run all benchmarks");
         openknx.console.printHelpLine("neo bench speed [strip]", "Update speed test");
         openknx.console.printHelpLine("neo bench colors [strip]", "Color pattern test");
@@ -168,7 +144,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("neo bench stability [strip]", "Stability test (1000 updates)");
 #endif
 
-        openknx.logger.log("═════════════════════════════════════════════════════════════════════════════════");
+        printSectionSeparator();
         openknx.logger.end();
         return true;
     }
@@ -464,11 +440,9 @@ bool NeoPixel::processInfoCommand()
     auto stats = _manager->getStats();
 
     openknx.logger.log("");
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("═══════════════════════════════════════════════════════════════");
+    printSectionSeparator();
     openknx.logger.log("  NeoPixel System Information");
-    openknx.logger.log("═══════════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
     openknx.logger.log("");
 
     // -----------------------------------------------------------------------
@@ -550,6 +524,7 @@ bool NeoPixel::processInfoCommand()
                     case LedProtocol::WS2812B: protocolName = "WS2812B"; break;
                     case LedProtocol::SK6812: protocolName = "SK6812"; break;
                     case LedProtocol::APA102: protocolName = "APA102"; break;
+                    case LedProtocol::APA102_CLONE: protocolName = "APA102_CLONE"; break;
                     case LedProtocol::SK9822: protocolName = "SK9822"; break;
                     case LedProtocol::WS2801: protocolName = "WS2801"; break;
                     case LedProtocol::LPD8806: protocolName = "LPD8806"; break;
@@ -813,9 +788,7 @@ bool NeoPixel::processInfoCommand()
         }
     }
 
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("═══════════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
     openknx.logger.log("");
 
     return true;
@@ -832,11 +805,9 @@ bool NeoPixel::processListCommand()
     }
 
     openknx.logger.log("");
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("═══════════════════════════════════════════════════════");
+    printSectionSeparator();
     openknx.logger.log("  PhysicalLED Strips");
-    openknx.logger.log("═══════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
 
     uint32_t count = _manager->getStripCount();
     if (count == 0)
@@ -864,9 +835,7 @@ bool NeoPixel::processListCommand()
             }
         }
     }
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("═══════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
     openknx.logger.log("");
 
     return true;
@@ -1206,12 +1175,10 @@ bool NeoPixel::processBenchmarkCommand(const std::string& args)
         }
 
         openknx.logger.log("");
-        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-        openknx.logger.log("═══════════════════════════════════════════════════════════════");
+        printSectionSeparator();
         openknx.logger.logWithValues("  Running ALL Benchmarks on %d Strip%s",
                                      stripCount, stripCount == 1 ? "" : "s");
-        openknx.logger.log("═══════════════════════════════════════════════════════════════");
-        openknx.logger.color(0);
+        printSectionSeparator();
         openknx.logger.log("");
 
         for (uint32_t i = 0; i < stripCount; i++)
@@ -1318,11 +1285,9 @@ bool NeoPixel::processPerformanceCommand()
     }
 
     openknx.logger.log("");
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("═══════════════════════════════════════════════════════════════");
+    printSectionSeparator();
     openknx.logger.log("  NeoPixel Performance Statistics");
-    openknx.logger.log("═══════════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
     openknx.logger.log("");
 
     // Calculate statistics
@@ -1481,9 +1446,7 @@ bool NeoPixel::processPerformanceCommand()
     }
 
     openknx.logger.log("");
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("═══════════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
     openknx.logger.log("");
 
     return true;
@@ -1540,11 +1503,9 @@ bool NeoPixel::processPhysListCommand()
     }
 
     openknx.logger.log("");
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("══════════════════════════════════════════════════════════════════════════════════════");
+    printSectionSeparator();
     openknx.logger.log("  Physical Strips");
-    openknx.logger.log("══════════════════════════════════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
 
     uint32_t stripCount = _manager->getStripCount();
 
@@ -1659,9 +1620,7 @@ bool NeoPixel::processPhysListCommand()
         }
     }
 
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("══════════════════════════════════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
     openknx.logger.log("");
 
     return true;
@@ -1899,11 +1858,9 @@ bool NeoPixel::processVirtListCommand()
     }
 
     openknx.logger.log("");
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("═══════════════════════════════════════════════════════════");
+    printSectionSeparator();
     openknx.logger.log("  Virtual Strips");
-    openknx.logger.log("═══════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
 
     uint32_t count = _manager->getVirtualStripCount();
     if (count == 0)
@@ -1935,9 +1892,7 @@ bool NeoPixel::processVirtListCommand()
         }
     }
 
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("═══════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
     openknx.logger.log("");
 
     return true;
@@ -2229,11 +2184,9 @@ bool NeoPixel::processSegListCommand()
     }
 
     openknx.logger.log("");
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("═════════════════════════════════════════════════════════════════════════");
+    printSectionSeparator();
     openknx.logger.log("  Segments");
-    openknx.logger.log("═════════════════════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
 
     uint32_t count = _manager->getSegmentCount();
     if (count == 0)
@@ -2270,9 +2223,7 @@ bool NeoPixel::processSegListCommand()
             }
         }
     }
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("═════════════════════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
     openknx.logger.log("");
 
     return true;
@@ -2488,10 +2439,9 @@ bool NeoPixel::processSegClearEffectCommand(const std::string& args)
 bool NeoPixel::processEffectsCommand()
 {
     openknx.logger.log("");
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("══════════════════════════════════════════════════════════");
+    printSectionSeparator();
     openknx.logger.log("  Available Effects");
-    openknx.logger.log("══════════════════════════════════════════════════════════");
+    printSectionSeparator();
     openknx.logger.color(0);
     openknx.logger.log("ID │ Name                      │ Description");
     openknx.logger.log("───┼───────────────────────────┼──────────────────────────────────────────");
@@ -2512,9 +2462,7 @@ bool NeoPixel::processEffectsCommand()
         }
     }
     
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("══════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
     openknx.logger.log("");
     openknx.logger.log("Use 'neo effect <seg> <eff>' to assign");
     openknx.logger.log("Use 'neo garage <seg> <phase>' to control GarageDoor phases");
@@ -3122,9 +3070,7 @@ bool NeoPixel::processPowerCommand(const std::string& args)
         }
 
         openknx.logger.log("");
-        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-        openknx.logger.log("═══════════════════ Power Management Status ═════════════════════════════════");
-        openknx.logger.color(0);
+        printHelpSectionHeader("Power Management Status");
 
         // Current limiting status
         openknx.logger.logWithValues("Status:           %s", pm->isEnabled() ? "ENABLED" : "DISABLED");
@@ -3167,7 +3113,7 @@ bool NeoPixel::processPowerCommand(const std::string& args)
             openknx.logger.color(0);
         }
 
-        openknx.logger.log("═════════════════════════════════════════════════════════════════════════════");
+        printSectionSeparator();
         openknx.logger.log("");
         openknx.logger.end();
         return true;
@@ -3267,13 +3213,51 @@ bool NeoPixel::processPowerCommand(const std::string& args)
 /**
  * @brief Print detail help header with title
  */
+/**
+ * @brief Print simple separator line (full width)
+ */
+void NeoPixel::printSectionSeparator()
+{
+    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+    openknx.logger.log("═════════════════════════════════════════════════════════════════════════════");
+    openknx.logger.color(0);
+}
+
+/**
+ * @brief Print simple header line (for help overview sections)
+ */
+void NeoPixel::printHelpSectionHeader(const char* title)
+{
+    // Dynamic header width calculation to avoid buffer overflow
+    const int totalWidth = 77;  // Max console width (safe buffer size)
+    int titleLen = strlen(title);
+    int sidesWidth = totalWidth - titleLen - 2;  // 2 spaces around title
+    int leftWidth = sidesWidth / 2;
+    int rightWidth = sidesWidth - leftWidth;
+    
+    // Build header with dynamic border
+    char header[80];
+    int pos = 0;
+    for (int i = 0; i < leftWidth && pos < 79; i++) header[pos++] = '=';
+    if (pos < 79) header[pos++] = ' ';
+    for (int i = 0; i < titleLen && pos < 79; i++) header[pos++] = title[i];
+    if (pos < 79) header[pos++] = ' ';
+    for (int i = 0; i < rightWidth && pos < 79; i++) header[pos++] = '=';
+    header[pos] = '\0';
+    
+    openknx.logger.log("");
+    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+    openknx.logger.log(header);
+    openknx.logger.color(0);
+}
+
+/**
+ * @brief Print detail help header with command table
+ */
 void NeoPixel::printDetailHelpHeader(const char* title)
 {
     openknx.logger.begin();
-    openknx.logger.log("");
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.logWithValues("═════════════════════ %s ═══════════════════════════════════════", title);
-    openknx.logger.color(0);
+    printHelpSectionHeader(title);
     openknx.logger.log("Command(s)               Description");
     openknx.logger.log("─────────────────────────────────────────────────────────────────────────────");
 }
@@ -3373,11 +3357,9 @@ TimingMode NeoPixel::parseTimingMode(const char* str)
 bool NeoPixel::processPhysTimingsCommand()
 {
     openknx.logger.log("");
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("═══════════════════════════════════════════════════════════");
+    printSectionSeparator();
     openknx.logger.log("  Available Timing Modes");
-    openknx.logger.log("═══════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
     openknx.logger.log("");
 
     openknx.logger.log("ID │ Mode Name       │ Target Bitrate │ Description");
@@ -3406,9 +3388,7 @@ bool NeoPixel::processPhysTimingsCommand()
     openknx.logger.log("  neo phys timing 0 fast25      -> Set to FAST_25PCT (1 MHz)");
     openknx.logger.log("  neo phys timing 0 info        -> Detailed timing information");
 
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("═══════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
     openknx.logger.log("");
 
     return true;
@@ -3465,11 +3445,9 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
         }
 
         openknx.logger.log("");
-        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-        openknx.logger.log("═══════════════════════════════════════════════════════════");
+        printSectionSeparator();
         openknx.logger.logWithValues("  Timing Information - Strip [%d]", stripId);
-        openknx.logger.log("═══════════════════════════════════════════════════════════");
-        openknx.logger.color(0);
+        printSectionSeparator();
         openknx.logger.log("");
 
         // System info
@@ -3598,9 +3576,7 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
         }
 
         openknx.logger.log("");
-        openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-        openknx.logger.log("═══════════════════════════════════════════════════════════");
-        openknx.logger.color(0);
+        printSectionSeparator();
         openknx.logger.log("");
 #else
         openknx.logger.log("ERROR: Timing info only available on RP2040/RP2350");
@@ -3792,11 +3768,9 @@ bool NeoPixel::processPhysConfigInfoCommand(uint32_t stripId)
     }
 
     openknx.logger.log("");
-    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-    openknx.logger.log("══════════════════════════════════════════════════════════════════════════════════════");
+    printSectionSeparator();
     openknx.logger.logWithPrefixAndValues("", "  Strip Configuration - Strip %d", stripId);
-    openknx.logger.log("══════════════════════════════════════════════════════════════════════════════════════");
-    openknx.logger.color(0);
+    printSectionSeparator();
 
     // Get config
     auto* cfg = strip->getConfig();

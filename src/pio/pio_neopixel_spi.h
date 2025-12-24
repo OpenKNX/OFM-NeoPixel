@@ -236,7 +236,7 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
     void sendStartFrame();
     void sendEndFrame();
     static void dmaIRQHandler();
-    inline void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t brightness = 31);
+    void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
 
     static PIO_NeoPixel_SPI* _dmaHandlers[12];
     static void registerDMAHandler(int channel, PIO_NeoPixel_SPI* instance);

@@ -211,10 +211,10 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     {
         // Clone chips: Safe ranges to prevent flicker and sync issues
         _inst->minRgbValue = 8;         // RGB < 8 doesn't update on clones
-        _inst->maxRgbValue = 255;       // No upper limit (can be set for power management)
+        _inst->maxRgbValue = 230;       // Upper limit to reduce power consumption (can via API if needed)
         _inst->hwBrightnessMin = 16;    // Below 16 causes flicker on clones
         _inst->hwBrightnessMax = 30;    // 31 breaks sync on some clones
-        _inst->hwBrightness = 24;       // Default: 75% of safe range (16-30)
+        _inst->hwBrightness = 16;       // Default: minimum safe value (conservative)
     }
     else
     {
@@ -609,45 +609,25 @@ bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
     // This prevents flickering from partial buffer updates during DMA read
     if (_inst->busy) return false;
 
-    // Use current hardware brightness (default: 30, adjustable via setHardwareBrightness())
+    // Uses global hardware brightness (adjustable via setHardwareBrightness())
     // Brightness range: 16-30 (below 16 flickers, 31/0xFF breaks sync)
-    rgbToBuffer(index, r, g, b, _inst->hwBrightness);
+    rgbToBuffer(index, r, g, b);
     _inst->dirty = true; // Mark buffer as changed
     return true;
 }
 
 /**
- * Sets RGBW color values for an LED
- *
- * For SPI LEDs (APA102/SK9822), the 'w' parameter is interpreted
- * as brightness value (0-255, scaled to safe 5-bit range) instead of white channel.
- *
- * Brightness mapping: 0-255 → 16-30 (safe range)
- * - Why 16-30? Below 16 causes flicker, 31/0xFF breaks sync on clone chips
- * - Formula: 16 + (w * 14) / 255 ensures smooth gradation within safe range
- *
- * @param index LED index (0-based)
- * @param r Red component (0-255, logical RGB)
- * @param g Green component (0-255, logical RGB)
- * @param b Blue component (0-255, logical RGB)
- * @param w Brightness value (0-255, auto-scaled to safe 5-bit range 16-30)
- * @return true if successful, false if index out of bounds
+ * @brief RGBW not supported for SPI LEDs (APA102/SK9822 have no white channel)
+ * @return false (not supported)
  */
 bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
-    if (!_inst || index >= _inst->ledCount) return false;
-
-    // CRITICAL: Don't modify buffer while DMA transfer is in progress!
-    // This prevents flickering from partial buffer updates during DMA read
-    if (_inst->busy) return false;
-
-    // Interpret w parameter as brightness (0-255) for APA102/SK9822
-    // Map to safe range 16-30: below 16 flickers, 31/0xFF breaks sync on clones
-    // Linear mapping: 16 + (w * 14) / 255  →  w=0→16, w=255→30
-    uint8_t brightness_5bit = 16 + ((uint16_t)w * 14) / 255;
-    rgbToBuffer(index, r, g, b, brightness_5bit);
-    _inst->dirty = true; // Mark buffer as changed
-    return true;
+    (void)index; (void)r; (void)g; (void)b; (void)w; // Suppress unused parameter warnings
+#ifdef OPENKNX_DEBUG
+    openknx.logger.logWithPrefixAndValues("PIO NeoPixel SPI",
+                                          "ERROR: setPixel(r,g,b,w) not supported - SPI LEDs have no white channel!");
+#endif
+    return false; // SPI LEDs don't support RGBW
 }
 
 /**
@@ -660,13 +640,14 @@ bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b,
  * - Brightness byte: 0xE0 | (brightness & 0x1F)
  * - Color bytes: Mapped according to ColorOrder (RGB, BGR, GRB, etc.)
  *
+ * Uses global hardware brightness from _inst->hwBrightness (adjustable via setHardwareBrightness())
+ *
  * @param index LED index
  * @param r Red component (0-255, logical RGB)
  * @param g Green component (0-255, logical RGB)
  * @param b Blue component (0-255, logical RGB)
- * @param brightness Brightness value (5-bit range: 16-30)
  */
-inline void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t brightness)
+void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
     if (!_inst || !_inst->buffer) return;
 
@@ -719,7 +700,7 @@ inline void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, 
     {
         openknx.logger.logWithPrefixAndValues("PIO NeoPixel Spi",
                                               "rgbToBuffer[%d]: R=%d G=%d B=%d Bright=%d, WordIdx=%d",
-                                              index, r, g, b, brightness, wordIndex);
+                                              index, r, g, b, _inst->hwBrightness, wordIndex);
     }
     #endif
 
@@ -727,7 +708,7 @@ inline void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, 
     {
         // APA102/SK9822: Pack as 32-bit word
         // Format: [Byte3: Brightness | Byte2: Color2 | Byte1: Color1 | Byte0: Color0]
-        uint8_t brightByte = 0xE0 | (brightness & 0x1F); // 111xxxxx (5-bit brightness)
+        uint8_t brightByte = 0xE0 | (_inst->hwBrightness & 0x1F); // 111xxxxx (5-bit brightness)
 
         // Build RGB value (24-bit) according to ColorOrder
         // Each case maps logical RGB → hardware byte positions

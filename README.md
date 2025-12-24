@@ -95,7 +95,7 @@ This design enables complex LED configurations with minimal CPU overhead through
 - **Console Commands**: Inspect and modify timing with `neo phys timing`
 - **Bitrate Range**: 640 kHz (SLOW_20PCT) to 1000 kHz (FAST_25PCT)
 
-### GPIO Optimizations (NEW)
+### GPIO Optimizations
 
 - **12mA Drive Strength**: 3x stronger than default (4mA) for long cables
 - **FAST Slew Rate**: Sharp clock edges, reduced distortion >5 MHz
@@ -103,6 +103,21 @@ This design enables complex LED configurations with minimal CPU overhead through
 - **SPI Optimized**: Tested stable at 3-20 MHz over 5m cables
 - **Serial Optimized**: WS2812B timing precision (+-150ns tolerance)
 - **CPU Frequency Adaptive**: Auto-adjusts clkdiv for 125-300 MHz operation
+
+### Hardware Brightness (SPI LEDs)
+
+- **Global Hardware Brightness**: APA102/SK9822 support 5-bit hardware brightness (0-31)
+- **API Control**: `setHardwareBrightness(value)` for global brightness without color depth loss
+- **Safe Ranges**: Clone chips require 16-30 range (below 16 flickers, 31 breaks sync)
+- **Console Commands**: `neo phys config <index> hwbrightness <value>`
+- **No Per-Pixel Brightness**: `setPixel(r,g,b,w)` on SPI returns false (no RGBW support)
+- **Consistent API**: Matches Serial behavior (global brightness only)
+
+### OpenKNX Integration
+
+- **ETS Programming Safety**: `processBeforeRestart()` callback turns off all LEDs before ETS programming
+- **Module Lifecycle**: Clean initialization and shutdown hooks
+- **KNX Bus Ready**: Prepares for GroupObject integration (planned)
 
 ### Effect System
 
@@ -1421,16 +1436,21 @@ public:
     PhysicalStrip(uint8_t pin, uint16_t ledCount, LedProtocol protocol);
     
     // Pixel Control
-    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
+    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b);  // RGB only
+    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w);  // RGBW (Serial only)
     void setPixel(uint16_t index, uint32_t color);
     void fill(uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
     void clear();
     
     // Display Control
     void show();
-    void setBrightness(uint8_t brightness);
+    void setBrightness(uint8_t brightness);  // Software brightness (0-255)
     
-    // Timing Control (NEW)
+    // Hardware Brightness (SPI only: APA102/SK9822)
+    void setHardwareBrightness(uint8_t value);  // 5-bit (0-31), global for all LEDs
+    uint8_t getHardwareBrightness() const;
+    
+    // Timing Control
     TimingMode getTimingMode() const;
     void setTimingMode(TimingMode mode);  // Recreates driver with new timing
     
@@ -2187,7 +2207,7 @@ segment->setColor(255, 255, 255);  // White
 - Power limiting protects against **unintentional** overload
 - Shown power values = real hardware consumption ✓
 
-**Note:** Hardware brightness (APA102/SK9822) is separately tracked and included in power calculation.
+**Note:** Hardware brightness (APA102/SK9822) is **global** for all LEDs in the strip. Set via `setHardwareBrightness(value)`. The `setPixel(r,g,b,w)` overload returns `false` on SPI strips (no RGBW support). Per-pixel brightness control use software brightness via Segment API.
 
 ### Important Notes
 

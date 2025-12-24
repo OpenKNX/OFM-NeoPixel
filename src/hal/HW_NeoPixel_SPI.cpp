@@ -376,17 +376,28 @@ bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 
 /**
  * Set each pixel color (RGBW)
- * For APA102/SK9822, w parameter is ignored (use config brightness instead)
+ * For APA102/SK9822, w parameter is ignored (no white channel)
  */
 bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
+    (void)w; // Suppress unused parameter warning
+    
     if (!_inst || index >= _inst->ledCount)
     {
         return false;
     }
 
-    // Just forward to RGB version (brightness from config)
-    // w parameter ignored for SPI strips
+#ifdef OPENKNX_DEBUG
+    static bool warned = false;
+    if (!warned && w != 0)
+    {
+        openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
+                                              "WARNING: setPixel(r,g,b,w) - SPI LEDs have no white channel, w parameter ignored!");
+        warned = true; // Only warn once
+    }
+#endif
+
+    // Forward to RGB version (brightness from config)
     return setPixel(index, r, g, b);
 }
 

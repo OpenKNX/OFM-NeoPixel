@@ -164,6 +164,8 @@ class NeoPixel : public OpenKNX::Module
     bool processPowerCommand(const std::string& args);
 
     // Console help helper functions
+    void printSectionSeparator();
+    void printHelpSectionHeader(const char* title);
     void printDetailHelpHeader(const char* title);
     void printDetailHelpSeparator();
     void printDetailHelpParameter(const char* paramDesc);
