@@ -26,16 +26,21 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
     uint8_t bgB = config.b2();
     uint8_t bgW = config.w2();
 
+    const uint8_t speedVal = config.speed; // 0 means "fastest"
+
     state.lastUpdate += deltaTime; // Speed control: accumulate time
 
-    if (state.lastUpdate >= config.speed)
+    if (state.lastUpdate >= speedVal)
     {
         state.lastUpdate = 0;
 
         uint16_t length = segment->getLength();
 
         // Set pixel at current position based on direction (stored in mode field)
-        WipeDirection dir = (WipeDirection)config.mode;
+        // Direction is stored in config.option1 (0..5)
+        uint8_t dirVal = config.option1;
+        if (dirVal > 5) dirVal = 5;
+        WipeDirection dir = (WipeDirection)dirVal;
 
         switch (dir) // Determine which wipe direction to use
         {

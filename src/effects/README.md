@@ -207,35 +207,44 @@ RainbowEffect rainbowEffect;
 
 ## Ported Effects
 
-### Currently Ported (5 Effects)
+### Currently Ported Effects
 
-| Effect | FastLED Original | Status | Complexity | Notes |
-|--------|------------------|--------|------------|-------|
-| **Rainbow** | `fill_rainbow()` | Complete | Simple | Classic rainbow gradient |
-| **Pride2015** | Mark Kriegsman | Complete | Complex | Brightness waves |
-| **Confetti** | ColorWavesWithPalettes | Complete | Medium | Random sparkles |
-| **Juggle** | juggle() | Complete | Medium | Sine wave dots |
-| **BPM** | bpm() | Complete | Medium | Pulsing colors |
+| Effect                | FastLED Original         | Status    | Notes                       |
+|-----------------------|-------------------------|-----------|-----------------------------|
+| Rainbow               | fill_rainbow()          | Complete  | Classic rainbow gradient     |
+| Pride2015             | Mark Kriegsman          | Complete  | Brightness waves             |
+| Confetti              | ColorWavesWithPalettes  | Complete  | Random sparkles              |
+| Juggle                | juggle()                | Complete  | Sine wave dots               |
+| BPM                   | bpm()                   | Complete  | Pulsing colors               |
+| Fire                  | Fire2012                | Complete  | Realistic fire simulation    |
+| TheaterChase          | theaterChase()          | Complete  | Chasing lights               |
+| TheaterChaseRainbow   | theaterChaseRainbow()   | Complete  | Chasing rainbow lights       |
+| Sinelon               | sinelon()               | Complete  | Moving dot with trail        |
+| Twinkle               | addGlitter()            | Complete  | Twinkling random pixels      |
+| Comet                 | comet()                 | Complete  | Moving comet with tail       |
+| Meteor                | meteorRain()            | Complete  | Meteor rain effect           |
+| Noise                 | inoise8()               | Complete  | Perlin/simplex noise effect  |
+| Palette               | ColorFromPalette        | Complete  | Color palette support        |
+| Lightning             | lightning()             | Complete  | Lightning simulation         |
+| Gradient              | fill_gradient()         | Complete  | Gradient fill effect         |
 
-### Additional OFM-NeoPixel Effects (3 Effects)
+### Original/Extended Effects
 
-| Effect | Inspired By | Status | Notes |
-|--------|-------------|--------|-------|
-| **Solid** | N/A | Complete | Static color |
-| **Cylon** | Knight Rider | Complete | Bouncing dot |
-| **Wipe** | Theater chase | Complete | Fill animation |
+| Effect         | Inspired By      | Status    | Notes                                 |
+|---------------|------------------|-----------|---------------------------------------|
+| Solid         | N/A              | Complete  | Static color                          |
+| Cylon         | Knight Rider     | Complete  | Bouncing dot                          |
+| Wipe          | Theater chase    | Complete  | Fill animation                        |
+| RGBWTest      | N/A              | Complete  | SK6812 RGBW test effect               |
+| GarageDoor    | N/A              | Complete  | Multi-phase garage animation          |
+| Sparkle       | N/A              | Complete  | Random sparkles                       |
+| Breathing     | N/A              | Complete  | Smooth fade in and out                |
+| Strobe        | N/A              | Complete  | Strobe light effect                   |
+| Pulse         | N/A              | Complete  | Adjustable pulse width effect         |
 
-### Planned Ports (Not Yet Implemented)
+### Effects Planned or Not Yet Implemented
 
-| Effect | FastLED Name | Difficulty | Priority |
-|--------|--------------|------------|----------|
-| **Fire** | Fire2012 | High | High |
-| **Noise** | inoise8() | High | Medium |
-| **Palette** | ColorFromPalette | Medium | High |
-| **Lightning** | lightning() | Medium | Medium |
-| **Meteor** | meteorRain() | Low | Low |
-| **Twinkle** | addGlitter() | Low | Medium |
-| **Gradient** | fill_gradient() | Low | High |
+
 
 ---
 
@@ -271,7 +280,8 @@ void nscale8(uint8_t* arr, uint16_t len, uint8_t scale);
 
 #### Color Functions
 ```cpp
-uint32_t hsv2rgb_rainbow(uint8_t hue, uint8_t sat, uint8_t val);
+uint32_t hsv2rgb_rainbow(uint8_t hue, uint8_t sat, uint8_t val, bool yellowBoost, bool greenCorr); // New overload with perceptual correction options
+uint32_t hsv2rgb_rainbow(uint8_t hue, uint8_t sat, uint8_t val); // Backwards-compatible default (uses yellowBoost=true, greenCorr=false)
 uint32_t hsv2rgb_spectrum(uint8_t hue, uint8_t sat, uint8_t val);
 ```
 

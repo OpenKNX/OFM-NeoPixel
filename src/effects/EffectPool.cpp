@@ -26,71 +26,91 @@
 // #define NEOPIXEL_DISABLE_PULSE
 // #define NEOPIXEL_DISABLE_COMET
 // #define NEOPIXEL_DISABLE_METEOR
+// #define NEOPIXEL_DISABLE_NOISE
+// #define NEOPIXEL_DISABLE_PALETTE
+// #define NEOPIXEL_DISABLE_LIGHTNING
+// #define NEOPIXEL_DISABLE_GRADIENT
 // ============================================================================
 
 #include "EffectSolid.h"
 
 #ifndef NEOPIXEL_DISABLE_WIPE
-#include "EffectWipe.h"
+    #include "EffectWipe.h"
 #endif
 
 #ifndef NEOPIXEL_DISABLE_RAINBOW
-#include "RainbowEffect.h"
+    #include "RainbowEffect.h"
 #endif
 
 #ifndef NEOPIXEL_DISABLE_PRIDE
-#include "PrideEffect.h"
+    #include "PrideEffect.h"
 #endif
 
 #ifndef NEOPIXEL_DISABLE_CONFETTI
-#include "ConfettiEffect.h"
+    #include "ConfettiEffect.h"
 #endif
 
 #ifndef NEOPIXEL_DISABLE_JUGGLE
-#include "JuggleEffect.h"
+    #include "JuggleEffect.h"
 #endif
 
 #ifndef NEOPIXEL_DISABLE_BPM
-#include "BPMEffect.h"
+    #include "BPMEffect.h"
 #endif
 
 #ifndef NEOPIXEL_DISABLE_CYLON
-#include "CylonEffect.h"
+    #include "CylonEffect.h"
 #endif
 
 #ifndef NEOPIXEL_DISABLE_RGBWTEST
-#include "RGBWTestEffect.h"
+    #include "RGBWTestEffect.h"
 #endif
 
 #ifndef NEOPIXEL_DISABLE_GARAGEDOOR
-#include "GarageDoorEffect.h"
+    #include "GarageDoorEffect.h"
 #endif
 
 #ifndef NEOPIXEL_MINIMAL_EFFECTS
 
-#ifndef NEOPIXEL_DISABLE_FIRE
-#include "FireEffect.h"
-#endif
+    #ifndef NEOPIXEL_DISABLE_FIRE
+        #include "FireEffect.h"
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_THEATERCHASE
-#include "TheaterChaseEffect.h"
-#endif
+    #ifndef NEOPIXEL_DISABLE_THEATERCHASE
+        #include "TheaterChaseEffect.h"
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_SINELON
-#include "SinelonEffect.h"
-#endif
+    #ifndef NEOPIXEL_DISABLE_SINELON
+        #include "SinelonEffect.h"
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_TWINKLE
-#include "TwinkleEffect.h"
-#endif
+    #ifndef NEOPIXEL_DISABLE_TWINKLE
+        #include "TwinkleEffect.h"
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_BREATHING
-#include "BreathingEffect.h"
-#endif
+    #ifndef NEOPIXEL_DISABLE_BREATHING
+        #include "BreathingEffect.h"
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_COMET
-#include "CometEffect.h"
-#endif
+    #ifndef NEOPIXEL_DISABLE_COMET
+        #include "CometEffect.h"
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_NOISE
+        #include "NoiseEffect.h"
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_PALETTE
+        #include "PaletteEffect.h"
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_LIGHTNING
+        #include "LightningEffect.h"
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_GRADIENT
+        #include "GradientEffect.h"
+    #endif
 
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 
@@ -138,46 +158,62 @@ static GarageDoorEffect* s_garageDoor = nullptr;
 
 #ifndef NEOPIXEL_MINIMAL_EFFECTS
 
-#ifndef NEOPIXEL_DISABLE_FIRE
+    #ifndef NEOPIXEL_DISABLE_FIRE
 static FireEffect* s_fire = nullptr;
-#endif
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_THEATERCHASE
+    #ifndef NEOPIXEL_DISABLE_THEATERCHASE
 static TheaterChaseEffect* s_theaterChase = nullptr;
 static TheaterChaseRainbowEffect* s_theaterChaseRainbow = nullptr;
-#endif
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_SINELON
+    #ifndef NEOPIXEL_DISABLE_SINELON
 static SinelonEffect* s_sinelon = nullptr;
-#endif
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_TWINKLE
+    #ifndef NEOPIXEL_DISABLE_TWINKLE
 static TwinkleEffect* s_twinkle = nullptr;
-#endif
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_SPARKLE
+    #ifndef NEOPIXEL_DISABLE_SPARKLE
 static SparkleEffect* s_sparkle = nullptr;
-#endif
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_BREATHING
+    #ifndef NEOPIXEL_DISABLE_BREATHING
 static BreathingEffect* s_breathing = nullptr;
-#endif
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_STROBE
+    #ifndef NEOPIXEL_DISABLE_STROBE
 static StrobeEffect* s_strobe = nullptr;
-#endif
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_PULSE
+    #ifndef NEOPIXEL_DISABLE_PULSE
 static PulseEffect* s_pulse = nullptr;
-#endif
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_COMET
+    #ifndef NEOPIXEL_DISABLE_COMET
 static CometEffect* s_comet = nullptr;
-#endif
+    #endif
 
-#ifndef NEOPIXEL_DISABLE_METEOR
+    #ifndef NEOPIXEL_DISABLE_METEOR
 static MeteorEffect* s_meteor = nullptr;
-#endif
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_NOISE
+static NoiseEffect* s_noise = nullptr;
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_PALETTE
+static PaletteEffect* s_palette = nullptr;
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_LIGHTNING
+static LightningEffect* s_lightning = nullptr;
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_GRADIENT
+static GradientEffect* s_gradient = nullptr;
+    #endif
 
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 //
@@ -459,6 +495,50 @@ Effect* EffectPool::getMeteor()
     return s_meteor;
 }
 
+    #ifndef NEOPIXEL_DISABLE_NOISE
+Effect* EffectPool::getNoise()
+{
+    if (!s_noise)
+    {
+        s_noise = new NoiseEffect();
+    }
+    return s_noise;
+}
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_PALETTE
+Effect* EffectPool::getPalette()
+{
+    if (!s_palette)
+    {
+        s_palette = new PaletteEffect();
+    }
+    return s_palette;
+}
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_LIGHTNING
+Effect* EffectPool::getLightning()
+{
+    if (!s_lightning)
+    {
+        s_lightning = new LightningEffect();
+    }
+    return s_lightning;
+}
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_GRADIENT
+Effect* EffectPool::getGradient()
+{
+    if (!s_gradient)
+    {
+        s_gradient = new GradientEffect();
+    }
+    return s_gradient;
+}
+    #endif
+
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 // ============================================================================
 // Dynamic Effect Registry
@@ -471,7 +551,7 @@ Effect* EffectPool::getMeteor()
 uint8_t EffectPool::getEffectCount()
 {
     uint8_t count = 1; // Solid always included
-    
+
 #ifndef NEOPIXEL_DISABLE_WIPE
     count++;
 #endif
@@ -501,36 +581,48 @@ uint8_t EffectPool::getEffectCount()
 #endif
 
 #ifndef NEOPIXEL_MINIMAL_EFFECTS
-#ifndef NEOPIXEL_DISABLE_FIRE
+    #ifndef NEOPIXEL_DISABLE_FIRE
     count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_THEATERCHASE
+    #endif
+    #ifndef NEOPIXEL_DISABLE_THEATERCHASE
     count += 2; // TheaterChase + TheaterChaseRainbow
-#endif
-#ifndef NEOPIXEL_DISABLE_SINELON
+    #endif
+    #ifndef NEOPIXEL_DISABLE_SINELON
     count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_TWINKLE
+    #endif
+    #ifndef NEOPIXEL_DISABLE_TWINKLE
     count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_SPARKLE
+    #endif
+    #ifndef NEOPIXEL_DISABLE_SPARKLE
     count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_BREATHING
+    #endif
+    #ifndef NEOPIXEL_DISABLE_BREATHING
     count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_STROBE
+    #endif
+    #ifndef NEOPIXEL_DISABLE_STROBE
     count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_PULSE
+    #endif
+    #ifndef NEOPIXEL_DISABLE_PULSE
     count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_COMET
+    #endif
+    #ifndef NEOPIXEL_DISABLE_COMET
     count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_METEOR
+    #endif
+    #ifndef NEOPIXEL_DISABLE_METEOR
     count++;
-#endif
+    #endif
+    #ifndef NEOPIXEL_DISABLE_NOISE
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_PALETTE
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_LIGHTNING
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_GRADIENT
+    count++;
+    #endif
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 
     return count;
@@ -544,10 +636,10 @@ uint8_t EffectPool::getEffectCount()
 Effect* EffectPool::getEffectByIndex(uint8_t index)
 {
     uint8_t currentIndex = 0;
-    
+
     // Index 0: Solid (always included)
     if (index == currentIndex++) return getSolid();
-    
+
 #ifndef NEOPIXEL_DISABLE_WIPE
     if (index == currentIndex++) return getWipe();
 #endif
@@ -577,37 +669,49 @@ Effect* EffectPool::getEffectByIndex(uint8_t index)
 #endif
 
 #ifndef NEOPIXEL_MINIMAL_EFFECTS
-#ifndef NEOPIXEL_DISABLE_FIRE
+    #ifndef NEOPIXEL_DISABLE_FIRE
     if (index == currentIndex++) return getFire();
-#endif
-#ifndef NEOPIXEL_DISABLE_THEATERCHASE
+    #endif
+    #ifndef NEOPIXEL_DISABLE_THEATERCHASE
     if (index == currentIndex++) return getTheaterChase();
     if (index == currentIndex++) return getTheaterChaseRainbow();
-#endif
-#ifndef NEOPIXEL_DISABLE_SINELON
+    #endif
+    #ifndef NEOPIXEL_DISABLE_SINELON
     if (index == currentIndex++) return getSinelon();
-#endif
-#ifndef NEOPIXEL_DISABLE_TWINKLE
+    #endif
+    #ifndef NEOPIXEL_DISABLE_TWINKLE
     if (index == currentIndex++) return getTwinkle();
-#endif
-#ifndef NEOPIXEL_DISABLE_SPARKLE
+    #endif
+    #ifndef NEOPIXEL_DISABLE_SPARKLE
     if (index == currentIndex++) return getSparkle();
-#endif
-#ifndef NEOPIXEL_DISABLE_BREATHING
+    #endif
+    #ifndef NEOPIXEL_DISABLE_BREATHING
     if (index == currentIndex++) return getBreathing();
-#endif
-#ifndef NEOPIXEL_DISABLE_STROBE
+    #endif
+    #ifndef NEOPIXEL_DISABLE_STROBE
     if (index == currentIndex++) return getStrobe();
-#endif
-#ifndef NEOPIXEL_DISABLE_PULSE
+    #endif
+    #ifndef NEOPIXEL_DISABLE_PULSE
     if (index == currentIndex++) return getPulse();
-#endif
-#ifndef NEOPIXEL_DISABLE_COMET
+    #endif
+    #ifndef NEOPIXEL_DISABLE_COMET
     if (index == currentIndex++) return getComet();
-#endif
-#ifndef NEOPIXEL_DISABLE_METEOR
+    #endif
+    #ifndef NEOPIXEL_DISABLE_METEOR
     if (index == currentIndex++) return getMeteor();
-#endif
+    #endif
+    #ifndef NEOPIXEL_DISABLE_NOISE
+    if (index == currentIndex++) return getNoise();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_PALETTE
+    if (index == currentIndex++) return getPalette();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_LIGHTNING
+    if (index == currentIndex++) return getLightning();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_GRADIENT
+    if (index == currentIndex++) return getGradient();
+    #endif
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 
     return nullptr; // Index out of range

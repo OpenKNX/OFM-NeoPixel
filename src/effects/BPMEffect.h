@@ -5,11 +5,16 @@
  * Colored stripes pulsing at a BPM rate. Port of FastLED's BPM pattern.
  * Based on FastLED library (MIT License) - https://github.com/FastLED/FastLED
  *
- * Parameters:
- *   [0] BPM (0-255) - Beats per minute
- *   [1] Hue (0-255) - Starting hue offset
+ * Parameter convention in this project:
+ *   - ETS "Effekt Speed"      -> config.speed      (used here as BPM)
+ *   - ETS "Effekt Option 1"   -> config.option1    (used here as base Hue)
+ *   - ETS "Effekt Intensity"  -> config.intensity  (used here as brightness scaling)
  *
- * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
+ * Effect parameters (API) exposed for compatibility:
+ *   [0] BPM (0-255)
+ *   [1] Hue (0-255)
+ *
+ * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX
  */
 
 #pragma once
@@ -58,11 +63,11 @@ class BPMEffect : public Effect
     uint32_t getParameter(const Segment* segment, uint8_t index) const override
     {
         if (!segment) return 0;
-        auto& state = segment->getState();
+        const auto& cfg = segment->getConfig();
         switch (index)
         {
-            case 0: return state.aux1; // BPM
-            case 1: return state.aux2; // Hue
+            case 0: return cfg.speed;   // BPM
+            case 1: return cfg.option1; // Base Hue
             default: return 0;
         }
     }
@@ -70,11 +75,22 @@ class BPMEffect : public Effect
     void setParameter(Segment* segment, uint8_t index, uint32_t value) override
     {
         if (!segment) return;
-        auto& state = segment->getState();
+        auto& cfg = segment->getConfig();
+        auto& st = segment->getState();
+
         switch (index)
         {
-            case 0: state.aux1 = value; break; // BPM
-            case 1: state.aux2 = value; break; // Hue
+            case 0:
+                cfg.speed = static_cast<uint8_t>(value); // BPM
+                break;
+
+            case 1:
+                cfg.option1 = static_cast<uint8_t>(value); // Base Hue
+                st.position = 0;                           // restart hue drift so parameter stays the base
+                break;
+
+            default:
+                break;
         }
     }
 
@@ -88,22 +104,32 @@ class BPMEffect : public Effect
         auto& state = segment->getState();
         auto& config = segment->getConfig();
 
-        // Get parameters from state
-        uint16_t bpm = state.aux1 > 0 ? state.aux1 : config.speed; // Fallback to config.speed
-        uint8_t gHue = state.aux2;
+        const uint16_t length = segment->getLength();
+        if (length == 0) return;
 
-        uint16_t length = segment->getLength();
-        uint8_t masterBrightness = config.intensity;
+        // BPM from config.speed (0 is valid in general, but beatsin8 with 0 is not useful)
+        uint16_t bpm = config.speed;
+        if (bpm == 0) bpm = static_cast<uint16_t>(getParameterDefault(0)); // fallback 62
 
-        uint8_t beat = FastLEDMath::beatsin8(bpm, 64, 255);
+        // Base hue from config.option1, animated hue drift stored in state.position
+        const uint8_t baseHue = config.option1;
+        const uint8_t gHue = static_cast<uint8_t>(baseHue + (uint8_t)state.position);
+
+        // Brightness scaling from config.intensity (0 means "off" / black)
+        const uint8_t masterBrightness = config.intensity;
+        const bool yellowBoost = config.feature2;
+        const bool greenCorr = config.feature3;
+
+        const uint8_t beat = FastLEDMath::beatsin8(bpm, 64, 255);
 
         for (uint16_t i = 0; i < length; i++)
         {
-            uint8_t hue = gHue + (i * 2);
-            uint8_t brightness = beat - gHue + (i * 10);
+            const uint8_t hue = static_cast<uint8_t>(gHue + (i * 2));
+
+            uint8_t brightness = static_cast<uint8_t>(beat - gHue + (i * 10));
             brightness = FastLEDMath::scale8(brightness, masterBrightness);
 
-            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, brightness);
+            const uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, brightness, yellowBoost, greenCorr);
 
             segment->setPixel(i,
                               (rgb >> 16) & 0xFF,
@@ -111,7 +137,8 @@ class BPMEffect : public Effect
                               rgb & 0xFF);
         }
 
-        state.aux2++; // Increment Hue
+        // keep hue drifting (so baseHue stays fixed in config.option1)
+        state.position = (state.position + 1) & 0xFF;
     }
 
     void reset() override {}

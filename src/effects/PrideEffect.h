@@ -16,6 +16,14 @@
 #include "Effect.h"
 #include "FastLEDMath.h"
 
+// ====================================================================
+// Config usage:
+//   config.intensity  : master brightness (0..255)
+//   config.reverse    : reverse hue progression/direction
+//   config.feature2   : enable yellow brightness compensation (hsv2rgb_rainbow)
+//   config.feature3   : enable green correction hooks (hsv2rgb_rainbow)
+// ====================================================================
+
 class PrideEffect : public Effect
 {
   public:
@@ -47,9 +55,13 @@ class PrideEffect : public Effect
         if (!segment) return;
 
         auto& state = segment->getState();
-        auto& config = segment->getConfig();
-        uint16_t length = segment->getLength();
-        uint8_t masterBrightness = config.intensity;
+
+        const auto& config = segment->getConfig();
+        const uint16_t length = segment->getLength();
+        const uint8_t masterBrightness = config.intensity; // Master brightness (0..255)
+        const bool reverse = (config.reverse != 0);        // Reverse direction
+        const bool yellowBoost = config.feature2;          // Yellow brightness compensation
+        const bool greenCorr = config.feature3;            // Green correction hooks
 
         // State stored in EffectState
         uint16_t pseudotime = state.position;
@@ -62,13 +74,23 @@ class PrideEffect : public Effect
 
         uint16_t hueinc16 = FastLEDMath::beatsin88(113, 1, 3000);
 
-        pseudotime += deltaTime * msmultiplier;
-        hue16 += deltaTime * FastLEDMath::beatsin88(400, 5, 9);
+        if (!reverse)
+        {
+            pseudotime += deltaTime * msmultiplier;
+            hue16 += deltaTime * FastLEDMath::beatsin88(400, 5, 9);
+        }
+        else
+        {
+            pseudotime -= deltaTime * msmultiplier;
+            hue16 -= deltaTime * FastLEDMath::beatsin88(400, 5, 9);
+        }
         uint16_t brightnesstheta16 = pseudotime;
 
         for (uint16_t i = 0; i < length; i++)
         {
-            hue16 += hueinc16;
+            if (!reverse) hue16 += hueinc16;
+            else
+                hue16 -= hueinc16;
             uint8_t hue8 = hue16 / 256;
 
             brightnesstheta16 += brightnessthetainc16;
@@ -80,7 +102,7 @@ class PrideEffect : public Effect
 
             bri8 = FastLEDMath::scale8(bri8, masterBrightness);
 
-            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue8, sat8, bri8);
+            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue8, sat8, bri8, yellowBoost, greenCorr);
 
             segment->setPixel(i,
                               (rgb >> 16) & 0xFF,

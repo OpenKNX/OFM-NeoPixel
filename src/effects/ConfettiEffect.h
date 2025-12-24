@@ -17,6 +17,17 @@
 #include "Effect.h"
 #include "FastLEDMath.h"
 
+// ====================================================================
+// Config usage summary (ETS mapping)
+//   config.speed     -> FadeSpeed (amount per update, clamped to 1..50; 0 => default)
+//   config.option1   -> Saturation (0..255)
+//   config.intensity -> Brightness/Value (0..255)
+//   config.feature2  -> Yellow brightness compensation (hsv2rgb_rainbow)
+//   config.feature3  -> Green correction hooks (hsv2rgb_rainbow)
+// Notes:
+//   - Hue is animated internally via state.position (low 8 bits).
+// ====================================================================
+
 class ConfettiEffect : public Effect
 {
   public:
@@ -58,11 +69,11 @@ class ConfettiEffect : public Effect
     uint32_t getParameter(const Segment* segment, uint8_t index) const override
     {
         if (!segment) return 0;
-        auto& state = segment->getState();
+        const auto& cfg = segment->getConfig();
         switch (index)
         {
-            case 0: return state.aux1; // FadeSpeed
-            case 1: return state.aux2; // Saturation
+            case 0: return cfg.speed;   // FadeSpeed
+            case 1: return cfg.option1; // Saturation
             default: return 0;
         }
     }
@@ -70,11 +81,12 @@ class ConfettiEffect : public Effect
     void setParameter(Segment* segment, uint8_t index, uint32_t value) override
     {
         if (!segment) return;
-        auto& state = segment->getState();
+        auto& cfg = segment->getConfig();
         switch (index)
         {
-            case 0: state.aux1 = value; break;
-            case 1: state.aux2 = value; break;
+            case 0: cfg.speed = static_cast<uint8_t>(value); break;   // FadeSpeed
+            case 1: cfg.option1 = static_cast<uint8_t>(value); break; // Saturation
+            default: break;
         }
     }
 
@@ -86,14 +98,23 @@ class ConfettiEffect : public Effect
         if (!segment) return;
 
         auto& state = segment->getState();
-        auto& config = segment->getConfig();
+        const auto& config = segment->getConfig();
         uint16_t length = segment->getLength();
 
-        // Get parameters
-        uint8_t fadeSpeed = state.aux1 > 0 ? state.aux1 : 10;
-        uint8_t saturation = state.aux2 > 0 ? state.aux2 : 200;
-        uint8_t brightness = config.intensity;
+        // Snapshot config parameters (consistent for this update call)
+        const uint8_t speed = config.speed;         // FadeSpeed
+        const uint8_t intensity = config.intensity; // Brightness/Value
+        const uint8_t saturation = config.option1;  // Saturation
 
+        const bool yellowBoost = config.feature2; // Yellow boost
+        const bool greenCorr = config.feature3;   // Green correction hooks
+
+        // FadeSpeed: clamp to 1..50; treat 0 as default
+        uint8_t fadeSpeed = speed;
+        if (fadeSpeed == 0) fadeSpeed = 10;
+        if (fadeSpeed > 50) fadeSpeed = 50;
+
+        const uint8_t brightness = intensity;
         // Hue stored in position (lower 8 bits)
         uint8_t gHue = state.position & 0xFF;
 
@@ -112,7 +133,7 @@ class ConfettiEffect : public Effect
 
         // Add new random confetti
         int pos = FastLEDMath::random8(length);
-        uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(gHue + FastLEDMath::random8(64), saturation, brightness);
+        uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(gHue + FastLEDMath::random8(64), saturation, brightness, yellowBoost, greenCorr);
 
         uint8_t r, g, b;
         if (segment->getPixel(pos, r, g, b))

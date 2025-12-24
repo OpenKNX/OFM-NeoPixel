@@ -16,6 +16,15 @@
 /**
  * Breathing Effect
  *
+ * Config usage:
+ *  - intensity: max brightness (0 = off)
+ *  - speed: breathing speed (mapped to BPM)
+ *  - option1: minimum brightness floor
+ *  - option2: curve shaping (0 = linear, 255 = more exponential)
+ *  - feature1: hold at peak (pause at max)
+ *  - feature2: rainbow mode (else fixed RGB color)
+ *  - feature3: enables HSV->RGB correction flags (yellow + green)
+ *
  * The entire strip fades in and out smoothly like breathing.
  */
 class BreathingEffect : public Effect
@@ -32,41 +41,48 @@ class BreathingEffect : public Effect
     {
         if (!segment) return;
 
-        auto& config = segment->getConfig();
-        uint16_t length = segment->getLength();
+        const auto& config = segment->getConfig();
+        const uint16_t length = segment->getLength();
+
+        // Snapshot config parameters for a consistent frame (values may change via KNX during runtime)
+        const uint8_t speed = config.speed;            // breathing speed (mapped to BPM)
+        const uint8_t intensity = config.intensity;    // max brightness (0=off)
+        const uint8_t option1 = config.option1;        // minimum brightness floor
+        const uint8_t option2 = config.option2;        // curve shaping (0 = linear, 255 = more exponential)
+        const bool holdAtPeak = config.feature1;       // hold at peak (pause at max)
+        const bool rainbowBreathing = config.feature2; // rainbow mode (else fixed RGB color)
+        const bool corrFlags = config.feature3;        // enables HSV->RGB correction flags (yellow+green)
+        const uint8_t baseR = config.r();
+        const uint8_t baseG = config.g();
+        const uint8_t baseB = config.b();
 
         _time += deltaTime;
 
-        // Use option1 for breathing depth (50-255, default full range)
-        uint8_t minBrightness = config.option1 > 0 ? config.option1 : 0;
-        uint8_t maxBrightness = 255;
+        // If intensity is 0, treat as OFF
+        if (intensity == 0)
+        {
+            for (uint16_t i = 0; i < length; i++)
+                segment->setPixel(i, 0, 0, 0);
+            return;
+        }
 
-        // Use option2 for breathing curve (0=linear, 255=exponential)
-        uint8_t curve = config.option2;
-
-        // Use feature1 for hold at peak (0=smooth, 1=hold)
-        bool holdAtPeak = config.feature1;
-
-        // Use feature2 for rainbow breathing (0=set color, 1=rainbow)
-        bool rainbowBreathing = config.feature2;
+        const uint8_t minBrightness = option1; // 0 is valid
+        const uint8_t maxBrightness = intensity;
+        const uint8_t curve = option2; // 0=linear
 
         // Calculate BPM from speed (map 0-255 to 5-60 breaths per minute)
-        uint16_t bpm = 5 + ((config.speed * 55) / 255);
+        const uint16_t bpm = 5 + ((uint16_t)speed * 55u) / 255u;
 
         // Use beatsin8 to get smooth breathing pattern
         uint8_t breath;
         if (holdAtPeak)
         {
             // Modified breathing with pause at peak
-            uint8_t rawBreath = FastLEDMath::beatsin8(bpm, 0, 255);
+            const uint8_t rawBreath = FastLEDMath::beatsin8(bpm, 0, 255);
             if (rawBreath > 200)
-            {
                 breath = 255; // Hold at peak
-            }
             else
-            {
                 breath = FastLEDMath::scale8(rawBreath, 200); // Scale normal breathing
-            }
         }
         else
         {
@@ -76,37 +92,32 @@ class BreathingEffect : public Effect
         // Apply curve adjustment
         if (curve > 0)
         {
-            // Apply exponential curve for more natural breathing
-            uint8_t curved = FastLEDMath::scale8(breath, breath);
+            const uint8_t curved = FastLEDMath::scale8(breath, breath); // square curve
             breath = FastLEDMath::lerp8by8(breath, curved, curve);
         }
 
         // Scale the configured brightness by the breathing pattern
-        uint8_t currentBrightness = FastLEDMath::scale8(config.intensity, breath);
+        const uint8_t currentBrightness = FastLEDMath::scale8(intensity, breath);
 
-        // Apply to all pixels
+        // Compute one color for the whole segment
         uint8_t r, g, b;
         if (rainbowBreathing)
         {
-            // Rainbow breathing mode
-            uint8_t hue = (_time / 50) % 256; // Slow hue cycle
-            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, currentBrightness);
+            const uint8_t hue = (uint8_t)((_time / 50u) & 0xFF); // slow hue cycle
+            const uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, currentBrightness, corrFlags, corrFlags);
             r = (rgb >> 16) & 0xFF;
             g = (rgb >> 8) & 0xFF;
             b = rgb & 0xFF;
         }
         else
         {
-            // Use configured color
-            r = FastLEDMath::scale8(config.r(), currentBrightness);
-            g = FastLEDMath::scale8(config.g(), currentBrightness);
-            b = FastLEDMath::scale8(config.b(), currentBrightness);
+            r = FastLEDMath::scale8(baseR, currentBrightness);
+            g = FastLEDMath::scale8(baseG, currentBrightness);
+            b = FastLEDMath::scale8(baseB, currentBrightness);
         }
 
         for (uint16_t i = 0; i < length; i++)
-        {
             segment->setPixel(i, r, g, b);
-        }
     }
 
     void reset() override
@@ -128,6 +139,15 @@ class BreathingEffect : public Effect
 /**
  * Strobe Effect
  *
+ * Config usage:
+ *  - intensity: ON brightness
+ *  - speed: strobe period (higher = faster)
+ *  - option1: ON ratio in percent (duty cycle)
+ *  - option2: minimum brightness for OFF phase (0..255)
+ *  - feature1: random timing jitter
+ *  - feature2: rainbow strobe (else fixed RGB color)
+ *  - feature3: enables HSV->RGB correction flags (yellow + green)
+ *
  * Fast on/off flashing like a strobe light.
  */
 class StrobeEffect : public Effect
@@ -143,30 +163,37 @@ class StrobeEffect : public Effect
 
     void update(Segment* segment, uint32_t deltaTime) override
     {
+        (void)deltaTime;
         if (!segment) return;
 
-        auto& config = segment->getConfig();
-        uint16_t length = segment->getLength();
+        const auto& config = segment->getConfig();
+        const uint16_t length = segment->getLength();
 
-        // Use option1 for on duration ratio (10-200, default 50/50)
-        uint8_t onRatio = config.option1 > 0 ? config.option1 : 100; // Percentage on time
-        onRatio = onRatio > 200 ? 200 : onRatio;
+        // Snapshot config parameters for a consistent frame
+        const uint8_t speed = config.speed;         // strobe period (higher = faster)
+        const uint8_t intensity = config.intensity; // ON brightness
+        const uint8_t option1 = config.option1;     // ON ratio in percent (duty cycle)
+        const uint8_t option2 = config.option2;     // minimum brightness for OFF phase (0..255)
+        const bool randomTiming = config.feature1;  // random timing jitter
+        const bool rainbowStrobe = config.feature2; // rainbow strobe (else fixed RGB color)
+        const bool corrFlags = config.feature3;     // enables HSV->RGB correction flags (yellow + green)
+        const uint8_t baseR = config.r();
+        const uint8_t baseG = config.g();
+        const uint8_t baseB = config.b();
 
-        // Use option2 for minimum brightness when "off" (0-100, default 0)
-        uint8_t minBrightness = config.option2 > 0 ? config.option2 : 0;
-        minBrightness = minBrightness > 100 ? 100 : minBrightness;
+        // Use option1 for on duration ratio (0..200, default 100)
+        uint8_t onRatio = option1 ? option1 : 100;
+        if (onRatio > 200) onRatio = 200;
 
-        // Use feature1 for random timing (0=regular, 1=random)
-        bool randomTiming = config.feature1;
-
-        // Use feature2 for rainbow strobe (0=set color, 1=rainbow)
-        bool rainbowStrobe = config.feature2;
+        // Use option2 for minimum brightness when "off" (0..100)
+        uint8_t minBrightness = option2;
+        if (minBrightness > 100) minBrightness = 100;
 
         // Calculate strobe interval based on speed (map 0-255 to 10-500ms)
-        uint32_t baseInterval = 10 + ((255 - config.speed) * 490) / 255;
-        uint32_t interval = randomTiming ? (baseInterval / 2 + FastLEDMath::random16(baseInterval)) : baseInterval;
+        const uint32_t baseInterval = 10u + ((uint32_t)(255u - speed) * 490u) / 255u;
+        const uint32_t interval = randomTiming ? (baseInterval / 2u + FastLEDMath::random16(baseInterval)) : baseInterval;
 
-        uint32_t now = millis();
+        const uint32_t now = millis();
         if (now - _lastUpdate >= interval)
         {
             _lastUpdate = now;
@@ -174,9 +201,9 @@ class StrobeEffect : public Effect
         }
 
         // Calculate on/off durations based on ratio
-        uint32_t currentPhase = (now - _lastUpdate);
-        uint32_t onDuration = (interval * onRatio) / 200; // Convert percentage to duration
-        bool shouldBeOn = currentPhase < onDuration;
+        const uint32_t currentPhase = (now - _lastUpdate);
+        const uint32_t onDuration = (interval * onRatio) / 200u; // Convert percentage to duration
+        const bool shouldBeOn = currentPhase < onDuration;
 
         uint8_t r, g, b;
         if (_isOn && shouldBeOn)
@@ -184,44 +211,42 @@ class StrobeEffect : public Effect
             // Full brightness when on
             if (rainbowStrobe)
             {
-                uint8_t hue = (now / 100) % 256; // Fast hue cycling
-                uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, config.intensity);
+                const uint8_t hue = (uint8_t)((now / 100u) & 0xFF);
+                const uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, intensity, corrFlags, corrFlags);
                 r = (rgb >> 16) & 0xFF;
                 g = (rgb >> 8) & 0xFF;
                 b = rgb & 0xFF;
             }
             else
             {
-                r = FastLEDMath::scale8(config.r(), config.intensity);
-                g = FastLEDMath::scale8(config.g(), config.intensity);
-                b = FastLEDMath::scale8(config.b(), config.intensity);
+                r = FastLEDMath::scale8(baseR, intensity);
+                g = FastLEDMath::scale8(baseG, intensity);
+                b = FastLEDMath::scale8(baseB, intensity);
             }
         }
         else
         {
             // Off or dim
-            uint8_t dimBrightness = FastLEDMath::scale8(config.intensity, minBrightness);
+            const uint8_t dimBrightness = FastLEDMath::scale8(intensity, minBrightness);
             if (rainbowStrobe)
             {
-                uint8_t hue = (now / 100) % 256;
-                uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, dimBrightness);
+                const uint8_t hue = (uint8_t)((now / 100u) & 0xFF);
+                const uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, dimBrightness, corrFlags, corrFlags);
                 r = (rgb >> 16) & 0xFF;
                 g = (rgb >> 8) & 0xFF;
                 b = rgb & 0xFF;
             }
             else
             {
-                r = FastLEDMath::scale8(config.r(), dimBrightness);
-                g = FastLEDMath::scale8(config.g(), dimBrightness);
-                b = FastLEDMath::scale8(config.b(), dimBrightness);
+                r = FastLEDMath::scale8(baseR, dimBrightness);
+                g = FastLEDMath::scale8(baseG, dimBrightness);
+                b = FastLEDMath::scale8(baseB, dimBrightness);
             }
         }
 
         // Apply to all pixels
         for (uint16_t i = 0; i < length; i++)
-        {
             segment->setPixel(i, r, g, b);
-        }
     }
 
     void reset() override
@@ -244,6 +269,15 @@ class StrobeEffect : public Effect
 /**
  * Pulse Effect
  *
+ * Config usage:
+ *  - intensity: max brightness
+ *  - speed: pulse speed
+ *  - option1: pulse width
+ *  - option2: base hue offset / secondary shaping (if used)
+ *  - feature1: sharp pulse (hard edges) vs smooth
+ *  - feature2: rainbow pulse (else fixed RGB color)
+ *  - feature3: enables HSV->RGB correction flags (yellow + green)
+ *
  * Similar to breathing but with adjustable pulse width and more dramatic effect.
  */
 class PulseEffect : public Effect
@@ -260,67 +294,68 @@ class PulseEffect : public Effect
     {
         if (!segment) return;
 
-        auto& config = segment->getConfig();
-        uint16_t length = segment->getLength();
+        const auto& config = segment->getConfig();
+        const uint16_t length = segment->getLength();
+
+        // Snapshot config parameters for a consistent frame
+        const uint8_t speed = config.speed;         // pulse speed
+        const uint8_t intensity = config.intensity; // max brightness
+        const uint8_t option1 = config.option1;     // pulse width
+        const uint8_t option2 = config.option2;     // base hue offset / secondary shaping (if used)
+        const bool sharpPulse = config.feature1;    // sharp pulse (hard edges) vs smooth
+        const bool rainbowPulse = config.feature2;  // rainbow pulse (else fixed RGB color)
+        const bool corrFlags = config.feature3;     // enables HSV->RGB correction flags (yellow + green)
+        const uint8_t baseR = config.r();
+        const uint8_t baseG = config.g();
+        const uint8_t baseB = config.b();
 
         _time += deltaTime;
 
         // Use option1 for pulse width (10-200, default 100)
-        uint8_t pulseWidth = config.option1 > 0 ? config.option1 : 100;
-        pulseWidth = pulseWidth < 10 ? 10 : (pulseWidth > 200 ? 200 : pulseWidth);
+        uint8_t pulseWidth = option1 ? option1 : 100;
+        if (pulseWidth < 10) pulseWidth = 10;
+        else if (pulseWidth > 200)
+            pulseWidth = 200;
 
         // Use option2 for gamma correction strength (0-255, default 128)
-        uint8_t gamma = config.option2 > 0 ? config.option2 : 128;
-
-        // Use feature1 for sharp pulse (0=smooth, 1=sharp)
-        bool sharpPulse = config.feature1;
-
-        // Use feature2 for rainbow pulse (0=set color, 1=rainbow)
-        bool rainbowPulse = config.feature2;
+        const uint8_t gamma = option2 ? option2 : 128;
 
         // Calculate pulse rate from speed (map 0-255 to 10-120 BPM)
-        uint16_t bpm = 10 + ((config.speed * 110) / 255);
+        const uint16_t bpm = 10u + ((uint16_t)speed * 110u) / 255u;
 
         // Calculate pulse range based on width
-        uint8_t minVal = sharpPulse ? 0 : (255 - pulseWidth) / 2;
-        uint8_t maxVal = sharpPulse ? pulseWidth : 255;
+        const uint8_t minVal = sharpPulse ? 0 : (uint8_t)((255u - pulseWidth) / 2u);
+        const uint8_t maxVal = sharpPulse ? pulseWidth : 255;
 
-        // Use beatsin8 with configurable range for pulse
         uint8_t pulse = FastLEDMath::beatsin8(bpm, minVal, maxVal);
 
-        // Apply gamma correction for more natural looking pulse
+        // Apply gamma correction
         if (gamma > 0)
         {
-            uint8_t squared = FastLEDMath::scale8(pulse, pulse); // Square for gamma curve
+            const uint8_t squared = FastLEDMath::scale8(pulse, pulse);
             pulse = FastLEDMath::lerp8by8(pulse, squared, gamma);
         }
 
-        // Scale the configured brightness by the pulse pattern
-        uint8_t currentBrightness = FastLEDMath::scale8(config.intensity, pulse);
+        const uint8_t currentBrightness = FastLEDMath::scale8(intensity, pulse);
 
-        // Apply to all pixels
         uint8_t r, g, b;
         if (rainbowPulse)
         {
-            // Rainbow pulse mode
-            uint8_t hue = (_time / 30) % 256; // Medium speed hue cycle
-            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, currentBrightness);
+            const uint8_t hue = (uint8_t)((_time / 30u) & 0xFF);
+            const uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, currentBrightness, corrFlags, corrFlags);
             r = (rgb >> 16) & 0xFF;
             g = (rgb >> 8) & 0xFF;
             b = rgb & 0xFF;
         }
         else
         {
-            // Use configured color
-            r = FastLEDMath::scale8(config.r(), currentBrightness);
-            g = FastLEDMath::scale8(config.g(), currentBrightness);
-            b = FastLEDMath::scale8(config.b(), currentBrightness);
+            r = FastLEDMath::scale8(baseR, currentBrightness);
+            g = FastLEDMath::scale8(baseG, currentBrightness);
+            b = FastLEDMath::scale8(baseB, currentBrightness);
         }
 
         for (uint16_t i = 0; i < length; i++)
-        {
             segment->setPixel(i, r, g, b);
-        }
     }
 
     void reset() override

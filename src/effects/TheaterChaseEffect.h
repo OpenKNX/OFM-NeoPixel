@@ -19,6 +19,17 @@
  * Creates a chase pattern where every Nth pixel is lit, creating
  * a "marching ants" effect like old theater marquees.
  */
+/**
+ * @brief Theater Chase effect
+ *
+ * Uses config parameters:
+ *  - config.speed     : update interval (movement speed)
+ *  - config.intensity : master brightness scaling for RGB
+ *  - config.option1   : spacing (1..10, 0 => default 3)
+ *  - config.option2   : dot size (1..5, 0 => default 1)
+ *  - config.reverse   : reverse chase direction
+ *  - config.feature1  : trail mode (fade instead of clear)
+ */
 class TheaterChaseEffect : public Effect
 {
   private:
@@ -36,28 +47,29 @@ class TheaterChaseEffect : public Effect
         if (!segment) return;
 
         auto& config = segment->getConfig();
-        uint16_t length = segment->getLength();
+        const uint16_t length = segment->getLength();
+        if (length == 0) return;
+
+        const uint8_t speedVal = config.speed;         // update interval (movement speed)
+        const uint8_t intensityVal = config.intensity; // master brightness scaling for RGB
+        const uint8_t option1 = config.option1;        // spacing (1..10, 0 => default 3)
+        const uint8_t option2 = config.option2;        // dot size (1..5, 0 => default 1)
+        const bool reverseDir = (config.reverse != 0); // reverse chase direction
+        const bool trailMode = config.feature1;        // trail mode (fade instead of clear)
 
         // Calculate update interval based on speed (map 0-255 to 20-200ms)
-        uint32_t interval = 20 + ((255 - config.speed) * 180) / 255;
+        const uint32_t interval = 20UL + ((uint32_t)(255 - speedVal) * 180UL) / 255UL;
 
-        uint32_t now = millis();
+        const uint32_t now = millis();
         if (now - _lastUpdate < interval)
-        {
             return; // Not time to update yet
-        }
         _lastUpdate = now;
 
-        // Use option1 for spacing (1-10, default 3)
-        uint8_t spacing = config.option1 > 0 ? config.option1 : 3;
-        spacing = spacing > 10 ? 10 : spacing; // Clamp to reasonable max
-
-        // Use option2 for dot size (1-5, default 1)
-        uint8_t dotSize = config.option2 > 0 ? config.option2 : 1;
-        dotSize = dotSize > 5 ? 5 : dotSize; // Clamp to reasonable max
-
-        // Use feature1 for trail mode (0=off, 1=on)
-        bool trailMode = config.feature1;
+        // Spacing & dot size
+        uint8_t spacing = (option1 > 0) ? option1 : 3;
+        if (spacing > 10) spacing = 10;
+        uint8_t dotSize = (option2 > 0) ? option2 : 1;
+        if (dotSize > 5) dotSize = 5;
 
         // Clear all pixels first (or fade if in trail mode)
         for (uint16_t i = 0; i < length; i++)
@@ -67,9 +79,9 @@ class TheaterChaseEffect : public Effect
                 // Fade existing pixels for trail effect
                 uint8_t r, g, b;
                 segment->getPixel(i, r, g, b);
-                r = r * 0.85; // 15% fade
-                g = g * 0.85;
-                b = b * 0.85;
+                r = (uint8_t)(r * 0.85f); // 15% fade
+                g = (uint8_t)(g * 0.85f);
+                b = (uint8_t)(b * 0.85f);
                 segment->setPixel(i, r, g, b);
             }
             else
@@ -78,26 +90,24 @@ class TheaterChaseEffect : public Effect
             }
         }
 
-        // Light pixels starting from current position with dot size
+        // Light every spacing-th pixel with configured color
+        const uint8_t baseR = FastLEDMath::scale8(config.r(), intensityVal);
+        const uint8_t baseG = FastLEDMath::scale8(config.g(), intensityVal);
+        const uint8_t baseB = FastLEDMath::scale8(config.b(), intensityVal);
+
         for (uint16_t i = _position; i < length; i += spacing)
         {
-            // Apply master brightness to configured color
-            uint8_t r = FastLEDMath::scale8(config.r(), config.intensity);
-            uint8_t g = FastLEDMath::scale8(config.g(), config.intensity);
-            uint8_t b = FastLEDMath::scale8(config.b(), config.intensity);
-
-            // Set multiple pixels for larger dot size
             for (uint8_t d = 0; d < dotSize && (i + d) < length; d++)
-            {
-                segment->setPixel(i + d, r, g, b);
-            }
+                segment->setPixel(i + d, baseR, baseG, baseB);
         }
 
-        // Advance position
-        _position++;
-        if (_position >= spacing)
+        // Advance position (phase) with optional reverse direction
+        if (reverseDir)
+            _position = (_position == 0) ? (uint8_t)(spacing - 1) : (uint8_t)(_position - 1);
+        else
         {
-            _position = 0;
+            _position++;
+            if (_position >= spacing) _position = 0;
         }
     }
 
@@ -123,6 +133,20 @@ class TheaterChaseEffect : public Effect
  *
  * Same as theater chase but cycles through rainbow colors
  */
+/**
+ * @brief Theater Chase Rainbow effect
+ *
+ * Uses config parameters:
+ *  - config.speed     : update interval (movement speed)
+ *  - config.intensity : brightness (HSV V)
+ *  - config.option1   : spacing (1..10, 0 => default 3)
+ *  - config.option2   : dot size (1..5, 0 => default 1)
+ *  - config.option3   : hue advance per step (1..20, 0 => default 5)
+ *  - config.reverse   : reverse chase direction
+ *  - config.feature1  : trail mode (fade instead of clear)
+ *  - config.feature2  : enable yellow brightness compensation (hsv2rgb_rainbow)
+ *  - config.feature3  : enable green correction hooks (hsv2rgb_rainbow)
+ */
 class TheaterChaseRainbowEffect : public Effect
 {
   private:
@@ -141,44 +165,47 @@ class TheaterChaseRainbowEffect : public Effect
         if (!segment) return;
 
         auto& config = segment->getConfig();
-        uint16_t length = segment->getLength();
+        const uint16_t length = segment->getLength();
+        if (length == 0) return;
+
+        const uint8_t speedVal = config.speed;         // update interval (movement speed)
+        const uint8_t intensityVal = config.intensity; // master brightness scaling for RGB
+        const uint8_t option1 = config.option1;        // spacing (1..10, 0 => default 3)
+        const uint8_t option2 = config.option2;        // dot size (1..5, 0 => default 1)
+        const uint8_t option3 = config.option3;        // hue advance per step (1..20, 0 => default 5)
+        const bool reverseDir = (config.reverse != 0); // reverse chase direction
+        const bool trailMode = config.feature1;        // trail mode (fade instead of clear)
+        const bool yellowBoost = config.feature2;      // enable HSV rainbow corrections
+        const bool greenCorr = config.feature3;        // enable HSV rainbow corrections
 
         // Calculate update interval based on speed
-        uint32_t interval = 30 + ((255 - config.speed) * 170) / 255;
+        const uint32_t interval = 30UL + ((uint32_t)(255 - speedVal) * 170UL) / 255UL;
 
-        uint32_t now = millis();
+        const uint32_t now = millis();
         if (now - _lastUpdate < interval)
-        {
             return;
-        }
         _lastUpdate = now;
 
-        // Use option1 for spacing (1-10, default 3)
-        uint8_t spacing = config.option1 > 0 ? config.option1 : 3;
-        spacing = spacing > 10 ? 10 : spacing;
+        // Spacing & dot size
+        uint8_t spacing = (option1 > 0) ? option1 : 3;
+        if (spacing > 10) spacing = 10;
+        uint8_t dotSize = (option2 > 0) ? option2 : 1;
+        if (dotSize > 5) dotSize = 5;
 
-        // Use option2 for dot size (1-5, default 1)
-        uint8_t dotSize = config.option2 > 0 ? config.option2 : 1;
-        dotSize = dotSize > 5 ? 5 : dotSize;
-
-        // Use option3 for color change speed (1-20, default 5)
-        uint8_t colorSpeed = config.option3 > 0 ? config.option3 : 5;
-        colorSpeed = colorSpeed > 20 ? 20 : colorSpeed;
-
-        // Use feature1 for trail mode (0=off, 1=on)
-        bool trailMode = config.feature1;
+        // Hue change speed
+        uint8_t colorSpeed = (option3 > 0) ? option3 : 5;
+        if (colorSpeed > 20) colorSpeed = 20;
 
         // Clear all pixels first (or fade if in trail mode)
         for (uint16_t i = 0; i < length; i++)
         {
             if (trailMode)
             {
-                // Fade existing pixels for trail effect
                 uint8_t r, g, b;
                 segment->getPixel(i, r, g, b);
-                r = r * 0.85; // 15% fade
-                g = g * 0.85;
-                b = b * 0.85;
+                r = (uint8_t)(r * 0.85f);
+                g = (uint8_t)(g * 0.85f);
+                b = (uint8_t)(b * 0.85f);
                 segment->setPixel(i, r, g, b);
             }
             else
@@ -190,26 +217,25 @@ class TheaterChaseRainbowEffect : public Effect
         // Light every spacing-th pixel with rainbow color
         for (uint16_t i = _position; i < length; i += spacing)
         {
-            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, config.intensity);
+            const uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, intensityVal, yellowBoost, greenCorr);
+            const uint8_t r = (rgb >> 16) & 0xFF;
+            const uint8_t g = (rgb >> 8) & 0xFF;
+            const uint8_t b = rgb & 0xFF;
 
-            uint8_t r = (rgb >> 16) & 0xFF;
-            uint8_t g = (rgb >> 8) & 0xFF;
-            uint8_t b = rgb & 0xFF;
-
-            // Set multiple pixels for larger dot size
             for (uint8_t d = 0; d < dotSize && (i + d) < length; d++)
-            {
                 segment->setPixel(i + d, r, g, b);
-            }
         }
 
-        // Advance position and hue
-        _position++;
-        if (_position >= spacing)
+        // Advance position (phase) with optional reverse direction
+        if (reverseDir)
+            _position = (_position == 0) ? (uint8_t)(spacing - 1) : (uint8_t)(_position - 1);
+        else
         {
-            _position = 0;
+            _position++;
+            if (_position >= spacing) _position = 0;
         }
-        _hue += colorSpeed; // Configurable color change speed
+
+        _hue += colorSpeed;
     }
 
     void reset() override

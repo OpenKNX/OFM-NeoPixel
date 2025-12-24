@@ -48,6 +48,16 @@ enum WipeDirection : uint8_t
  * Wipes color across LEDs from one side to another
  * Zero member variables - all state in Segment
  */
+/**
+ * Config usage:
+ *   - config.speed     : wipe step delay / animation speed
+ *   - config.option1   : direction (0..5) (WipeDirection)
+ *   - config.r1/g1/b1/w1 : wipe color (primary)
+ *   - config.r2/g2/b2/w2 : background color (secondary)
+ * Notes:
+ *   - config.intensity is currently not applied (colors are used as-is).
+ */
+
 class EffectWipe : public Effect
 {
   public:
@@ -61,44 +71,71 @@ class EffectWipe : public Effect
     // ====================================================================
     // Parameter API
     // ====================================================================
-    uint8_t getParameterCount() const override { return 1; }
+    uint8_t getParameterCount() const override { return 2; }
 
     const char* getParameterName(uint8_t index) const override
     {
-        return (index == 0) ? "Direction" : nullptr;
+        switch (index)
+        {
+            case 0: return "Speed";
+            case 1: return "Direction";
+            default: return nullptr;
+        }
     }
 
     ParameterType getParameterType(uint8_t index) const override
     {
-        return ParameterType::PARAM_ENUM;
+        switch (index)
+        {
+            case 0: return ParameterType::PARAM_UINT8; // Speed
+            case 1: return ParameterType::PARAM_ENUM;  // Direction
+            default: return ParameterType::PARAM_UINT8;
+        }
     }
 
     uint32_t getParameterDefault(uint8_t index) const override
     {
-        return 0; // WIPE_LEFT_TO_RIGHT
+        switch (index)
+        {
+            case 0: return 25; // default speed
+            case 1: return 0;  // default direction: WIPE_LEFT_TO_RIGHT
+            default: return 0;
+        }
     }
 
     uint32_t getParameter(const Segment* segment, uint8_t index) const override
     {
-        if (!segment || index != 0) return 0;
-        return segment->getConfig().mode;
+        if (!segment) return 0;
+        const auto& cfg = segment->getConfig();
+        switch (index)
+        {
+            case 0: return cfg.speed;
+            case 1: return cfg.option1; // direction
+            default: return 0;
+        }
     }
 
     void setParameter(Segment* segment, uint8_t index, uint32_t value) override
     {
-        if (!segment || index != 0) return;
-        const_cast<EffectConfig&>(segment->getConfig()).mode = value;
+        if (!segment) return;
+        auto& cfg = segment->getConfig();
+        switch (index)
+        {
+            case 0: cfg.speed = static_cast<uint8_t>(value); break;
+            case 1: cfg.option1 = static_cast<uint8_t>(value); break; // direction
+            default: break;
+        }
     }
 
     // Enum values for Direction parameter
     uint8_t getEnumValueCount(uint8_t paramIndex) const override
     {
-        return (paramIndex == 0) ? 6 : 0;
+        return (paramIndex == 1) ? 6 : 0;
     }
 
     const char* getEnumValueName(uint8_t paramIndex, uint8_t enumValue) const override
     {
-        if (paramIndex != 0) return nullptr;
+        if (paramIndex != 1) return nullptr;
         switch (enumValue)
         {
             case WIPE_LEFT_TO_RIGHT: return "Left->Right";

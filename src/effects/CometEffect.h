@@ -1,6 +1,6 @@
 /**
  * @file CometEffect.h
- * @brief Comet/Meteor effect - Moving dot with trailing tail 
+ * @brief Comet/Meteor effect - Moving dot with trailing tail
  *
  * Creates a comet or meteor effect with a bright head and fading tail.
  * Based on common LED effect patterns.
@@ -12,6 +12,20 @@
 #include "../Segment.h"
 #include "Effect.h"
 #include "FastLEDMath.h"
+
+/**
+ * Comet Effect
+ *
+ * Uses Segment config:
+ *  - speed: movement/update speed (higher = faster)
+ *  - intensity: head brightness / overall brightness scaling
+ *  - option1: tail fade rate (0 = default)
+ *  - option2: tail length (0 = default)
+ *  - feature1: bounce mode (restart vs bounce at ends)
+ *  - feature2: rainbow mode (HSV rainbow instead of fixed RGB color)
+ *  - feature3: enable HSV rainbow correction hooks (yellow boost + green correction)
+ *  - color (r/g/b): fixed comet color when rainbow mode is off
+ */
 
 /**
  * Comet Effect
@@ -37,27 +51,30 @@ class CometEffect : public Effect
         if (!segment) return;
 
         auto& config = segment->getConfig();
-        uint16_t length = segment->getLength();
-
+        const uint16_t length = segment->getLength();
         if (length == 0) return;
+        const uint8_t speed = config.speed;         // movement/update speed (higher = faster)
+        const uint8_t intensity = config.intensity; // head brightness / overall brightness scaling
+        const uint8_t option1 = config.option1;     // tail fade rate
+        const uint8_t option2 = config.option2;     // tail length
+
+        const bool bounceMode = config.feature1;  // bounce mode (restart vs bounce at ends)
+        const bool rainbowMode = config.feature2; // rainbow mode (HSV rainbow instead of fixed RGB color)
+
+        // Feature3: enable HSV correction hooks (yellow + green)
+        const bool yellowBoost = config.feature3;
+        const bool greenCorr = config.feature3;
 
         // Use option1 for tail fade rate (200-250, default 230)
-        uint8_t fadeRate = config.option1 > 0 ? (200 + config.option1 / 5) : 230;
-        fadeRate = fadeRate > 250 ? 250 : fadeRate;
+        uint8_t fadeRate = (option1 > 0) ? (uint8_t)(200 + option1 / 5) : 230;
+        fadeRate = (fadeRate > 250) ? 250 : fadeRate;
 
         // Use option2 for tail length (5-30, default 10)
-        _tailLength = config.option2 > 0 ? config.option2 : 10;
-        _tailLength = _tailLength < 5 ? 5 : (_tailLength > 30 ? 30 : _tailLength);
-
-        // Use feature1 for bounce mode (0=restart, 1=bounce)
-        bool bounceMode = config.feature1;
-
-        // Use feature2 for rainbow mode (0=set color, 1=rainbow)
-        bool rainbowMode = config.feature2;
+        _tailLength = (option2 > 0) ? option2 : 10;
+        _tailLength = (_tailLength < 5) ? 5 : ((_tailLength > 30) ? 30 : _tailLength);
 
         // Calculate update interval based on speed
-        uint32_t interval = 10 + ((255 - config.speed) * 90) / 255;
-
+        const uint32_t interval = 10 + ((255 - speed) * 90) / 255;
         uint32_t now = millis();
         if (now - _lastUpdate < interval)
         {
@@ -94,7 +111,7 @@ class CometEffect : public Effect
                     // Rainbow tail
                     uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(
                         _hue - (t * 10), 255,
-                        FastLEDMath::scale8(brightness, config.intensity));
+                        FastLEDMath::scale8(brightness, intensity));
                     r = (rgb >> 16) & 0xFF;
                     g = (rgb >> 8) & 0xFF;
                     b = rgb & 0xFF;
@@ -104,7 +121,7 @@ class CometEffect : public Effect
                     // Default cycling rainbow
                     uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(
                         _hue, 255,
-                        FastLEDMath::scale8(brightness, config.intensity));
+                        FastLEDMath::scale8(brightness, intensity));
                     r = (rgb >> 16) & 0xFF;
                     g = (rgb >> 8) & 0xFF;
                     b = rgb & 0xFF;
@@ -112,7 +129,7 @@ class CometEffect : public Effect
                 else
                 {
                     // Use configured color
-                    brightness = FastLEDMath::scale8(brightness, config.intensity);
+                    brightness = FastLEDMath::scale8(brightness, intensity);
                     r = FastLEDMath::scale8(config.r(), brightness);
                     g = FastLEDMath::scale8(config.g(), brightness);
                     b = FastLEDMath::scale8(config.b(), brightness);
@@ -130,7 +147,7 @@ class CometEffect : public Effect
             if (rainbowMode || (config.r() == 0 && config.g() == 0 && config.b() == 0))
             {
                 // Rainbow or no color configured
-                uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, config.intensity);
+                uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, intensity, yellowBoost, greenCorr);
                 r = (rgb >> 16) & 0xFF;
                 g = (rgb >> 8) & 0xFF;
                 b = rgb & 0xFF;
@@ -139,9 +156,9 @@ class CometEffect : public Effect
             else
             {
                 // Use configured color
-                r = FastLEDMath::scale8(config.r(), config.intensity);
-                g = FastLEDMath::scale8(config.g(), config.intensity);
-                b = FastLEDMath::scale8(config.b(), config.intensity);
+                r = FastLEDMath::scale8(config.r(), intensity);
+                g = FastLEDMath::scale8(config.g(), intensity);
+                b = FastLEDMath::scale8(config.b(), intensity);
             }
 
             segment->setPixel(_position, r, g, b);
@@ -223,24 +240,28 @@ class MeteorEffect : public Effect
         if (!segment) return;
 
         auto& config = segment->getConfig();
-        uint16_t length = segment->getLength();
-
+        const uint16_t length = segment->getLength();
         if (length == 0) return;
 
+        // Snapshot config for a consistent frame
+        const uint8_t speed = config.speed;         // movement/update speed (higher = faster)
+        const uint8_t intensity = config.intensity; // head brightness / overall brightness scaling
+        const uint8_t option1 = config.option1;     // meteor size
+        const uint8_t option2 = config.option2;     // meteor frequency
+
+        const bool randomColors = config.feature1; // Feature1: random colors
+        const bool multiMeteor = config.feature2;  // Feature2: multiple meteors
+
+        // Feature3: enable HSV correction hooks (yellow + green)
+        const bool yellowBoost = config.feature3;
+        const bool greenCorr = config.feature3;
         // Use option1 for meteor size range (2-15, default 3-8)
-        uint8_t minSize = config.option1 > 0 ? (2 + config.option1 / 20) : 3;
+        uint8_t minSize = option1 > 0 ? (2 + option1 / 20) : 3;
         uint8_t maxSize = minSize + 5;
         maxSize = maxSize > 15 ? 15 : maxSize;
 
         // Use option2 for meteor frequency (100-5000ms, default based on speed)
-        uint32_t baseInterval = config.option2 > 0 ? (100 + config.option2 * 19) : (1000 + ((255 - config.speed) * 4000) / 255);
-
-        // Use feature1 for random colors (0=set color, 1=random)
-        bool randomColors = config.feature1;
-
-        // Use feature2 for multiple meteors (0=single, 1=multiple)
-        bool multiMeteor = config.feature2;
-
+        uint32_t baseInterval = option2 > 0 ? (100 + option2 * 19) : (1000 + ((255 - speed) * 4000) / 255);
         uint32_t now = millis();
 
         // Start new meteor if needed
@@ -269,7 +290,7 @@ class MeteorEffect : public Effect
         }
 
         // Update meteor position
-        uint32_t moveInterval = 20 + ((255 - config.speed) * 80) / 255;
+        uint32_t moveInterval = 20 + ((255 - speed) * 80) / 255;
         if (now - _lastUpdate >= moveInterval && _position >= 0)
         {
             _lastUpdate = now;
@@ -305,7 +326,7 @@ class MeteorEffect : public Effect
                     {
                         // Use random/rainbow hue
                         uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255,
-                                                                    FastLEDMath::scale8(brightness, config.intensity));
+                                                                    FastLEDMath::scale8(brightness, intensity), yellowBoost, greenCorr);
                         r = (rgb >> 16) & 0xFF;
                         g = (rgb >> 8) & 0xFF;
                         b = rgb & 0xFF;
@@ -313,7 +334,7 @@ class MeteorEffect : public Effect
                     else
                     {
                         // Use configured color
-                        brightness = FastLEDMath::scale8(brightness, config.intensity);
+                        brightness = FastLEDMath::scale8(brightness, intensity);
                         r = FastLEDMath::scale8(config.r(), brightness);
                         g = FastLEDMath::scale8(config.g(), brightness);
                         b = FastLEDMath::scale8(config.b(), brightness);

@@ -25,6 +25,18 @@
  *  3) Sometimes randomly new 'sparks' of heat are added at the bottom
  *  4) The heat from each cell is rendered as a color into the LEDs
  */
+/**
+ * @brief Fire2012 effect
+ *
+ * Uses Segment config parameters:
+ *  - config.intensity : master brightness scaling (0..255)
+ *  - config.option1   : cooling control (0=default, else 0..255 mapped to ~20..100)
+ *  - config.option2   : sparking probability (0=default, else 0..255 mapped to ~50..200)
+ *  - config.reverse   : reverse direction (fire goes downwards)
+ *  - config.feature2  : blue fire mode (on/off)
+ * Notes:
+ *  - Speed/Option3/Feature1/Feature3 are currently unused by this effect.
+ */
 class FireEffect : public Effect
 {
   private:
@@ -53,6 +65,12 @@ class FireEffect : public Effect
         if (!segment) return;
 
         auto& config = segment->getConfig();
+
+        const uint8_t intensity = config.intensity;    // Master brightness scaling (0..255)
+        const uint8_t option1 = config.option1;        // Cooling control (0=default)
+        const uint8_t option2 = config.option2;        // Sparking probability (0=default)
+        const bool reverseDir = (config.reverse != 0); // Reverse direction
+        const bool blueMode = config.feature2;         // Blue fire mode
         uint16_t length = segment->getLength();
 
         // Ensure we don't exceed our heat array
@@ -72,14 +90,16 @@ class FireEffect : public Effect
             }
         }
 
-        // Use option1 for cooling (20-100, default 55)
-        _cooling = 20 + ((config.option1 > 0 ? config.option1 : 90) * 80) / 255;
+        // option1 -> cooling (0 = default)
+        const uint8_t coolIn = (option1 == 0) ? 90 : option1;
+        _cooling = 20 + (coolIn * 80) / 255;
 
-        // Use option2 for sparking (50-200, default 120)
-        _sparking = 50 + ((config.option2 > 0 ? config.option2 : 120) * 150) / 255;
+        // option2 -> sparking (0 = default)
+        const uint8_t sparkIn = (option2 == 0) ? 120 : option2;
+        _sparking = 50 + (sparkIn * 150) / 255;
 
-        // Use feature1 for reverse direction
-        _reverseDirection = config.feature1;
+        // Reverse direction from dedicated config.reverse flag
+        _reverseDirection = reverseDir;
 
         // Step 1. Cool down every cell a little
         for (uint16_t i = 0; i < _numCells; i++)
@@ -110,7 +130,7 @@ class FireEffect : public Effect
         {
             // Use feature2 for color mode (normal fire vs blue fire)
             uint32_t color;
-            if (config.feature2)
+            if (blueMode)
             {
                 color = blueFire(_heat[j]); // Blue fire variant
             }
@@ -125,9 +145,9 @@ class FireEffect : public Effect
             uint8_t b = (color & 0xFF);
 
             // Scale by master brightness
-            r = FastLEDMath::scale8(r, config.intensity);
-            g = FastLEDMath::scale8(g, config.intensity);
-            b = FastLEDMath::scale8(b, config.intensity);
+            r = FastLEDMath::scale8(r, intensity);
+            g = FastLEDMath::scale8(g, intensity);
+            b = FastLEDMath::scale8(b, intensity);
 
             // Set pixel (optionally reverse direction)
             uint16_t pixelnum;

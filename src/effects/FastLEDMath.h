@@ -240,35 +240,25 @@ namespace FastLEDMath
     // ============================================================================
 
     /**
-     * @brief HSV to RGB conversion (FastLED compatible)
+     * @brief HSV to RGB conversion (FastLED-like rainbow mapping, continuous hue)
+     *
+     * Converts HSV (0..255) to RGB using a continuous rainbow mapping.
+     * Optional perceptual correction hooks:
+     *  - yellowBoost: boosts yellow band (R+G, B==0) for perceived brightness consistency
+     *  - greenCorr: optional green correction hooks (reserved for LED-type tuning)
+     *
      * @param h Hue (0-255)
      * @param s Saturation (0-255)
      * @param v Value/Brightness (0-255)
+     * @param yellowBoost Enable yellow brightness compensation
+     * @param greenCorr Enable green correction hooks
      * @return 32-bit RGB (0x00RRGGBB)
      */
-    inline uint32_t hsv2rgb_rainbow(uint8_t h, uint8_t s, uint8_t v)
+    inline uint32_t hsv2rgb_rainbow(uint8_t h, uint8_t s, uint8_t v, bool yellowBoost, bool greenCorr)
     {
-        // Yellow has a higher inherent brightness than
-        // any other color; 'pure' yellow is perceived to
-        // be 93% as bright as white. In order to make
-        // yellow appear the correct relative brightness,
-        // it has to be rendered brighter than all other
-        // colors. Level Y1 is a moderate boost, the default.
+        const uint8_t section = h >> 5;
+        const uint8_t frac = (h & 0x1F) << 3;
 
-        const uint8_t Y1 = 1; // moderate yellow boost (default)
-        const uint8_t Y2 = 0; // optional extra yellow boost (0=off for most LEDs)
-
-        // G2/Gscale: Color correction for specific LED types (currently unused)
-        // In FastLED these were used for LEDs with oversaturated green
-        // Keep for future LED type color correction support
-        const uint8_t G2 = 0;     // 1 => divide green by 2
-        const uint8_t Gscale = 0; // 1..255 => scale green; 0 => off
-
-        // 8 hue sections (32 steps each) for a continuous rainbow.
-        const uint8_t section = h >> 5;       // 0..7
-        const uint8_t frac = (h & 0x1F) << 3; // 0..248
-
-        // Endpoints per section (continuous rainbow)
         static const uint8_t r0[8] = {255, 255, 255, 0, 0, 0, 255, 255};
         static const uint8_t g0[8] = {0, 128, 255, 255, 255, 0, 0, 0};
         static const uint8_t b0[8] = {0, 0, 0, 0, 255, 255, 255, 128};
@@ -281,17 +271,30 @@ namespace FastLEDMath
         uint8_t g = lerp8by8(g0[section], g1[section], frac);
         uint8_t b = lerp8by8(b0[section], b1[section], frac);
 
-        // Yellow brightness compensation: boost green only in the R+G band (orange/yellow).
-        if (b == 0 && r != 0 && g != 0)
+        // --- Yellow boost (FastLED-style) ---
+        if (yellowBoost)
         {
-            if (Y1) g = qadd8(g, (g >> 1)); // +50% (moderate)
-            if (Y2) g = qadd8(g, (g >> 2)); // +25% extra (optional)
+            const uint8_t Y1 = 1;
+            const uint8_t Y2 = 0;
+
+            if (b == 0 && r != 0 && g != 0)
+            {
+                if (Y1) g = qadd8(g, (g >> 1)); // +50%
+                if (Y2) g = qadd8(g, (g >> 2)); // +25%
+            }
         }
 
-        // Optional green correction knobs (off by default)
-        if (G2) g >>= 1;
-        if (Gscale) g = scale8(g, Gscale);
+        // --- Green correction hooks ---
+        if (greenCorr)
+        {
+            const uint8_t G2 = 0;
+            const uint8_t Gscale = 0;
 
+            if (G2) g >>= 1;
+            if (Gscale) g = scale8(g, Gscale);
+        }
+
+        // saturation
         if (s != 255)
         {
             if (s == 0)
@@ -302,20 +305,20 @@ namespace FastLEDMath
             {
                 uint8_t desat = 255 - s;
                 desat = scale8(desat, desat);
-
                 uint8_t satscale = 255 - desat;
 
                 if (r) r = scale8(r, satscale);
                 if (g) g = scale8(g, satscale);
                 if (b) b = scale8(b, satscale);
 
-                uint8_t brightness_floor = desat;
-                r += brightness_floor;
-                g += brightness_floor;
-                b += brightness_floor;
+                uint8_t floor = desat;
+                r += floor;
+                g += floor;
+                b += floor;
             }
         }
 
+        // value
         if (v != 255)
         {
             v = scale8_video(v, v);
@@ -333,7 +336,13 @@ namespace FastLEDMath
 
         return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
     }
-
+    /**
+     * Backwards-compatible default
+     */
+    inline uint32_t hsv2rgb_rainbow(uint8_t h, uint8_t s, uint8_t v)
+    {
+        return hsv2rgb_rainbow(h, s, v, true, false);
+    }
     // ============================================================================
     // Noise & Random
     // ============================================================================

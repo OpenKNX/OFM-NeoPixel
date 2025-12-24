@@ -43,6 +43,10 @@ class StrobeEffect;
 class PulseEffect;
 class CometEffect;
 class MeteorEffect;
+class NoiseEffect;
+class PaletteEffect;
+class LightningEffect;
+class GradientEffect;
 
 /**
  * EffectPool - Singleton Pool for all Effect Instances
@@ -73,9 +77,13 @@ class EffectPool
     static Effect* getPulse();
     static Effect* getComet();
     static Effect* getMeteor();
+    static Effect* getNoise();
+    static Effect* getPalette();
+    static Effect* getLightning();
+    static Effect* getGradient();
     //
     // -----------------------------------------------------------
-    
+
     // Dynamic effect registry access
     static uint8_t getEffectCount();
     static Effect* getEffectByIndex(uint8_t index);

@@ -17,6 +17,13 @@
  * Rainbow Cycle Effect
  *
  * Like rainbow, but distributes colors more evenly across the strip.
+ *
+ * Uses config parameters:
+ *  - config.speed     : cycle speed (0 => minimal)
+ *  - config.intensity : brightness (HSV V)
+ *  - config.reverse   : reverse cycling direction
+ *  - config.feature2  : enable yellow brightness compensation (hsv2rgb_rainbow)
+ *  - config.feature3  : enable green correction hooks (hsv2rgb_rainbow)
  */
 class RainbowCycleEffect : public Effect
 {
@@ -33,14 +40,19 @@ class RainbowCycleEffect : public Effect
         if (!segment) return;
 
         auto& config = segment->getConfig();
-        uint16_t length = segment->getLength();
-
+        const uint16_t length = segment->getLength();
         if (length == 0) return;
 
-        // Calculate how much to advance the color cycle each frame
-        uint8_t speed = config.speed > 0 ? config.speed : 1;
-        _colorIndex += speed / 16; // Slower than regular rainbow
+        const uint8_t speedVal = (config.speed == 0) ? 1 : config.speed; // Cycle speed (0 => minimal)
+        const uint8_t intensityVal = config.intensity;                   // Brightness (HSV V)
+        const bool reverseDir = (config.reverse != 0);                   // Reverse cycling direction
+        const bool yellowBoost = config.feature2;                        // Yellow brightness compensation
+        const bool greenCorr = config.feature3;                          // Green correction hooks
 
+        // Calculate how much to advance the color cycle each frame
+        uint8_t inc = speedVal / 16; // Slower than regular rainbow
+        if (inc == 0) inc = 1;
+        _colorIndex = reverseDir ? (uint8_t)(_colorIndex - inc) : (uint8_t)(_colorIndex + inc);
         // Draw rainbow cycle across the strip
         for (uint16_t i = 0; i < length; i++)
         {
@@ -48,7 +60,7 @@ class RainbowCycleEffect : public Effect
             // This creates a rainbow that moves around the strip
             uint8_t hue = _colorIndex + (i * 255 / length);
 
-            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, config.intensity);
+            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, intensityVal, yellowBoost, greenCorr);
 
             uint8_t r = (rgb >> 16) & 0xFF;
             uint8_t g = (rgb >> 8) & 0xFF;
