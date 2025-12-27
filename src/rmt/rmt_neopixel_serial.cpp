@@ -377,11 +377,11 @@ PhysicalStripConfig* RMT_NeoPixel_Serial::createDefaultConfig() const
 bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
 {
     if (!_inst || !config) return false;
-    
+
     // Type check - must be SerialStripConfig
     const SerialStripConfig* serialCfg = config->isSerialConfig() ? static_cast<const SerialStripConfig*>(config) : nullptr;
     if (!serialCfg) return false;
-    
+
     // RMT has no runtime-configurable settings for serial strips
     // Timing and protocol are fixed at initialization
     return true;

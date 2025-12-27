@@ -65,8 +65,8 @@ class EffectWipe : public Effect
     virtual ~EffectWipe() = default;
 
     void update(Segment* segment, uint32_t deltaTime) override;
-    const char* getName() override { return "Wipe"; }
-    const char* getDescription() override { return "Color wipe animation from start to end"; }
+    const char* getName(const char* lang = nullptr) override { return "Wipe"; }
+    const char* getDescription(const char* lang = nullptr) override { return "Color wipe animation from start to end"; }
 
     // ====================================================================
     // Parameter API

@@ -81,18 +81,19 @@ class VirtualStrip
     // Sync & Transfer
     // ====================================================================
     bool waitForCompletion(uint32_t timeoutMs = 0); // Wait for all physical strips to complete
-    bool syncToPhysical();                                 // Sync buffer to physical strips
+    bool syncToPhysical();                          // Sync buffer to physical strips
     bool show();
     bool isAnyBusy() const;
 
     /**
      * @brief Turn off all LEDs immediately (clear + show combined)
-     * 
+     *
      * Convenience method that clears the buffer and immediately sends
      * the update to all physical strips. Useful for emergency shutdowns,
      * power-off states, or before ETS programming.
      */
-    inline void turnOffAll() {
+    inline void turnOffAll()
+    {
         clear();
         show();
     }

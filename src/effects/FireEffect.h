@@ -25,18 +25,6 @@
  *  3) Sometimes randomly new 'sparks' of heat are added at the bottom
  *  4) The heat from each cell is rendered as a color into the LEDs
  */
-/**
- * @brief Fire2012 effect
- *
- * Uses Segment config parameters:
- *  - config.intensity : master brightness scaling (0..255)
- *  - config.option1   : cooling control (0=default, else 0..255 mapped to ~20..100)
- *  - config.option2   : sparking probability (0=default, else 0..255 mapped to ~50..200)
- *  - config.reverse   : reverse direction (fire goes downwards)
- *  - config.feature2  : blue fire mode (on/off)
- * Notes:
- *  - Speed/Option3/Feature1/Feature3 are currently unused by this effect.
- */
 class FireEffect : public Effect
 {
   private:
@@ -173,14 +161,125 @@ class FireEffect : public Effect
         }
     }
 
-    const char* getName() override
+    const char* getName(const char* lang = nullptr) override
     {
         return "Fire";
     }
 
-    const char* getDescription() override
+    const char* getDescription(const char* lang = nullptr) override
     {
         return "Realistic fire simulation with flickering";
+    }
+
+    // Parameter API
+    uint8_t getParameterCount() const override { return 5; }
+
+    const char* getParameterName(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return "Speed";
+            case 1: return "Cooling";
+            case 2: return "Sparking";
+            case 3: return "ReverseDirection";
+            case 4: return "BlueFireMode";
+            default: return "";
+        }
+    }
+
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Animationsgeschwindigkeit (ungenutzt)", "Speed: Animation speed (unused)");
+            case 1: return PARAM_DESC_DE_EN("Kühlrate: Wie schnell das Feuer abkühlt (20-100)", "Cooling rate: How fast the fire cools down (20-100)");
+            case 2: return PARAM_DESC_DE_EN("Funkenrate: Wie oft neue Funken entstehen (50-200)", "Spark rate: How often new sparks appear (50-200)");
+            case 3: return PARAM_DESC_DE_EN("Richtung umkehren: Feuer nach unten", "Reverse direction: Fire downwards");
+            case 4: return PARAM_DESC_DE_EN("Blaufeuermodus: Blaues statt oranges Feuer", "Blue fire mode: Blue instead of orange fire");
+            default: return "";
+        }
+    }
+
+    ParameterType getParameterType(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return ParameterType::PARAM_UINT8;
+            case 1: return ParameterType::PARAM_UINT8;
+            case 2: return ParameterType::PARAM_UINT8;
+            case 3: return ParameterType::PARAM_BOOL;
+            case 4: return ParameterType::PARAM_BOOL;
+            default: return ParameterType::PARAM_UINT8;
+        }
+    }
+
+    uint32_t getParameterDefault(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 128; // Speed (unused dummy)
+            case 1: return 90;  // Cooling (maps to ~55 in algorithm)
+            case 2: return 120; // Sparking (maps to ~120 in algorithm)
+            case 3: return 0;   // ReverseDirection off
+            case 4: return 0;   // BlueFireMode off (normal orange fire)
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMin(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 1; // Speed min
+            case 1: return 0; // Cooling min (maps to 20)
+            case 2: return 0; // Sparking min (maps to 50)
+            case 3: return 0; // ReverseDirection false
+            case 4: return 0; // BlueFireMode false
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMax(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 255; // Speed max
+            case 1: return 255; // Cooling max (maps to 100)
+            case 2: return 255; // Sparking max (maps to 200)
+            case 3: return 1;   // ReverseDirection true
+            case 4: return 1;   // BlueFireMode true
+            default: return 255;
+        }
+    }
+
+    uint32_t getParameter(const Segment* segment, uint8_t index) const override
+    {
+        if (!segment) return 0;
+        auto& config = segment->getConfig();
+        switch (index)
+        {
+            case 0: return config.speed;    // Speed (unused)
+            case 1: return config.option1;  // Cooling
+            case 2: return config.option2;  // Sparking
+            case 3: return config.feature1; // ReverseDirection
+            case 4: return config.feature2; // BlueFireMode
+            default: return 0;
+        }
+    }
+
+    void setParameter(Segment* segment, uint8_t index, uint32_t value) override
+    {
+        if (!segment) return;
+        auto& config = segment->getConfig();
+        switch (index)
+        {
+            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed (unused)
+            case 1: config.option1 = static_cast<uint8_t>(value); break; // Cooling (20-100)
+            case 2: config.option2 = static_cast<uint8_t>(value); break; // Sparking (50-200)
+            case 3: config.feature1 = static_cast<bool>(value); break;   // ReverseDirection
+            case 4: config.feature2 = static_cast<bool>(value); break;   // BlueFireMode
+            default: break;
+        }
     }
 
   private:

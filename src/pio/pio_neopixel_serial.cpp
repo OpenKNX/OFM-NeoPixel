@@ -69,7 +69,7 @@ static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, u
 
     // 2. Transfer pin to PIO control (before setting state!)
     pio_gpio_init(pio, pin);
-    
+
     // 3. Set pin as output under PIO control
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
 
@@ -394,8 +394,8 @@ bool PIO_NeoPixel_Serial::initPIO()
     // slightly faster timing than standard 800 kHz. Automatically calculates the
     // correct clkdiv for any CPU frequency to maintain consistent 960 kHz output.
     float actual_sys_clk = (float)clock_get_hz(clk_sys);
-    float clkdiv = 1.0f;           // Initialize to safe default
-    float actual_bitrate = 0.0f;   // Initialize to safe default
+    float clkdiv = 1.0f;         // Initialize to safe default
+    float actual_bitrate = 0.0f; // Initialize to safe default
     float bitrate_multiplier = 1.0f;
     const char* mode_name = "AUTO";
 
@@ -528,9 +528,9 @@ bool PIO_NeoPixel_Serial::initPIO()
 
     // CRITICAL: Clear and reset state machine before init (prevents garbage after reboot!)
     pio_sm_set_enabled(_inst->pio, _inst->sm, false); // Disable first
-    pio_sm_restart(_inst->pio, _inst->sm);             // Reset PC to start
-    pio_sm_clear_fifos(_inst->pio, _inst->sm);         // Clear any old data
-    pio_sm_clkdiv_restart(_inst->pio, _inst->sm);      // Reset clock divider
+    pio_sm_restart(_inst->pio, _inst->sm);            // Reset PC to start
+    pio_sm_clear_fifos(_inst->pio, _inst->sm);        // Clear any old data
+    pio_sm_clkdiv_restart(_inst->pio, _inst->sm);     // Reset clock divider
 
     // Initialize the PIO program with calculated clock divider
     neopixel_serial_program_init(_inst->pio, _inst->sm, _inst->offset, _inst->pin, clkdiv, rgbw);

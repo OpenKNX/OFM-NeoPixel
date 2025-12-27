@@ -3,6 +3,25 @@
 // ============================================================================
 // Effect Selection - Individual Effect Control
 // ============================================================================
+//
+// CRITICAL: Effect Registration Order = ETS XML IDs
+//
+// The order of effects in getEffectByIndex() directly defines the XML enumeration IDs!
+// Build-EffectParameters.ps1 parses this file to extract the registration order.
+//
+// Registration Order Example:
+//   getEffectByIndex():
+//     - index 0 → getSolid()        → ETS XML: <Enumeration Value="0" Text="Solid"/>
+//     - index 1 → getWipe()         → ETS XML: <Enumeration Value="1" Text="Wipe"/>
+//     - index 2 → getRainbow()      → ETS XML: <Enumeration Value="2" Text="Rainbow"/>
+//
+// When KNX sends "Effect ID = 23", OAM calls getEffectByIndex(23).
+// The XML ID must match the C++ registration index exactly!
+//
+// !!!  DO NOT REORDER getEffectByIndex() without regenerating XML!
+// !!! Always run Build-EffectParameters.ps1 after changing effect order!
+//
+// ============================================================================
 // Define these to DISABLE specific effects (saves flash memory)
 // Solid effect cannot be disabled (always included)
 //
@@ -39,6 +58,7 @@
 #endif
 
 #ifndef NEOPIXEL_DISABLE_RAINBOW
+    #include "RainbowCycleEffect.h"
     #include "RainbowEffect.h"
 #endif
 
@@ -78,6 +98,7 @@
 
     #ifndef NEOPIXEL_DISABLE_THEATERCHASE
         #include "TheaterChaseEffect.h"
+        #include "TheaterChaseRainbowEffect.h"
     #endif
 
     #ifndef NEOPIXEL_DISABLE_SINELON
@@ -88,12 +109,28 @@
         #include "TwinkleEffect.h"
     #endif
 
+    #ifndef NEOPIXEL_DISABLE_SPARKLE
+        #include "SparkleEffect.h"
+    #endif
+
     #ifndef NEOPIXEL_DISABLE_BREATHING
         #include "BreathingEffect.h"
     #endif
 
+    #ifndef NEOPIXEL_DISABLE_STROBE
+        #include "StrobeEffect.h"
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_PULSE
+        #include "PulseEffect.h"
+    #endif
+
     #ifndef NEOPIXEL_DISABLE_COMET
         #include "CometEffect.h"
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_METEOR
+        #include "MeteorEffect.h"
     #endif
 
     #ifndef NEOPIXEL_DISABLE_NOISE
@@ -126,6 +163,7 @@ static EffectWipe* s_wipe = nullptr;
 
 #ifndef NEOPIXEL_DISABLE_RAINBOW
 static RainbowEffect* s_rainbow = nullptr;
+static RainbowCycleEffect* s_rainbowCycle = nullptr;
 #endif
 
 #ifndef NEOPIXEL_DISABLE_PRIDE
@@ -256,6 +294,19 @@ Effect* EffectPool::getRainbow()
         s_rainbow = new RainbowEffect();
     }
     return s_rainbow;
+}
+
+/**
+ * @brief Get RainbowCycle Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getRainbowCycle()
+{
+    if (!s_rainbowCycle)
+    {
+        s_rainbowCycle = new RainbowCycleEffect();
+    }
+    return s_rainbowCycle;
 }
 
 /**
@@ -556,7 +607,8 @@ uint8_t EffectPool::getEffectCount()
     count++;
 #endif
 #ifndef NEOPIXEL_DISABLE_RAINBOW
-    count++;
+    count++; // Rainbow
+    count++; // RainbowCycle
 #endif
 #ifndef NEOPIXEL_DISABLE_PRIDE
     count++;
@@ -645,6 +697,7 @@ Effect* EffectPool::getEffectByIndex(uint8_t index)
 #endif
 #ifndef NEOPIXEL_DISABLE_RAINBOW
     if (index == currentIndex++) return getRainbow();
+    if (index == currentIndex++) return getRainbowCycle();
 #endif
 #ifndef NEOPIXEL_DISABLE_PRIDE
     if (index == currentIndex++) return getPride();

@@ -18,16 +18,6 @@
  *
  * A colored dot sweeping back and forth, with fading trails.
  * Uses beatsin16 for smooth sine wave movement.
- *
- * Uses config parameters:
- *  - config.speed     : movement speed mapped to BPM (sine/bounce)
- *  - config.intensity : brightness scaling (HSV V / RGB scale)
- *  - config.option1   : fade rate control (0 => default)
- *  - config.option2   : dot size (0 => 1)
- *  - config.reverse   : reverse direction (mirrors position)
- *  - config.feature1  : rainbow mode (else uses configured RGB color)
- *  - config.feature2  : bounce mode (linear bounce instead of sine)
- *  - config.feature3  : enable HSV rainbow corrections (yellow/green hooks)
  */
 class SinelonEffect : public Effect
 {
@@ -50,27 +40,19 @@ class SinelonEffect : public Effect
 
         if (length == 0) return;
 
-        // Snapshot config per frame (avoids mixed frames if KNX updates mid-loop)
-        const uint8_t speedVal = config.speed;         // movement speed mapped to BPM
-        const uint8_t intensityVal = config.intensity; // brightness scaling
-        const uint8_t option1 = config.option1;        // fade rate control
-        const uint8_t option2 = config.option2;        // dot size
-        const bool reverseDir = (config.reverse != 0); // reverse direction
-        const bool rainbowMode = config.feature1;      // rainbow mode
-        const bool bounceMode = config.feature2;       // bounce mode
-        const bool yellowBoost = config.feature3;      // enable HSV rainbow corrections
-        const bool greenCorr = config.feature3;        // enable HSV rainbow corrections
-        const uint8_t cfgR = config.r();
-        const uint8_t cfgG = config.g();
-        const uint8_t cfgB = config.b();
-
         // Use option1 for fade rate (200-250, default 235)
-        uint8_t fadeRate = (option1 > 0) ? (uint8_t)(200 + option1 / 5) : 235;
+        uint8_t fadeRate = config.option1 > 0 ? (200 + config.option1 / 5) : 235;
         fadeRate = fadeRate > 250 ? 250 : fadeRate;
 
         // Use option2 for dot size (1-5, default 1)
-        uint8_t dotSize = (option2 > 0) ? option2 : 1;
+        uint8_t dotSize = config.option2 > 0 ? config.option2 : 1;
         dotSize = dotSize > 5 ? 5 : dotSize;
+
+        // Use feature1 for rainbow mode (0=use set color, 1=rainbow)
+        bool rainbowMode = config.feature1;
+
+        // Use feature2 for bounce mode (0=sine wave, 1=linear bounce)
+        bool bounceMode = config.feature2;
 
         // Fade all pixels to create trailing effect
         for (uint16_t i = 0; i < length; i++)
@@ -93,7 +75,7 @@ class SinelonEffect : public Effect
         {
             // Linear bounce mode
             // Calculate BPM from speed (map 0-255 to 5-50 BPM)
-            uint16_t bpm = 5 + ((speedVal * 45) / 255);
+            uint16_t bpm = 5 + ((config.speed * 45) / 255);
 
             // Update position based on direction
             _position += _direction ? bpm / 10 : -(bpm / 10);
@@ -115,21 +97,16 @@ class SinelonEffect : public Effect
         else
         {
             // Sine wave mode (original behavior)
-            uint16_t bpm = 5 + ((speedVal * 45) / 255);
+            uint16_t bpm = 5 + ((config.speed * 45) / 255);
             pos = FastLEDMath::beatsin16(bpm, 0, length - 1);
-        }
-
-        if (reverseDir && length > 0)
-        {
-            pos = (int)((length - 1) - (uint16_t)pos);
         }
 
         // Determine color
         uint8_t r, g, b;
-        if (rainbowMode || (cfgR == 0 && cfgG == 0 && cfgB == 0))
+        if (rainbowMode || (config.r() == 0 && config.g() == 0 && config.b() == 0))
         {
             // Rainbow mode or no color configured
-            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, intensityVal, yellowBoost, greenCorr);
+            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, config.intensity);
             r = (rgb >> 16) & 0xFF;
             g = (rgb >> 8) & 0xFF;
             b = rgb & 0xFF;
@@ -138,9 +115,9 @@ class SinelonEffect : public Effect
         else
         {
             // Use configured color
-            r = FastLEDMath::scale8(cfgR, intensityVal);
-            g = FastLEDMath::scale8(cfgG, intensityVal);
-            b = FastLEDMath::scale8(cfgB, intensityVal);
+            r = FastLEDMath::scale8(config.r(), config.intensity);
+            g = FastLEDMath::scale8(config.g(), config.intensity);
+            b = FastLEDMath::scale8(config.b(), config.intensity);
         }
 
         // Add bright pixel(s) at current position
@@ -157,13 +134,124 @@ class SinelonEffect : public Effect
         _direction = true;
     }
 
-    const char* getName() override
+    const char* getName(const char* lang = nullptr) override
     {
         return "Sinelon";
     }
 
-    const char* getDescription() override
+    const char* getDescription(const char* lang = nullptr) override
     {
         return "Single LED moving with sine wave motion";
+    }
+
+    // Parameter API
+    uint8_t getParameterCount() const override { return 5; }
+
+    const char* getParameterName(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return "Speed";
+            case 1: return "FadeRate";
+            case 2: return "DotSize";
+            case 3: return "RainbowMode";
+            case 4: return "BounceMode";
+            default: return "";
+        }
+    }
+
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Bewegungsgeschwindigkeit (höher=schneller)", "Speed: Movement speed (higher=faster)");
+            case 1: return PARAM_DESC_DE_EN("Ausblendrate: Wie schnell der Schweif verblasst (0-250)", "Fade rate: How fast the trail fades (0-250)");
+            case 2: return PARAM_DESC_DE_EN("Punktgröße: Anzahl LEDs im Punkt (1-5)", "Dot size: Number of LEDs in dot (1-5)");
+            case 3: return PARAM_DESC_DE_EN("Regenbogenmodus: Farbwechsel statt fester Farbe", "Rainbow mode: Color cycling instead of fixed color");
+            case 4: return PARAM_DESC_DE_EN("Sprungmodus: Linear springen statt Sinuswelle", "Bounce mode: Linear bounce instead of sine wave");
+            default: return "";
+        }
+    }
+
+    ParameterType getParameterType(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return ParameterType::PARAM_UINT8;
+            case 1: return ParameterType::PARAM_UINT8;
+            case 2: return ParameterType::PARAM_UINT8;
+            case 3: return ParameterType::PARAM_BOOL;
+            case 4: return ParameterType::PARAM_BOOL;
+            default: return ParameterType::PARAM_UINT8;
+        }
+    }
+
+    uint32_t getParameterDefault(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 128; // Speed
+            case 1: return 175; // FadeRate
+            case 2: return 1;   // DotSize
+            case 3: return 0;   // RainbowMode
+            case 4: return 0;   // BounceMode
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMin(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 1; // Speed min
+            case 1: return 0; // FadeRate min
+            case 2: return 1; // DotSize min
+            case 3: return 0; // RainbowMode false
+            case 4: return 0; // BounceMode false
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMax(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 255; // Speed max
+            case 1: return 250; // FadeRate max
+            case 2: return 5;   // DotSize max
+            case 3: return 1;   // RainbowMode true
+            case 4: return 1;   // BounceMode true
+            default: return 255;
+        }
+    }
+
+    uint32_t getParameter(const Segment* segment, uint8_t index) const override
+    {
+        if (!segment) return 0;
+        auto& config = segment->getConfig();
+        switch (index)
+        {
+            case 0: return config.speed;    // Speed
+            case 1: return config.option1;  // FadeRate
+            case 2: return config.option2;  // DotSize
+            case 3: return config.feature1; // RainbowMode
+            case 4: return config.feature2; // BounceMode
+            default: return 0;
+        }
+    }
+
+    void setParameter(Segment* segment, uint8_t index, uint32_t value) override
+    {
+        if (!segment) return;
+        auto& config = segment->getConfig();
+        switch (index)
+        {
+            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed (movement speed)
+            case 1: config.option1 = static_cast<uint8_t>(value); break; // FadeRate (0-250)
+            case 2: config.option2 = static_cast<uint8_t>(value); break; // DotSize (1-5 LEDs)
+            case 3: config.feature1 = static_cast<bool>(value); break;   // RainbowMode
+            case 4: config.feature2 = static_cast<bool>(value); break;   // BounceMode
+            default: break;
+        }
     }
 };

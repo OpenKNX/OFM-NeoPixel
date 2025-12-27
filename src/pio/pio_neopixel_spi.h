@@ -66,8 +66,8 @@ struct pio_neopixel_spi_inst
     // Example: brightness=31 -> 0xFF(11111111) (full brightness), brightness=0 -> 0xE0(11100000) (off)
     bool hasGlobalBrightness; // APA102/SK9822 have global brightness
 
-    uint8_t* buffer;     // LED data buffer
-    size_t bufferSize;   // Buffer size in bytes (logical)
+    uint8_t* buffer;        // LED data buffer
+    size_t bufferSize;      // Buffer size in bytes (logical)
     size_t bufferWordCount; // Buffer size in 32-bit words (actual allocation)
 
     uint32_t spiFrequency; // SPI frequency (Hz)
@@ -87,12 +87,12 @@ struct pio_neopixel_spi_inst
     uint8_t hwBrightnessMin;    // Min hardware brightness (0-31, default: 0 for APA102, 16 for clones)
     uint8_t hwBrightnessMax;    // Max hardware brightness (0-31, default: 31 for APA102, 30 for clones)
 
-    int dmaChannel;     // DMA channel (-1 if not used)
-    int dmaIrqNum;      // DMA IRQ number (0 or 1, -1 if not used)
-    bool useDMA;        // Use DMA for transfers
-    bool initialized;   // Initialization state
-    volatile bool busy; // Transfer in progress
-    volatile bool dirty;         // Buffer has changed since last show() (prevents flicker from redundant sends)
+    int dmaChannel;      // DMA channel (-1 if not used)
+    int dmaIrqNum;       // DMA IRQ number (0 or 1, -1 if not used)
+    bool useDMA;         // Use DMA for transfers
+    bool initialized;    // Initialization state
+    volatile bool busy;  // Transfer in progress
+    volatile bool dirty; // Buffer has changed since last show() (prevents flicker from redundant sends)
 };
 typedef struct pio_neopixel_spi_inst pio_neopixel_spi_inst_t;
 

@@ -33,8 +33,8 @@ class ConfettiEffect : public Effect
   public:
     ConfettiEffect() = default;
 
-    const char* getName() override { return "Confetti"; }
-    const char* getDescription() override { return "Random colored pixels fading over time"; }
+    const char* getName(const char* lang = nullptr) override { return "Confetti"; }
+    const char* getDescription(const char* lang = nullptr) override { return "Random colored pixels fading over time"; }
 
     // ====================================================================
     // Parameter API
@@ -81,11 +81,11 @@ class ConfettiEffect : public Effect
     void setParameter(Segment* segment, uint8_t index, uint32_t value) override
     {
         if (!segment) return;
-        auto& cfg = segment->getConfig();
+        auto& config = segment->getConfig();
         switch (index)
         {
-            case 0: cfg.speed = static_cast<uint8_t>(value); break;   // FadeSpeed
-            case 1: cfg.option1 = static_cast<uint8_t>(value); break; // Saturation
+            case 0: config.speed = static_cast<uint8_t>(value); break;   // FadeSpeed
+            case 1: config.option1 = static_cast<uint8_t>(value); break; // Saturation (0-255)
             default: break;
         }
     }

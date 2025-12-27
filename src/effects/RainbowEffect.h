@@ -37,8 +37,8 @@ class RainbowEffect : public Effect
   public:
     RainbowEffect() = default;
 
-    const char* getName() override { return "Rainbow"; }
-    const char* getDescription() override { return "Full spectrum rainbow cycle"; }
+    const char* getName(const char* lang = nullptr) override { return "Rainbow"; }
+    const char* getDescription(const char* lang = nullptr) override { return "Full spectrum rainbow cycle"; }
 
     // ====================================================================
     // Parameter API
@@ -85,11 +85,12 @@ class RainbowEffect : public Effect
     void setParameter(Segment* segment, uint8_t index, uint32_t value) override
     {
         if (!segment) return;
-        auto& cfg = segment->getConfig();
+        auto& config = segment->getConfig();
         switch (index)
         {
-            case 0: cfg.speed = (uint8_t)value; break;   // Speed
-            case 1: cfg.option1 = (uint8_t)value; break; // Delta
+            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed (animation speed)
+            case 1: config.option1 = static_cast<uint8_t>(value); break; // Delta (color spread)
+            default: break;
         }
     }
 

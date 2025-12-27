@@ -35,11 +35,20 @@ class CylonEffect : public Effect
   public:
     CylonEffect() = default;
 
-    const char* getName() override { return "Cylon"; }
-    const char* getDescription() override { return "Bouncing eye with trailing fade (KITT/BSG)"; }
+    const char* getName(const char* lang = nullptr) override
+    {
+        return EFFECT_NAME_DE_EN("Cylon", "Cylon");
+    }
+
+    const char* getDescription(const char* lang = nullptr) override
+    {
+        return EFFECT_DESC_DE_EN(
+            "Klassischer KITT/Cylon-Effekt mit hin- und herspringendem Lichtauge und verblassendem Schweif. Inspiriert von Knight Rider und Battlestar Galactica. Das Auge bewegt sich sanft hin und her mit einstellbarer Größe und Geschwindigkeit.",
+            "Classic KITT/Cylon effect with bouncing light eye and fading trail. Inspired by Knight Rider and Battlestar Galactica. The eye moves smoothly back and forth with adjustable size and speed.");
+    }
 
     // ====================================================================
-    // Parameter API
+    // Parameter API - Self-Describing
     // ====================================================================
     uint8_t getParameterCount() const override { return 4; }
 
@@ -55,33 +64,84 @@ class CylonEffect : public Effect
         }
     }
 
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN(
+                "Geschwindigkeit: Bewegungstempo des Lichtauges (0=automatisch skaliert basierend auf Segmentlänge, höhere Werte=schnellere Bewegung). Bei 0 passt sich die Geschwindigkeit dynamisch an die LED-Anzahl an.",
+                "Speed: Movement tempo of the light eye (0=automatically scaled based on segment length, higher values=faster movement). At 0, speed dynamically adjusts to LED count.");
+            case 1: return PARAM_DESC_DE_EN(
+                "Farbton: HSV-Farbwert für das Lichtauge (0=rot, 85=grün, 170=blau, 212=magenta). Der klassische KITT-Effekt verwendet rot (0), aber jede Farbe ist möglich.",
+                "Hue: HSV color value for the light eye (0=red, 85=green, 170=blue, 212=magenta). Classic KITT effect uses red (0), but any color is possible.");
+            case 2: return PARAM_DESC_DE_EN(
+                "Augengröße: Anzahl der LEDs die das helle Zentrum des Auges bilden (1-20 LEDs). Größere Werte erzeugen ein breiteres, diffuseres Auge. Empfohlen: 3-7 LEDs.",
+                "Eye Size: Number of LEDs forming the bright center of the eye (1-20 LEDs). Larger values create a wider, more diffuse eye. Recommended: 3-7 LEDs.");
+            case 3: return PARAM_DESC_DE_EN(
+                "Schweif-Geschwindigkeit: Wie schnell der Schweif hinter dem Auge verblasst (1=langsames Verblassen mit langem Schweif, 255=schnelles Verblassen mit kurzem Schweif). Höhere Werte erzeugen einen schärferen, kürzeren Effekt.",
+                "Trail Speed: How quickly the trail fades behind the eye (1=slow fade with long trail, 255=fast fade with short trail). Higher values create a sharper, shorter effect.");
+            default: return nullptr;
+        }
+    }
+
     ParameterType getParameterType(uint8_t index) const override
     {
-        return ParameterType::PARAM_UINT8;
+        switch (index)
+        {
+            case 0: return ParameterType::PARAM_UINT8; // Speed
+            case 1: return ParameterType::PARAM_HUE;   // Hue (special color type)
+            case 2: return ParameterType::PARAM_UINT8; // EyeSize
+            case 3: return ParameterType::PARAM_UINT8; // FadeAmount
+            default: return ParameterType::PARAM_UINT8;
+        }
     }
 
     uint32_t getParameterDefault(uint8_t index) const override
     {
         switch (index)
         {
-            case 0: return 0;  // Speed (0 = auto)
+            case 0: return 20; // Speed (slow, smooth)
             case 1: return 0;  // Hue (red)
-            case 2: return 4;  // EyeSize
-            case 3: return 40; // FadeAmount
+            case 2: return 5;  // EyeSize
+            case 3: return 50; // FadeAmount
             default: return 0;
+        }
+    }
+
+    uint32_t getParameterMin(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 0; // Speed min (0=auto)
+            case 1: return 0; // Hue min
+            case 2: return 1; // EyeSize min (at least 1 LED)
+            case 3: return 1; // FadeAmount min
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMax(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 255; // Speed max
+            case 1: return 255; // Hue max
+            case 2: return 20;  // EyeSize max (max 20 LEDs)
+            case 3: return 255; // FadeAmount max
+            default: return 255;
         }
     }
 
     uint32_t getParameter(const Segment* segment, uint8_t index) const override
     {
         if (!segment) return 0;
-        const auto& cfg = segment->getConfig();
+        auto& config = segment->getConfig();
         switch (index)
         {
-            case 0: return cfg.speed;   // Speed
-            case 1: return cfg.option1; // Hue
-            case 2: return cfg.option2; // EyeSize
-            case 3: return cfg.option3; // FadeAmount
+            case 0: return config.speed;   // ← STANDARD MAPPING
+            case 1: return config.option1; // ← STANDARD MAPPING
+            case 2: return config.option2; // ← STANDARD MAPPING
+            case 3: return config.option3; // ← STANDARD MAPPING
             default: return 0;
         }
     }
@@ -89,14 +149,13 @@ class CylonEffect : public Effect
     void setParameter(Segment* segment, uint8_t index, uint32_t value) override
     {
         if (!segment) return;
-        auto& cfg = segment->getConfig();
+        auto& config = segment->getConfig();
         switch (index)
         {
-            case 0: cfg.speed = static_cast<uint8_t>(value); break;   // Speed
-            case 1: cfg.option1 = static_cast<uint8_t>(value); break; // Hue
-            case 2: cfg.option2 = static_cast<uint8_t>(value); break; // EyeSize
-            case 3: cfg.option3 = static_cast<uint8_t>(value); break; // FadeAmount
-            default: break;
+            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed (0=auto)
+            case 1: config.option1 = static_cast<uint8_t>(value); break; // Hue (0=red, 85=green, 170=blue)
+            case 2: config.option2 = static_cast<uint8_t>(value); break; // EyeSize (1-20 LEDs)
+            case 3: config.option3 = static_cast<uint8_t>(value); break; // FadeAmount (trail fade speed)
         }
     }
 

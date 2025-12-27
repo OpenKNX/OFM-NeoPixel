@@ -60,42 +60,12 @@ enum class GaragePhase : uint8_t
  *   effect.setPhase(GaragePhase::RUNWAY);   // Switch to runway
  *   effect.setPhase(GaragePhase::SUCCESS);  // Show success
  */
-/**
- * Config usage summary (per segment):
- *  - config.speed:     global speed scaling (0=auto/1.0x, otherwise 0.25x..3.0x)
- *  - config.intensity: master brightness scaling for all phase colors (0..255)
- *  - config.option1:   arrow size / trail length (0 = default)
- *  - config.option2:   runway group size (0 = default)
- *  - config.option3:   breathing speed override (0 = default)
- *  - config.reverse:   reverse direction (arrows move inward, runway moves backward)
- *  - config.feature1..3: currently unused (reserved)
- */
 class GarageDoorEffect : public Effect
 {
   private:
     // =============================================================================
     // Configuration (setters available) - SHARED across all segments
     // =============================================================================
-
-    // Helper: map config.speed (0..255) to a multiplier for pixel-per-frame speeds
-    static float speedMultiplierFromConfig(uint8_t speed)
-    {
-        if (speed == 0) return 1.0f;             // keep existing auto-scaling
-        return 0.25f + (speed / 255.0f) * 2.75f; // 0.25x .. 3.0x
-    }
-
-    static uint8_t clampU8(uint8_t v, uint8_t lo, uint8_t hi)
-    {
-        return (v < lo) ? lo : (v > hi) ? hi
-                                        : v;
-    }
-
-    static float dtFactorFromMs(uint32_t deltaTime)
-    {
-        // Existing effect speeds were tuned for ~20 FPS (~50ms). Scale to be frame-rate independent.
-        if (deltaTime == 0) return 1.0f;
-        return (float)deltaTime / 50.0f;
-    }
 
     // Phase 1: Opening Arrow
     uint8_t _arrowSize = 6;                // Arrow eye size (trail length)
@@ -134,9 +104,151 @@ class GarageDoorEffect : public Effect
     /**
      * Get effect name
      */
-    const char* getName() override { return "GarageDoor"; }
+    const char* getName(const char* lang = nullptr) override { return "GarageDoor"; }
 
-    const char* getDescription() override { return "Opening/closing garage door animation"; }
+    const char* getDescription(const char* lang = nullptr) override { return "Opening/closing garage door animation"; }
+
+    // ====================================================================
+    // Parameter API
+    // ====================================================================
+    uint8_t getParameterCount() const override { return 8; }
+
+    const char* getParameterName(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return "Phase";
+            case 1: return "ArrowSize";
+            case 2: return "ArrowSpeed";
+            case 3: return "RunwayGroupSize";
+            case 4: return "RunwaySpeed";
+            case 5: return "BreathingSpeed";
+            case 6: return "OpeningDuration";
+            case 7: return "RunwayDuration";
+            default: return nullptr;
+        }
+    }
+
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN(
+                "Phase (0=Opening, 1=Runway, 2=Breathing)",
+                "Phase (0=Opening, 1=Runway, 2=Breathing)");
+            case 1: return PARAM_DESC_DE_EN(
+                "Pfeilgröße bei Opening-Phase",
+                "Arrow size in Opening phase");
+            case 2: return PARAM_DESC_DE_EN(
+                "Pfeilgeschwindigkeit (0=auto, höher=schneller)",
+                "Arrow speed (0=auto, higher=faster)");
+            case 3: return PARAM_DESC_DE_EN(
+                "LED-Gruppengröße bei Runway-Phase",
+                "LED group size in Runway phase");
+            case 4: return PARAM_DESC_DE_EN(
+                "Runway-Geschwindigkeit (0=auto, höher=schneller)",
+                "Runway speed (0=auto, higher=faster)");
+            case 5: return PARAM_DESC_DE_EN(
+                "Atemgeschwindigkeit bei Breathing-Phase",
+                "Breathing speed in Breathing phase");
+            case 6: return PARAM_DESC_DE_EN(
+                "Opening-Dauer in Sekunden (0=endlos)",
+                "Opening duration in seconds (0=infinite)");
+            case 7: return PARAM_DESC_DE_EN(
+                "Runway-Dauer in Sekunden (0=endlos)",
+                "Runway duration in seconds (0=infinite)");
+            default: return nullptr;
+        }
+    }
+
+    ParameterType getParameterType(uint8_t index) const override
+    {
+        return ParameterType::PARAM_UINT8;
+    }
+
+    uint32_t getParameterDefault(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 0;   // Phase (Opening)
+            case 1: return 6;   // ArrowSize
+            case 2: return 128; // ArrowSpeed (normal)
+            case 3: return 1;   // RunwayGroupSize
+            case 4: return 128; // RunwaySpeed (normal)
+            case 5: return 50;  // BreathingSpeed
+            case 6: return 0;   // OpeningDuration (infinite)
+            case 7: return 0;   // RunwayDuration (infinite)
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMin(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 0; // Phase min (Opening)
+            case 1: return 1; // ArrowSize min
+            case 2: return 0; // ArrowSpeed min (0=auto)
+            case 3: return 1; // RunwayGroupSize min
+            case 4: return 0; // RunwaySpeed min (0=auto)
+            case 5: return 1; // BreathingSpeed min
+            case 6: return 0; // OpeningDuration min (0=infinite)
+            case 7: return 0; // RunwayDuration min (0=infinite)
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMax(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 2;   // Phase max (Breathing)
+            case 1: return 20;  // ArrowSize max
+            case 2: return 255; // ArrowSpeed max
+            case 3: return 10;  // RunwayGroupSize max
+            case 4: return 255; // RunwaySpeed max
+            case 5: return 255; // BreathingSpeed max
+            case 6: return 60;  // OpeningDuration max (60 seconds)
+            case 7: return 60;  // RunwayDuration max (60 seconds)
+            default: return 255;
+        }
+    }
+
+    uint32_t getParameter(const Segment* segment, uint8_t index) const override
+    {
+        if (!segment) return 0;
+        auto& config = segment->getConfig();
+        switch (index)
+        {
+            case 0: return config.mode;          // Phase
+            case 1: return config.option1;       // ArrowSize
+            case 2: return config.option2;       // ArrowSpeed
+            case 3: return config.option3;       // RunwayGroupSize
+            case 4: return config.count;         // RunwaySpeed
+            case 5: return config.fade;          // BreathingSpeed
+            case 6: return config.legacyOption1; // OpeningDuration (uint32_t)
+            case 7: return config.legacyOption2; // RunwayDuration (uint32_t)
+            default: return 0;
+        }
+    }
+
+    void setParameter(Segment* segment, uint8_t index, uint32_t value) override
+    {
+        if (!segment) return;
+        auto& config = segment->getConfig();
+        switch (index)
+        {
+            case 0: config.mode = static_cast<uint8_t>(value); break;    // Phase (0=arrow, 1=runway, 2=breathing)
+            case 1: config.option1 = static_cast<uint8_t>(value); break; // ArrowSize (1-20)
+            case 2: config.option2 = static_cast<uint8_t>(value); break; // ArrowSpeed
+            case 3: config.option3 = static_cast<uint8_t>(value); break; // RunwayGroupSize (1-10)
+            case 4: config.count = static_cast<uint8_t>(value); break;   // RunwaySpeed
+            case 5: config.fade = static_cast<uint8_t>(value); break;    // BreathingSpeed
+            case 6: config.legacyOption1 = value; break;                 // OpeningDuration (seconds, uint32_t)
+            case 7: config.legacyOption2 = value; break;                 // RunwayDuration (seconds, uint32_t)
+            default: break;
+        }
+    }
     /**
      * Update effect - called every frame
      */
@@ -145,12 +257,25 @@ class GarageDoorEffect : public Effect
         if (!segment) return;
 
         auto& state = segment->getState();
+        auto& config = segment->getConfig();
 
-        // Initialize phase on first run (if never set)
-        if (state.lastUpdate == 0)
+        // Read parameters from config
+        GaragePhase desiredPhase = (GaragePhase)config.mode; // Phase parameter
+        _arrowSize = config.option1 > 0 ? config.option1 : 6;
+        uint8_t arrowSpeedParam = config.option2;
+        _arrowSpeed = (arrowSpeedParam == 0) ? 0.0f : (arrowSpeedParam / 128.0f);
+        _runwayGroupSize = config.option3 > 0 ? config.option3 : 1;
+        uint8_t runwaySpeedParam = config.count;
+        _runwaySpeed = (runwaySpeedParam == 0) ? 0.0f : (runwaySpeedParam / 128.0f);
+        _breathingSpeed = (config.fade / 1000.0f);      // Scale 1-255 to 0.001-0.255
+        _openingDuration = config.legacyOption1 * 1000; // Convert seconds to ms
+        _runwayDuration = config.legacyOption2 * 1000;  // Convert seconds to ms
+
+        // Initialize phase on first run or if phase changed
+        if (state.lastUpdate == 0 || state.phase != (uint8_t)desiredPhase)
         {
-            state.phase = (uint8_t)GaragePhase::STOPPED;
-            state.lastUpdate = 1; // Mark as initialized
+            setSegmentPhase(segment, desiredPhase);
+            state.lastUpdate = 1;
         }
 
         // Get current phase from segment state (stateless design!)
@@ -378,15 +503,6 @@ class GarageDoorEffect : public Effect
         auto& state = segment->getState();
         uint16_t length = segment->getLength();
         uint16_t center = length / 2;
-        const auto& cfg = segment->getConfig();     // Snapshot config
-        const uint8_t cfgSpeed = cfg.speed;         // speed (0=auto)
-        const uint8_t cfgIntensity = cfg.intensity; // master brightness scaling (0..255)
-        const uint8_t cfgArrowSize = cfg.option1;   // arrow size (0=default)
-        const bool reverseDir = (cfg.reverse != 0); // reverse direction
-
-        const uint8_t arrowSize = (cfgArrowSize == 0) ? _arrowSize : clampU8(cfgArrowSize, 1, 50);
-        const float speedMul = speedMultiplierFromConfig(cfgSpeed);
-        const float dtMul = dtFactorFromMs(deltaTime);
 
         // Calculate effective speed
         float effectiveSpeed = _arrowSpeed;
@@ -397,9 +513,6 @@ class GarageDoorEffect : public Effect
             effectiveSpeed = (float)length / 100.0f;
             if (effectiveSpeed < 1.0f) effectiveSpeed = 1.0f; // Minimum 1 pixel/frame
         }
-
-        effectiveSpeed *= speedMul;
-        effectiveSpeed *= dtMul;
 
         // Initialize on first run OR when returning to this phase
         if (state.counter == 0)
@@ -434,37 +547,25 @@ class GarageDoorEffect : public Effect
             arrowG = segment->getConfig().g();
             arrowB = segment->getConfig().b();
             arrowW = segment->getConfig().w();
-
-            // Apply master intensity scaling (0..255)
-            arrowR = FastLEDMath::scale8(arrowR, cfgIntensity);
-            arrowG = FastLEDMath::scale8(arrowG, cfgIntensity);
-            arrowB = FastLEDMath::scale8(arrowB, cfgIntensity);
-            arrowW = FastLEDMath::scale8(arrowW, cfgIntensity);
         }
 
-        // Current arrow positions: distance from center (0..maxDist)
-        // For even lengths, maxDist is reduced by 1 so the right side stays within [0..length-1].
-        float maxDist = (float)center;
-        if ((center * 2) == length && maxDist > 0.0f) maxDist -= 1.0f;
-
-        float dist = reverseDir ? (maxDist - (float)state.position) : (float)state.position;
-        if (dist < 0.0f) dist = 0.0f;
-
-        float leftPos = (float)center - dist;
-        float rightPos = (float)center + dist;
+        // Current arrow positions: both start at center, move outward
+        // state.position represents distance from center (0 = at center, grows outward)
+        float leftPos = (float)center - (float)state.position;  // Move left
+        float rightPos = (float)center + (float)state.position; // Move right
 
         // Draw left arrow (moving left from center)
-        drawArrowEye(segment, leftPos, arrowR, arrowG, arrowB, arrowW, arrowSize);
+        drawArrowEye(segment, leftPos, arrowR, arrowG, arrowB, arrowW);
 
         // Draw right arrow (moving right from center)
-        drawArrowEye(segment, rightPos, arrowR, arrowG, arrowB, arrowW, arrowSize);
+        drawArrowEye(segment, rightPos, arrowR, arrowG, arrowB, arrowW);
 
         // Move arrows outward
         float newPos = (float)state.position + effectiveSpeed;
         state.position = (uint16_t)newPos;
 
         // Loop: When arrows reach edges, restart from center
-        if (state.position >= (uint16_t)center)
+        if (state.position >= center)
         {
             state.position = 0; // Restart animation (loop)
             state.counter = 0;  // Trigger re-init next frame
@@ -474,23 +575,23 @@ class GarageDoorEffect : public Effect
     /**
      * Draw arrow eye with trail at given position
      */
-    void drawArrowEye(Segment* segment, float position, uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint8_t arrowSize)
+    void drawArrowEye(Segment* segment, float position, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
     {
         uint16_t length = segment->getLength();
         uint16_t pixelPos = (uint16_t)position;
 
-        for (uint8_t i = 0; i < arrowSize; i++)
+        for (uint8_t i = 0; i < _arrowSize; i++)
         {
-            int16_t pos = pixelPos + i - (arrowSize / 2);
+            int16_t pos = pixelPos + i - (_arrowSize / 2);
             if (pos >= 0 && pos < length)
             {
                 // Calculate brightness falloff for smooth eye
                 uint8_t brightness = 255;
-                if (i == 0 || i == arrowSize - 1)
+                if (i == 0 || i == _arrowSize - 1)
                 {
                     brightness = 128; // Dimmer edges
                 }
-                else if (i == 1 || i == arrowSize - 2)
+                else if (i == 1 || i == _arrowSize - 2)
                 {
                     brightness = 200; // Medium edges
                 }
@@ -525,15 +626,6 @@ class GarageDoorEffect : public Effect
     {
         auto& state = segment->getState();
         uint16_t length = segment->getLength();
-        const auto& cfg = segment->getConfig();
-        const uint8_t cfgSpeed = cfg.speed;         // speed (0=auto)
-        const uint8_t cfgIntensity = cfg.intensity; //  master brightness scaling (0..255)
-        const uint8_t cfgGroupSize = cfg.option2;   // runway group size (0=default)
-        const bool reverseDir = (cfg.reverse != 0); // reverse direction
-
-        const uint8_t groupSize = (cfgGroupSize == 0) ? _runwayGroupSize : clampU8(cfgGroupSize, 1, 20);
-        const float speedMul = speedMultiplierFromConfig(cfgSpeed);
-        const float dtMul = dtFactorFromMs(deltaTime);
 
         // Calculate effective speed
         float effectiveSpeed = _runwaySpeed;
@@ -554,9 +646,6 @@ class GarageDoorEffect : public Effect
                 effectiveSpeed = (float)length / 50.0f;
                 if (effectiveSpeed < 1.0f) effectiveSpeed = 1.0f; // Minimum 1 pixel/frame
             }
-
-            effectiveSpeed *= speedMul;
-            effectiveSpeed *= dtMul;
         }
 
         // Initialize on first run OR when returning to this phase
@@ -582,26 +671,21 @@ class GarageDoorEffect : public Effect
             runwayG = segment->getConfig().g();
             runwayB = segment->getConfig().b();
             runwayW = segment->getConfig().w();
-
-            // Apply master intensity scaling (0..255)
-            runwayR = FastLEDMath::scale8(runwayR, cfgIntensity);
-            runwayG = FastLEDMath::scale8(runwayG, cfgIntensity);
-            runwayB = FastLEDMath::scale8(runwayB, cfgIntensity);
-            runwayW = FastLEDMath::scale8(runwayW, cfgIntensity);
         }
 
         // Draw runway wave
         uint16_t wavePos = state.position;
-        for (uint8_t g = 0; g < groupSize; g++)
+        for (uint8_t g = 0; g < _runwayGroupSize; g++)
         {
-            uint16_t pos = reverseDir ? (uint16_t)((wavePos + length - (g % length)) % length) : (uint16_t)((wavePos + g) % length);
+            uint16_t pos = wavePos + g;
+            if (pos < length)
             {
                 // Brightness gradient within group
                 uint8_t brightness = 255;
-                if (groupSize > 1)
+                if (_runwayGroupSize > 1)
                 {
                     // Center of group brightest
-                    float centerOffset = abs((float)g - (float)groupSize / 2.0f);
+                    float centerOffset = abs((float)g - (float)_runwayGroupSize / 2.0f);
                     brightness = 255 - (uint8_t)(centerOffset * 40);
                 }
 
@@ -622,16 +706,15 @@ class GarageDoorEffect : public Effect
             }
         }
 
-        // Move wave (direction + frame-rate independent)
-        float posF = (float)state.position;
-        posF += reverseDir ? -effectiveSpeed : effectiveSpeed;
+        // Move wave forward
+        float newPos = (float)state.position + effectiveSpeed;
+        state.position = (uint16_t)newPos;
 
-        while (posF < 0.0f)
-            posF += (float)length;
-        while (posF >= (float)length)
-            posF -= (float)length;
-
-        state.position = (uint16_t)posF;
+        // Wrap around or stop at end
+        if (state.position >= length)
+        {
+            state.position = 0; // Restart from beginning (loop)
+        }
     }
 
     /**
@@ -646,21 +729,6 @@ class GarageDoorEffect : public Effect
     {
         auto& state = segment->getState();
         uint16_t length = segment->getLength();
-        // Snapshot config (stable within this update call)
-        const auto& cfg = segment->getConfig();
-        const uint8_t cfgSpeed = cfg.speed;         // speed (0=auto)
-        const uint8_t cfgIntensity = cfg.intensity; // master brightness scaling (0..255)
-        const uint8_t cfgBreathOpt = cfg.option3;   // breathing speed override (0=default)
-
-        const float speedMul = speedMultiplierFromConfig(cfgSpeed);
-        const float dtMul = dtFactorFromMs(deltaTime);
-
-        // Breathing speed override via option3 (0=default). Interpreted as degrees per frame / 10.
-        float breathingSpeed = _breathingSpeed;
-        if (cfgBreathOpt != 0)
-            breathingSpeed = (float)cfgBreathOpt / 10.0f;
-        breathingSpeed *= speedMul;
-        breathingSpeed *= dtMul;
 
         // Extract RGBW color - use segment color if effect color not set
         uint8_t successR = (_successColorRGBW >> 24) & 0xFF;
@@ -675,12 +743,6 @@ class GarageDoorEffect : public Effect
             successG = segment->getConfig().g();
             successB = segment->getConfig().b();
             successW = segment->getConfig().w();
-
-            // Apply master intensity scaling (0..255)
-            successR = FastLEDMath::scale8(successR, cfgIntensity);
-            successG = FastLEDMath::scale8(successG, cfgIntensity);
-            successB = FastLEDMath::scale8(successB, cfgIntensity);
-            successW = FastLEDMath::scale8(successW, cfgIntensity);
         }
 
         // Calculate breathing brightness (sine wave)
@@ -710,8 +772,8 @@ class GarageDoorEffect : public Effect
         }
 
         // Advance breathing angle
-        state.aux2 += (uint16_t)(breathingSpeed * 100.0f); // Scale for integer storage
-        if (state.aux2 >= 36000) state.aux2 = 0;           // Wrap at 360 degrees (scaled by 100)
+        state.aux2 += (uint16_t)(_breathingSpeed * 100.0f); // Scale for integer storage
+        if (state.aux2 >= 36000) state.aux2 = 0;            // Wrap at 360 degrees (scaled by 100)
     }
 
     /**

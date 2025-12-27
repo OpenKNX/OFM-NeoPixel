@@ -35,8 +35,8 @@ class JuggleEffect : public Effect
   public:
     JuggleEffect() = default;
 
-    const char* getName() override { return "Juggle"; }
-    const char* getDescription() override { return "Multiple colored dots bouncing and fading"; }
+    const char* getName(const char* lang = nullptr) override { return "Juggle"; }
+    const char* getDescription(const char* lang = nullptr) override { return "Multiple colored dots bouncing and fading"; }
 
     // ====================================================================
     // Parameter API
@@ -89,14 +89,14 @@ class JuggleEffect : public Effect
     void setParameter(Segment* segment, uint8_t index, uint32_t value) override
     {
         if (!segment) return;
-        auto& cfg = segment->getConfig();
+        auto& config = segment->getConfig();
 
         switch (index)
         {
-            case 0: cfg.speed = static_cast<uint8_t>(value); break;
-            case 1: cfg.option1 = static_cast<uint8_t>(value); break;
-            case 2: cfg.option2 = static_cast<uint8_t>(value); break;
-            case 3: cfg.option3 = static_cast<uint8_t>(value); break;
+            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed (juggle rate)
+            case 1: config.option1 = static_cast<uint8_t>(value); break; // NumDots (number of dots)
+            case 2: config.option2 = static_cast<uint8_t>(value); break; // FadeSpeed
+            case 3: config.option3 = static_cast<uint8_t>(value); break; // HueOffset (color shift)
             default: break;
         }
     }

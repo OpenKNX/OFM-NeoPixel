@@ -27,8 +27,8 @@ class BPMEffect : public Effect
   public:
     BPMEffect() = default;
 
-    const char* getName() override { return "BPM"; }
-    const char* getDescription() override { return "Beats per minute - pulsing colored waves"; }
+    const char* getName(const char* lang = nullptr) override { return "BPM"; }
+    const char* getDescription(const char* lang = nullptr) override { return "Beats per minute - pulsing colored waves"; }
 
     // ====================================================================
     // Parameter API
@@ -75,18 +75,18 @@ class BPMEffect : public Effect
     void setParameter(Segment* segment, uint8_t index, uint32_t value) override
     {
         if (!segment) return;
-        auto& cfg = segment->getConfig();
-        auto& st = segment->getState();
+        auto& config = segment->getConfig();
+        auto& state = segment->getState();
 
         switch (index)
         {
             case 0:
-                cfg.speed = static_cast<uint8_t>(value); // BPM
+                config.speed = static_cast<uint8_t>(value); // BPM (beats per minute)
                 break;
 
             case 1:
-                cfg.option1 = static_cast<uint8_t>(value); // Base Hue
-                st.position = 0;                           // restart hue drift so parameter stays the base
+                config.option1 = static_cast<uint8_t>(value); // Base Hue
+                state.position = 0;                           // restart hue drift so parameter stays the base
                 break;
 
             default:

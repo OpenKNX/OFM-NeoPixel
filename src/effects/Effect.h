@@ -20,7 +20,45 @@
 
 #include "ParameterType.h"
 #include <stdint.h>
+#include <string.h>
 
+// ====================================================================
+// Multi-Language Helper Macro
+// ====================================================================
+/**
+ * @brief Helper macro for multi-language parameter descriptions
+ * @param de_text German text
+ * @param en_text English text
+ * @return Selected text based on language parameter
+ *
+ * Usage:
+ *   return PARAM_DESC_DE_EN("Deutscher Text", "English text");
+ */
+#define PARAM_DESC_DE_EN(de_text, en_text) \
+    (lang && strcmp(lang, "de") == 0 ? (de_text) : (en_text))
+/**
+ * Macro for multi-language effect names
+ * @param de_name German effect name
+ * @param en_name English effect name
+ * @return Selected name based on language parameter
+ *
+ * Usage:
+ *   return EFFECT_NAME_DE_EN("Feuer", "Fire");
+ */
+#define EFFECT_NAME_DE_EN(de_name, en_name) \
+    (lang && strcmp(lang, "de") == 0 ? (de_name) : (en_name))
+
+/**
+ * Macro for multi-language effect descriptions
+ * @param de_desc German effect description
+ * @param en_desc English effect description
+ * @return Selected description based on language parameter
+ *
+ * Usage:
+ *   return EFFECT_DESC_DE_EN("Deutscher Text", "English text");
+ */
+#define EFFECT_DESC_DE_EN(de_desc, en_desc) \
+    (lang && strcmp(lang, "de") == 0 ? (de_desc) : (en_desc))
 // Forward declaration
 class Segment;
 
@@ -33,14 +71,30 @@ class Effect
     /**
      * Virtual Destructor
      */
-    virtual ~Effect() {}
+    virtual ~Effect() = default;
 
     /**
-     * @brief Update effect - STATELESS
-     *
-     * Reads config from segment->getConfig()
-     * Reads/writes state from segment->getState()
-     * Writes pixels with segment->setPixel()
+     * Get effect name
+     * @param lang Language code ("de" or "en"), nullptr for default (English)
+     * @return Human-readable effect name
+     */
+    virtual const char* getName(const char* lang = nullptr)
+    {
+        return lang && strcmp(lang, "de") == 0 ? "Unbekannt" : "Unknown";
+    }
+
+    /**
+     * Get effect description
+     * @param lang Language code ("de" or "en"), nullptr for default (English)
+     * @return Brief description of what the effect does
+     */
+    virtual const char* getDescription(const char* lang = nullptr)
+    {
+        return lang && strcmp(lang, "de") == 0 ? "Keine Beschreibung" : "No description";
+    }
+
+    /**
+     * Update effect animation
      *
      * @param segment The segment to animate (contains config & state)
      * @param deltaTime Time difference since last update in ms
@@ -51,18 +105,6 @@ class Effect
      * Reset effect state (for stateful effects)
      */
     virtual void reset() {}
-
-    /**
-     * Get effect name
-     * @return Human-readable effect name
-     */
-    virtual const char* getName() { return "Unknown"; }
-
-    /**
-     * Get effect description
-     * @return Brief description of what the effect does
-     */
-    virtual const char* getDescription() { return "No description"; }
 
     /**
      * @brief Check if effect is done
@@ -108,6 +150,28 @@ class Effect
      * @return Default value (packed in uint32_t)
      */
     virtual uint32_t getParameterDefault(uint8_t index) const { return 0; }
+
+    /**
+     * @brief Get parameter description (multi-language)
+     * @param index Parameter index (0..count-1)
+     * @param lang Language code ("de" or "en"), default: "de"
+     * @return Parameter description or nullptr
+     */
+    virtual const char* getParameterDescription(uint8_t index, const char* lang = "de") const { return nullptr; }
+
+    /**
+     * @brief Get parameter minimum value
+     * @param index Parameter index
+     * @return Minimum value (packed in uint32_t)
+     */
+    virtual uint32_t getParameterMin(uint8_t index) const { return 0; }
+
+    /**
+     * @brief Get parameter maximum value
+     * @param index Parameter index
+     * @return Maximum value (packed in uint32_t)
+     */
+    virtual uint32_t getParameterMax(uint8_t index) const { return 255; }
 
     /**
      * @brief Get parameter value from segment

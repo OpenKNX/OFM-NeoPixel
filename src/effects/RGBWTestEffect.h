@@ -24,17 +24,6 @@
 #include "FastLEDMath.h"
 #include "OpenKNX.h"
 
-/**
- * @brief RGBW test pattern for SK6812 (and similar)
- *
- * Uses config parameters (mainly for the rainbow+white phase):
- *  - config.intensity : overall brightness reference (used in rainbow/white)
- *  - config.speed     : hue rotation speed in PHASE_RAINBOW_WHITE (0 => default)
- *  - config.option1   : phase duration override in ms steps (0 => 5000ms, else option1*100ms)
- *  - config.reverse   : reverse rainbow direction in PHASE_RAINBOW_WHITE
- *  - config.feature2  : enable yellow brightness compensation (hsv2rgb_rainbow)
- *  - config.feature3  : enable green correction hooks (hsv2rgb_rainbow)
- */
 class RGBWTestEffect : public Effect
 {
   private:
@@ -59,24 +48,106 @@ class RGBWTestEffect : public Effect
   public:
     RGBWTestEffect() : _stateTime(0), _testPhase(0), _fadeValue(0), _fadeUp(true) {}
 
+    const char* getName(const char* lang = nullptr) override { return "RGBWTest"; }
+    const char* getDescription(const char* lang = nullptr) override { return "RGBW channel test pattern (8 phases)"; }
+
+    // ====================================================================
+    // Parameter API
+    // ====================================================================
+    uint8_t getParameterCount() const override { return 1; }
+
+    const char* getParameterName(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return "PhaseDuration";
+            default: return nullptr;
+        }
+    }
+
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN(
+                "Dauer jeder Testphase in Sekunden",
+                "Duration of each test phase in seconds");
+            default: return nullptr;
+        }
+    }
+
+    ParameterType getParameterType(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return ParameterType::PARAM_UINT8; // PhaseDuration
+            default: return ParameterType::PARAM_UINT8;
+        }
+    }
+
+    uint32_t getParameterDefault(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 5; // PhaseDuration (5 seconds)
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMin(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 1; // PhaseDuration min (1 second)
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMax(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 60; // PhaseDuration max (60 seconds)
+            default: return 255;
+        }
+    }
+
+    uint32_t getParameter(const Segment* segment, uint8_t index) const override
+    {
+        if (!segment) return 0;
+        auto& config = segment->getConfig();
+        switch (index)
+        {
+            case 0: return config.speed; // PhaseDuration
+            default: return 0;
+        }
+    }
+
+    void setParameter(Segment* segment, uint8_t index, uint32_t value) override
+    {
+        if (!segment) return;
+        auto& config = segment->getConfig();
+        switch (index)
+        {
+            case 0: config.speed = static_cast<uint8_t>(value); break; // PhaseDuration (1-60 seconds)
+            default: break;
+        }
+    }
+
     void update(Segment* segment, uint32_t deltaTime) override
     {
         if (!segment) return;
 
         auto& config = segment->getConfig();
-        const uint16_t length = segment->getLength();
-        const uint8_t intensityVal = config.intensity; // overall brightness reference
-        const uint8_t speedVal = config.speed;         // hue rotation speed in PHASE_RAINBOW_WHITE
-        const uint8_t opt1 = config.option1;           // phase duration override
-        const bool reverseDir = (config.reverse != 0); // reverse rainbow direction
-        const bool yellowBoost = config.feature2;      // enable yellow brightness compensation
-        const bool greenCorr = config.feature3;        // enable green correction hooks
+        uint16_t length = segment->getLength();
 
-        const uint32_t phaseDurationMs = (opt1 == 0) ? 5000UL : (uint32_t)opt1 * 100UL;
+        // Get phase duration parameter (1-60 seconds, default 5)
+        uint8_t phaseDurationSec = config.speed > 0 ? config.speed : 5;
+        uint32_t phaseDurationMs = phaseDurationSec * 1000;
 
         _stateTime += deltaTime;
 
-        // Switch phase every x seconds
+        // Switch phase when duration expires
         if (_stateTime >= phaseDurationMs)
         {
             _stateTime = 0;
@@ -91,35 +162,35 @@ class RGBWTestEffect : public Effect
         switch (_testPhase)
         {
             case PHASE_RED:
-                testPureColor(segment, length, intensityVal, 255, 0, 0, 0);
+                testPureColor(segment, length, 255, 0, 0, 0);
                 break;
 
             case PHASE_GREEN:
-                testPureColor(segment, length, intensityVal, 0, 255, 0, 0);
+                testPureColor(segment, length, 0, 255, 0, 0);
                 break;
 
             case PHASE_BLUE:
-                testPureColor(segment, length, intensityVal, 0, 0, 255, 0);
+                testPureColor(segment, length, 0, 0, 255, 0);
                 break;
 
             case PHASE_WHITE:
-                testPureColor(segment, length, intensityVal, 0, 0, 0, 255);
+                testPureColor(segment, length, 0, 0, 0, 255);
                 break;
 
             case PHASE_RGB_MIX:
-                testPureColor(segment, length, intensityVal, 255, 255, 255, 0);
+                testPureColor(segment, length, 255, 255, 255, 0);
                 break;
 
             case PHASE_RGBW_MIX:
-                testPureColor(segment, length, intensityVal, 128, 128, 128, 128);
+                testPureColor(segment, length, 128, 128, 128, 128);
                 break;
 
             case PHASE_WHITE_FADE:
-                testWhiteFade(segment, length, intensityVal, deltaTime);
+                testWhiteFade(segment, length, deltaTime);
                 break;
 
             case PHASE_RAINBOW_WHITE:
-                testRainbowWithWhite(segment, length, intensityVal, speedVal, reverseDir, yellowBoost, greenCorr);
+                testRainbowWithWhite(segment, length);
                 break;
         }
     }
@@ -132,28 +203,21 @@ class RGBWTestEffect : public Effect
         _fadeUp = true;
     }
 
-    const char* getName() override
-    {
-        return "RGBW_Test";
-    }
-
-    const char* getDescription() override
-    {
-        return "Test pattern for RGBW LED strips";
-    }
-
   private:
     /**
      * @brief Test pure color (one channel at a time)
      */
-    void testPureColor(Segment* segment, uint16_t length, uint8_t intensityVal,
+    void testPureColor(Segment* segment, uint16_t length,
                        uint8_t r, uint8_t g, uint8_t b, uint8_t w)
     {
+        auto& config = segment->getConfig();
+
         // Apply master brightness
-        r = FastLEDMath::scale8(r, intensityVal);
-        g = FastLEDMath::scale8(g, intensityVal);
-        b = FastLEDMath::scale8(b, intensityVal);
-        w = FastLEDMath::scale8(w, intensityVal);
+        r = FastLEDMath::scale8(r, config.intensity);
+        g = FastLEDMath::scale8(g, config.intensity);
+        b = FastLEDMath::scale8(b, config.intensity);
+        w = FastLEDMath::scale8(w, config.intensity);
+
         // Set all LEDs to same color
         for (uint16_t i = 0; i < length; i++)
         {
@@ -164,8 +228,10 @@ class RGBWTestEffect : public Effect
     /**
      * @brief Test white channel with fade
      */
-    void testWhiteFade(Segment* segment, uint16_t length, uint8_t intensityVal, uint32_t deltaTime)
+    void testWhiteFade(Segment* segment, uint16_t length, uint32_t deltaTime)
     {
+        auto& config = segment->getConfig();
+
         // Update fade value (2 steps per ms = 2 seconds full cycle)
         if (_fadeUp)
         {
@@ -190,7 +256,7 @@ class RGBWTestEffect : public Effect
         }
 
         // Apply brightness
-        uint8_t white = FastLEDMath::scale8(_fadeValue, intensityVal);
+        uint8_t white = FastLEDMath::scale8(_fadeValue, config.intensity);
 
         // All LEDs white with fade
         for (uint16_t i = 0; i < length; i++)
@@ -202,30 +268,25 @@ class RGBWTestEffect : public Effect
     /**
      * @brief Test rainbow with white background
      */
-    void testRainbowWithWhite(Segment* segment,
-                              uint16_t length,
-                              uint8_t intensityVal,
-                              uint8_t speedVal,
-                              bool reverseDir,
-                              bool yellowBoost,
-                              bool greenCorr)
+    void testRainbowWithWhite(Segment* segment, uint16_t length)
     {
-        // Hue step period in ms: 0 => legacy default (20ms). Higher speed => faster.
-        const uint16_t hueStepMs = (speedVal == 0) ? 20u : (uint16_t)(1u + (255u - speedVal));
-        const uint8_t hueOffset = (uint8_t)((_stateTime / hueStepMs) & 0xFF);
+        auto& config = segment->getConfig();
+
+        // Rotating hue
+        uint8_t hueOffset = (_stateTime / 20) % 256;
+
         for (uint16_t i = 0; i < length; i++)
         {
             // Rainbow color
-            const uint8_t posHue = (uint8_t)((uint32_t)i * 255u / length);
-            uint8_t hue = reverseDir ? (uint8_t)(hueOffset - posHue) : (uint8_t)(hueOffset + posHue);
-            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, intensityVal, yellowBoost, greenCorr);
+            uint8_t hue = hueOffset + (i * 255 / length);
+            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, config.intensity);
 
             uint8_t r = (rgb >> 16) & 0xFF;
             uint8_t g = (rgb >> 8) & 0xFF;
             uint8_t b = rgb & 0xFF;
 
             // Add white background (30% brightness)
-            uint8_t w = FastLEDMath::scale8(intensityVal, 77); // 77/255 ≈ 30%
+            uint8_t w = FastLEDMath::scale8(config.intensity, 77); // 77/255 ≈ 30%
 
             segment->setPixel(i, r, g, b, w);
         }

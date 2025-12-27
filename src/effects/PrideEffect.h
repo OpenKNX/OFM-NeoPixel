@@ -16,36 +16,96 @@
 #include "Effect.h"
 #include "FastLEDMath.h"
 
-// ====================================================================
-// Config usage:
-//   config.intensity  : master brightness (0..255)
-//   config.reverse    : reverse hue progression/direction
-//   config.feature2   : enable yellow brightness compensation (hsv2rgb_rainbow)
-//   config.feature3   : enable green correction hooks (hsv2rgb_rainbow)
-// ====================================================================
-
 class PrideEffect : public Effect
 {
   public:
     PrideEffect() = default;
 
-    const char* getName() override { return "Pride2015"; }
-    const char* getDescription() override { return "Rainbow colors with dynamic brightness waves"; }
+    const char* getName(const char* lang = nullptr) override { return "Pride2015"; }
+    const char* getDescription(const char* lang = nullptr) override { return "Rainbow colors with dynamic brightness waves"; }
 
     // ====================================================================
-    // Parameter API (Pride has no adjustable params - it's a fixed pattern)
+    // Parameter API
     // ====================================================================
-    uint8_t getParameterCount() const override { return 0; }
+    uint8_t getParameterCount() const override { return 1; }
 
-    const char* getParameterName(uint8_t index) const override { return nullptr; }
+    const char* getParameterName(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return "Speed";
+            default: return nullptr;
+        }
+    }
 
-    ParameterType getParameterType(uint8_t index) const override { return ParameterType::PARAM_UINT8; }
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN(
+                "Animationsgeschwindigkeit (höher=schneller)",
+                "Animation speed (higher=faster)");
+            default: return nullptr;
+        }
+    }
 
-    uint32_t getParameterDefault(uint8_t index) const override { return 0; }
+    ParameterType getParameterType(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return ParameterType::PARAM_UINT8; // Speed
+            default: return ParameterType::PARAM_UINT8;
+        }
+    }
 
-    uint32_t getParameter(const Segment* segment, uint8_t index) const override { return 0; }
+    uint32_t getParameterDefault(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 128; // Speed (normal)
+            default: return 0;
+        }
+    }
 
-    void setParameter(Segment* segment, uint8_t index, uint32_t value) override {}
+    uint32_t getParameterMin(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 1; // Speed min (must be > 0)
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMax(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 255; // Speed max
+            default: return 255;
+        }
+    }
+
+    uint32_t getParameter(const Segment* segment, uint8_t index) const override
+    {
+        if (!segment) return 0;
+        auto& config = segment->getConfig();
+        switch (index)
+        {
+            case 0: return config.speed; // Speed
+            default: return 0;
+        }
+    }
+
+    void setParameter(Segment* segment, uint8_t index, uint32_t value) override
+    {
+        if (!segment) return;
+        auto& config = segment->getConfig();
+        switch (index)
+        {
+            case 0: config.speed = static_cast<uint8_t>(value); break; // Speed (animation speed)
+            default: break;
+        }
+    }
 
     // ====================================================================
     // Update
@@ -55,13 +115,13 @@ class PrideEffect : public Effect
         if (!segment) return;
 
         auto& state = segment->getState();
+        auto& config = segment->getConfig();
+        uint16_t length = segment->getLength();
+        uint8_t masterBrightness = config.intensity;
 
-        const auto& config = segment->getConfig();
-        const uint16_t length = segment->getLength();
-        const uint8_t masterBrightness = config.intensity; // Master brightness (0..255)
-        const bool reverse = (config.reverse != 0);        // Reverse direction
-        const bool yellowBoost = config.feature2;          // Yellow brightness compensation
-        const bool greenCorr = config.feature3;            // Green correction hooks
+        // Get speed parameter (1-255, default 128)
+        uint8_t speed = config.speed > 0 ? config.speed : 128;
+        uint32_t scaledDeltaTime = (deltaTime * speed) / 128; // Scale deltaTime by speed
 
         // State stored in EffectState
         uint16_t pseudotime = state.position;
@@ -74,23 +134,13 @@ class PrideEffect : public Effect
 
         uint16_t hueinc16 = FastLEDMath::beatsin88(113, 1, 3000);
 
-        if (!reverse)
-        {
-            pseudotime += deltaTime * msmultiplier;
-            hue16 += deltaTime * FastLEDMath::beatsin88(400, 5, 9);
-        }
-        else
-        {
-            pseudotime -= deltaTime * msmultiplier;
-            hue16 -= deltaTime * FastLEDMath::beatsin88(400, 5, 9);
-        }
+        pseudotime += scaledDeltaTime * msmultiplier;
+        hue16 += scaledDeltaTime * FastLEDMath::beatsin88(400, 5, 9);
         uint16_t brightnesstheta16 = pseudotime;
 
         for (uint16_t i = 0; i < length; i++)
         {
-            if (!reverse) hue16 += hueinc16;
-            else
-                hue16 -= hueinc16;
+            hue16 += hueinc16;
             uint8_t hue8 = hue16 / 256;
 
             brightnesstheta16 += brightnessthetainc16;
@@ -102,7 +152,7 @@ class PrideEffect : public Effect
 
             bri8 = FastLEDMath::scale8(bri8, masterBrightness);
 
-            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue8, sat8, bri8, yellowBoost, greenCorr);
+            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue8, sat8, bri8);
 
             segment->setPixel(i,
                               (rgb >> 16) & 0xFF,

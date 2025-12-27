@@ -22,8 +22,8 @@
 class GradientEffect : public Effect
 {
   public:
-    const char* getName() override { return "Gradient"; }
-    const char* getDescription() override { return "Linear HSV gradient across the strip"; }
+    const char* getName(const char* lang = nullptr) override { return "Gradient"; }
+    const char* getDescription(const char* lang = nullptr) override { return "Linear HSV gradient across the strip"; }
 
     uint8_t getParameterCount() const override { return 4; }
     const char* getParameterName(uint8_t idx) const override
@@ -64,16 +64,16 @@ class GradientEffect : public Effect
         }
     }
 
-    void setParameter(Segment* segment, uint8_t idx, uint32_t value) override
+    void setParameter(Segment* segment, uint8_t index, uint32_t value) override
     {
         if (!segment) return;
-        auto& c = segment->getConfig();
-        switch (idx)
+        auto& config = segment->getConfig();
+        switch (index)
         {
-            case 0: c.speed = (uint8_t)value; break;
-            case 1: c.option1 = (uint8_t)value; break;
-            case 2: c.option2 = (uint8_t)value; break;
-            case 3: c.option3 = (uint8_t)value; break;
+            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed (animation speed)
+            case 1: config.option1 = static_cast<uint8_t>(value); break; // StartHue (start color)
+            case 2: config.option2 = static_cast<uint8_t>(value); break; // EndHue (end color)
+            case 3: config.option3 = static_cast<uint8_t>(value); break; // Saturation
             default: break;
         }
     }

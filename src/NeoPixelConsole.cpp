@@ -2445,7 +2445,7 @@ bool NeoPixel::processEffectsCommand()
     openknx.logger.color(0);
     openknx.logger.log("ID │ Name                      │ Description");
     openknx.logger.log("───┼───────────────────────────┼──────────────────────────────────────────");
-    
+
     // Dynamically list all effects from EffectPool
     uint8_t effectCount = EffectPool::getEffectCount();
     for (uint8_t i = 0; i < effectCount; i++)
@@ -2461,7 +2461,7 @@ bool NeoPixel::processEffectsCommand()
             openknx.logger.log(line);
         }
     }
-    
+
     printSectionSeparator();
     openknx.logger.log("");
     openknx.logger.log("Use 'neo effect <seg> <eff>' to assign");
@@ -2620,82 +2620,13 @@ bool NeoPixel::processEffectCommand(const std::string& args)
     const auto hasEffect = seg->hasEffect();
     if (action.compare("set") == 0)
     {
-        Effect* effect = nullptr;
-        switch (effId) // Get effect from pool - matches ETS enumeration values
-        {
-            case 0: // Solid
-                effect = EffectPool::getSolid();
-                break;
-            case 1: // Wipe
-                effect = EffectPool::getWipe();
-                break;
-            case 2: // Rainbow
-                effect = EffectPool::getRainbow();
-                break;
-            case 3: // Pride2015
-                effect = EffectPool::getPride();
-                break;
-            case 4: // Confetti
-                effect = EffectPool::getConfetti();
-                break;
-            case 5: // Juggle
-                effect = EffectPool::getJuggle();
-                break;
-            case 6: // BPM
-                effect = EffectPool::getBPM();
-                break;
-            case 7: // Cylon
-                effect = EffectPool::getCylon();
-                break;
-            case 8: // SK6812Test
-                effect = EffectPool::getRGBWTest();
-                break;
-            case 9: // GarageDoor
-                effect = EffectPool::getGarageDoor();
-                break;
-#ifndef NEOPIXEL_MINIMAL_EFFECTS
-            case 10: // Fire
-                effect = EffectPool::getFire();
-                break;
-            case 11: // Theater Chase
-                effect = EffectPool::getTheaterChase();
-                break;
-            case 12: // Theater Chase Rainbow
-                effect = EffectPool::getTheaterChaseRainbow();
-                break;
-            case 13: // Sinelon
-                effect = EffectPool::getSinelon();
-                break;
-            case 14: // Twinkle
-                effect = EffectPool::getTwinkle();
-                break;
-            case 15: // Sparkle
-                effect = EffectPool::getSparkle();
-                break;
-            case 16: // Breathing
-                effect = EffectPool::getBreathing();
-                break;
-            case 17: // Strobe
-                effect = EffectPool::getStrobe();
-                break;
-            case 18: // Pulse
-                effect = EffectPool::getPulse();
-                break;
-            case 19: // Comet
-                effect = EffectPool::getComet();
-                break;
-            case 20: // Meteor
-                effect = EffectPool::getMeteor();
-                break;
-#endif
-            default:
-                openknx.logger.logWithValues("ERROR: Effect ID %d not found!", effId);
-                openknx.logger.log("       Use 'neo effects' to see available effects");
-                return true;
-        }
+        // Get effect dynamically from pool by index
+        Effect* effect = EffectPool::getEffectByIndex(effId);
+
         if (!effect)
         {
-            openknx.logger.log("ERROR: Failed to get effect from pool!");
+            openknx.logger.logWithValues("ERROR: Effect ID %d not found!", effId);
+            openknx.logger.log("       Use 'neo effects' to see available effects");
             return true;
         }
 
@@ -3229,22 +3160,25 @@ void NeoPixel::printSectionSeparator()
 void NeoPixel::printHelpSectionHeader(const char* title)
 {
     // Dynamic header width calculation to avoid buffer overflow
-    const int totalWidth = 77;  // Max console width (safe buffer size)
+    const int totalWidth = 77; // Max console width (safe buffer size)
     int titleLen = strlen(title);
-    int sidesWidth = totalWidth - titleLen - 2;  // 2 spaces around title
+    int sidesWidth = totalWidth - titleLen - 2; // 2 spaces around title
     int leftWidth = sidesWidth / 2;
     int rightWidth = sidesWidth - leftWidth;
-    
+
     // Build header with dynamic border
     char header[80];
     int pos = 0;
-    for (int i = 0; i < leftWidth && pos < 79; i++) header[pos++] = '=';
+    for (int i = 0; i < leftWidth && pos < 79; i++)
+        header[pos++] = '=';
     if (pos < 79) header[pos++] = ' ';
-    for (int i = 0; i < titleLen && pos < 79; i++) header[pos++] = title[i];
+    for (int i = 0; i < titleLen && pos < 79; i++)
+        header[pos++] = title[i];
     if (pos < 79) header[pos++] = ' ';
-    for (int i = 0; i < rightWidth && pos < 79; i++) header[pos++] = '=';
+    for (int i = 0; i < rightWidth && pos < 79; i++)
+        header[pos++] = '=';
     header[pos] = '\0';
-    
+
     openknx.logger.log("");
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
     openknx.logger.log(header);
@@ -3952,14 +3886,14 @@ bool NeoPixel::processPhysConfigDummyCommand(uint32_t stripId, uint8_t mode)
         openknx.logger.log("");
         openknx.logger.log("  Or: Simply restart the device after setting this value.");
         openknx.logger.log("");
-        
+
         // Still set the mode in config so it's applied on next restart/recreation
         spiCfg->setDummyLedMode(mode);
         openknx.logger.logWithValues("Dummy LED mode set to: %d (%s) - will take effect on next strip creation",
-                                      mode, mode == 0 ? "None" : (mode == 1 ? "Physical" : "Virtual"));
+                                     mode, mode == 0 ? "None" : (mode == 1 ? "Physical" : "Virtual"));
         return true;
     }
-    
+
     // Strip not initialized yet - we can safely change the mode
     spiCfg->setDummyLedMode(mode);
     if (!strip->applyConfig())
@@ -3969,8 +3903,8 @@ bool NeoPixel::processPhysConfigDummyCommand(uint32_t stripId, uint8_t mode)
     }
 
     openknx.logger.logWithValues("Dummy LED mode set to: %d (%s)",
-                                          mode,
-                                          mode == 0 ? "None" : (mode == 1 ? "Physical" : "Virtual"));
+                                 mode,
+                                 mode == 0 ? "None" : (mode == 1 ? "Physical" : "Virtual"));
     openknx.logger.log("SUCCESS: Config applied - strip will use this mode when initialized");
 
     return true;

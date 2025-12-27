@@ -23,8 +23,17 @@
 class LightningEffect : public Effect
 {
   public:
-    const char* getName() override { return "Lightning"; }
-    const char* getDescription() override { return "Random lightning strikes with flash + decay"; }
+    const char* getName(const char* lang = nullptr) override
+    {
+        return EFFECT_NAME_DE_EN("Blitz", "Lightning");
+    }
+
+    const char* getDescription(const char* lang = nullptr) override
+    {
+        return EFFECT_DESC_DE_EN(
+            "Zufällige Blitzeinschläge mit kurzen Lichtblitzen und Abklingeffekt. Simuliert realistische Gewitterblitze mit einstellbarer Häufigkeit, Breite und Helligkeit.",
+            "Random lightning strikes with brief flashes and decay effect. Simulates realistic thunderstorm lightning with adjustable frequency, width and brightness.");
+    }
 
     uint8_t getParameterCount() const override { return 4; }
     const char* getParameterName(uint8_t idx) const override
@@ -38,6 +47,27 @@ class LightningEffect : public Effect
             default: return nullptr;
         }
     }
+
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN(
+                "Geschwindigkeit: Häufigkeit der Blitzeinschläge (0=selten, 255=sehr häufig). Niedrige Werte erzeugen seltene, dramatische Blitze.",
+                "Speed: Strike frequency (0=rare, 255=very frequent). Low values create rare, dramatic lightning strikes.");
+            case 1: return PARAM_DESC_DE_EN(
+                "Breite: Ausdehnung des Blitzes in LEDs (0=automatisch). Höhere Werte erzeugen breitere, diffusere Lichtbögen.",
+                "Width: Lightning bolt width in LEDs (0=automatic). Higher values create wider, more diffuse light arcs.");
+            case 2: return PARAM_DESC_DE_EN(
+                "Abklingzeit: Geschwindigkeit des Helligkeitsabfalls nach dem Blitz (0=Standard, höher=schneller). Steuert wie lange der Nachglüh-Effekt sichtbar bleibt.",
+                "Decay: Brightness fade speed after strike (0=default, higher=faster). Controls how long the afterglow effect remains visible.");
+            case 3: return PARAM_DESC_DE_EN(
+                "Farbton: HSV-Farbwert für farbige Blitze (0-255, nur aktiv mit Feature 1). 0=rot, 85=grün, 170=blau. Für weiße Blitze Feature 1 deaktivieren.",
+                "Hue: HSV color value for colored lightning (0-255, only active with Feature 1). 0=red, 85=green, 170=blue. Disable Feature 1 for white lightning.");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t) const override { return ParameterType::PARAM_UINT8; }
     uint32_t getParameterDefault(uint8_t idx) const override
     {
@@ -65,16 +95,16 @@ class LightningEffect : public Effect
         }
     }
 
-    void setParameter(Segment* segment, uint8_t idx, uint32_t value) override
+    void setParameter(Segment* segment, uint8_t index, uint32_t value) override
     {
         if (!segment) return;
-        auto& c = segment->getConfig();
-        switch (idx)
+        auto& config = segment->getConfig();
+        switch (index)
         {
-            case 0: c.speed = (uint8_t)value; break;
-            case 1: c.option1 = (uint8_t)value; break;
-            case 2: c.option2 = (uint8_t)value; break;
-            case 3: c.option3 = (uint8_t)value; break;
+            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed (strike frequency)
+            case 1: config.option1 = static_cast<uint8_t>(value); break; // Width (bolt width)
+            case 2: config.option2 = static_cast<uint8_t>(value); break; // Decay (fade speed)
+            case 3: config.option3 = static_cast<uint8_t>(value); break; // Hue (lightning color)
             default: break;
         }
     }

@@ -184,8 +184,9 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     if (colorOrder == ColorOrder::NONE)
     {
         // Protocol defaults: APA102=BGR, APA102_CLONE=BGR, SK9822=RGB
-        _inst->colorOrder = (protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE) 
-                            ? ColorOrder::BGR : ColorOrder::RGB;
+        _inst->colorOrder = (protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE)
+                                ? ColorOrder::BGR
+                                : ColorOrder::RGB;
     }
     else
     {
@@ -205,25 +206,25 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     _inst->endFramePattern = 0x00;  // End frame pattern: 0x00 = APA102, 0xFF = SK9822
     _inst->detectedChip = protocol; // Start with user-provided protocol
     _inst->autoDetectChip = false;  // Chip auto-detection disabled by default
-    
+
     // Protocol-specific defaults (safe ranges for clone chips)
     if (protocol == LedProtocol::APA102_CLONE)
     {
         // Clone chips: Safe ranges to prevent flicker and sync issues
-        _inst->minRgbValue = 8;         // RGB < 8 doesn't update on clones
-        _inst->maxRgbValue = 230;       // Upper limit to reduce power consumption (can via API if needed)
-        _inst->hwBrightnessMin = 16;    // Below 16 causes flicker on clones
-        _inst->hwBrightnessMax = 30;    // 31 breaks sync on some clones
-        _inst->hwBrightness = 16;       // Default: minimum safe value (conservative)
+        _inst->minRgbValue = 8;      // RGB < 8 doesn't update on clones
+        _inst->maxRgbValue = 230;    // Upper limit to reduce power consumption (can via API if needed)
+        _inst->hwBrightnessMin = 16; // Below 16 causes flicker on clones
+        _inst->hwBrightnessMax = 30; // 31 breaks sync on some clones
+        _inst->hwBrightness = 16;    // Default: minimum safe value (conservative)
     }
     else
     {
         // Original chips: Full range available
-        _inst->minRgbValue = 0;         // No RGB clamping
-        _inst->maxRgbValue = 255;       // No RGB clamping
-        _inst->hwBrightnessMin = 0;     // Full range 0-31
-        _inst->hwBrightnessMax = 31;    // Full range 0-31
-        _inst->hwBrightness = 16;       // Default: 50% brightness
+        _inst->minRgbValue = 0;      // No RGB clamping
+        _inst->maxRgbValue = 255;    // No RGB clamping
+        _inst->hwBrightnessMin = 0;  // Full range 0-31
+        _inst->hwBrightnessMax = 31; // Full range 0-31
+        _inst->hwBrightness = 16;    // Default: 50% brightness
     }
 
     // Determine bytes per LED and capabilities based on protocol
@@ -240,9 +241,9 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
 
     // CRITICAL: Use size_t for intermediate calculations to prevent overflow!
     // With uint16_t: ledCount=20000 * 4 = 80000 > 65535 → OVERFLOW!
-    size_t startFrameSize = (size_t)_inst->startFrameCount * 4;       // Typically 8 frames = 32 bytes
-    size_t dummyLedSize = (_inst->dummyLedMode == 1) ? 4 : 0;         // 4 bytes if physical dummy
-    size_t endFrameSize = (size_t)_inst->endFrameCount * 4;           // Typically 1 frame = 4 bytes
+    size_t startFrameSize = (size_t)_inst->startFrameCount * 4; // Typically 8 frames = 32 bytes
+    size_t dummyLedSize = (_inst->dummyLedMode == 1) ? 4 : 0;   // 4 bytes if physical dummy
+    size_t endFrameSize = (size_t)_inst->endFrameCount * 4;     // Typically 1 frame = 4 bytes
 
     _inst->bufferSize = startFrameSize + dummyLedSize + ((size_t)ledCount * _inst->bytesPerLed) + endFrameSize;
 
@@ -469,10 +470,10 @@ bool PIO_NeoPixel_SPI::initPIO()
                     if (_inst->clkdiv < 1.0f) _inst->clkdiv = 1.0f;
 
                     // CRITICAL: Clear and reset state machine before init (prevents garbage after reboot!)
-                    pio_sm_set_enabled(pio, sm, false);  // Disable first
-                    pio_sm_restart(pio, sm);              // Reset PC to start
-                    pio_sm_clear_fifos(pio, sm);          // Clear any old data
-                    pio_sm_clkdiv_restart(pio, sm);       // Reset clock divider
+                    pio_sm_set_enabled(pio, sm, false); // Disable first
+                    pio_sm_restart(pio, sm);            // Reset PC to start
+                    pio_sm_clear_fifos(pio, sm);        // Clear any old data
+                    pio_sm_clkdiv_restart(pio, sm);     // Reset clock divider
 
                     // Initialize SPI program
                     pio_spi_program_init(pio, sm, _inst->offset,
@@ -622,11 +623,15 @@ bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
  */
 bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
-    (void)index; (void)r; (void)g; (void)b; (void)w; // Suppress unused parameter warnings
-#ifdef OPENKNX_DEBUG
+    (void)index;
+    (void)r;
+    (void)g;
+    (void)b;
+    (void)w; // Suppress unused parameter warnings
+    #ifdef OPENKNX_DEBUG
     openknx.logger.logWithPrefixAndValues("PIO NeoPixel SPI",
                                           "ERROR: setPixel(r,g,b,w) not supported - SPI LEDs have no white channel!");
-#endif
+    #endif
     return false; // SPI LEDs don't support RGBW
 }
 
@@ -669,14 +674,14 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
     // Note: Values are configurable per strip (0=disabled)
     uint8_t minRgbValue = _inst->minRgbValue;
     uint8_t maxRgbValue = _inst->maxRgbValue;
-    
+
     if (minRgbValue > 0)
     {
         if (r > 0 && r < minRgbValue) r = minRgbValue;
         if (g > 0 && g < minRgbValue) g = minRgbValue;
         if (b > 0 && b < minRgbValue) b = minRgbValue;
     }
-    
+
     if (maxRgbValue < 255)
     {
         if (r > maxRgbValue) r = maxRgbValue;
@@ -738,15 +743,15 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
 
         // Write complete 32-bit word (atomic operation, DMA-safe)
         // Result: [Brightness << 24 | Byte2 << 16 | Byte1 << 8 | Byte0]
-        
+
         // CRITICAL: Memory barrier BEFORE write to ensure previous operations complete
         __dmb();
-        
+
         wordBuffer[wordIndex] = ((uint32_t)brightByte << 24) | (rgbValue & 0x00FFFFFF);
-        
+
         // CRITICAL: Memory barrier AFTER write to ensure write is visible before busy check
         __dmb();
-        
+
         // CRITICAL: Double-check busy flag AFTER write to detect race with show()
         // If DMA started between our initial check and write, invalidate this write
         if (_inst->busy)
@@ -768,15 +773,15 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
     else
     {
         // WS2801: Simple 24-bit RGB word [R << 16 | G << 8 | B]
-        
+
         // CRITICAL: Memory barrier BEFORE write
         __dmb();
-        
+
         wordBuffer[wordIndex] = (r << 16) | (g << 8) | b;
-        
+
         // CRITICAL: Memory barrier AFTER write + busy double-check
         __dmb();
-        
+
         // Double-check busy flag to detect race with show()
         if (_inst->busy)
         {
@@ -956,10 +961,10 @@ void PIO_NeoPixel_SPI::clear()
             wordBuffer[firstLedWordIdx + i] = 0x00000000;
         }
     }
-    
+
     // CRITICAL: Memory barrier after buffer writes
     __dmb();
-    
+
     _inst->dirty = true;
 }
 
@@ -1035,9 +1040,9 @@ PhysicalStripConfig* PIO_NeoPixel_SPI::createDefaultConfig() const
         cfg->setAutoDetectChip(_inst->autoDetectChip);
         cfg->setDetectedChip(_inst->detectedChip);
         cfg->setSpiFrequency(_inst->spiFrequency);
-        cfg->setMinRgbValue(_inst->minRgbValue);  // Clone chip workaround
-        cfg->setMaxRgbValue(_inst->maxRgbValue);  // Power limiting / clone workaround
-        cfg->setHwBrightnessRange(_inst->hwBrightnessMin, _inst->hwBrightnessMax);  // Clone chip safe range
+        cfg->setMinRgbValue(_inst->minRgbValue);                                   // Clone chip workaround
+        cfg->setMaxRgbValue(_inst->maxRgbValue);                                   // Power limiting / clone workaround
+        cfg->setHwBrightnessRange(_inst->hwBrightnessMin, _inst->hwBrightnessMax); // Clone chip safe range
     }
 
     return cfg;
@@ -1065,10 +1070,10 @@ bool PIO_NeoPixel_SPI::applyConfig(const PhysicalStripConfig* config)
     _inst->startFrameDelayUs = spiCfg->getStartFrameDelayUs();
     _inst->autoDetectChip = spiCfg->getAutoDetectChip();
     _inst->detectedChip = spiCfg->getDetectedChip();
-    _inst->minRgbValue = spiCfg->getMinRgbValue();  // Clone chip workaround
-    _inst->maxRgbValue = spiCfg->getMaxRgbValue();  // Power limiting / clone workaround
-    _inst->hwBrightnessMin = spiCfg->getHwBrightnessMin();  // Clone chip safe range
-    _inst->hwBrightnessMax = spiCfg->getHwBrightnessMax();  // Clone chip safe range
+    _inst->minRgbValue = spiCfg->getMinRgbValue();         // Clone chip workaround
+    _inst->maxRgbValue = spiCfg->getMaxRgbValue();         // Power limiting / clone workaround
+    _inst->hwBrightnessMin = spiCfg->getHwBrightnessMin(); // Clone chip safe range
+    _inst->hwBrightnessMax = spiCfg->getHwBrightnessMax(); // Clone chip safe range
 
     // Apply SPI frequency (can be changed live if initialized)
     uint32_t newFreq = spiCfg->getSpiFrequency();
@@ -1293,8 +1298,8 @@ void PIO_NeoPixel_SPI::setHardwareBrightness(uint8_t brightness)
     if (_inst->busy) return;
 
     // Clamp to safe range 16-30
-    //if (brightness < 16) brightness = 16;
-    //if (brightness > 30) brightness = 30;
+    // if (brightness < 16) brightness = 16;
+    // if (brightness > 30) brightness = 30;
 
     _inst->hwBrightness = brightness; // Update global brightness
 

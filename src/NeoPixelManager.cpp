@@ -556,7 +556,7 @@ void NeoPixelManager::applyPowerLimit()
                 {
                     // CRITICAL: Cast to size_t to prevent overflow (i * bytesPerPixel can exceed uint16_t)
                     size_t offset = (size_t)i * bytesPerPixel;
-                    
+
                     // CRITICAL: Bounds check to prevent buffer overflow
                     size_t bufferSize = vstrip->getBufferSize();
                     if (offset + bytesPerPixel > bufferSize)
@@ -565,7 +565,7 @@ void NeoPixelManager::applyPowerLimit()
                                   i, (uint32_t)offset, (uint32_t)bufferSize);
                         break; // Skip remaining LEDs for this strip
                     }
-                    
+
                     buffer[offset] = (uint8_t)(buffer[offset] * globalScale);         // R
                     buffer[offset + 1] = (uint8_t)(buffer[offset + 1] * globalScale); // G
                     buffer[offset + 2] = (uint8_t)(buffer[offset + 2] * globalScale); // B

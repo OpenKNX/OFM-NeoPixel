@@ -59,6 +59,7 @@ class EffectPool
     static Effect* getSolid();
     static Effect* getWipe();
     static Effect* getRainbow();
+    static Effect* getRainbowCycle();
     static Effect* getPride();
     static Effect* getConfetti();
     static Effect* getJuggle();

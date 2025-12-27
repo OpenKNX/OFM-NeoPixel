@@ -50,6 +50,7 @@ struct EffectConfig
     uint8_t count;              // Count (e.g. dots, drops)
     uint8_t fade;               // Fade amount 0-255
     uint8_t mode;               // Effect-specific mode
+    uint8_t effectType;         // Current effect type ID (for parameter loading)
 
     // OAM Interface Parameters
     uint8_t option1; // Effekt Option 1 (0-255) - Effect-specific parameter
