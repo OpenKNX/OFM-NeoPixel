@@ -83,6 +83,17 @@ class EffectWipe : public Effect
         }
     }
 
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Wischgeschwindigkeit", "Speed: Wipe animation speed");
+            case 1: return PARAM_DESC_DE_EN("Richtung (0-5): 0=Links→Rechts, 1=Rechts→Links, 2=Oben→Unten, 3=Unten→Oben, 4=Mitte→Außen, 5=Außen→Mitte",
+                                            "Direction (0-5): 0=Left→Right, 1=Right→Left, 2=Top→Bottom, 3=Bottom→Top, 4=Center→Out, 5=Edges→In");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t index) const override
     {
         switch (index)

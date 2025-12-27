@@ -38,6 +38,19 @@ class PaletteEffect : public Effect
             default: return nullptr;
         }
     }
+
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Scroll-Geschwindigkeit (0-255)", "Speed: Scroll speed (0-255)");
+            case 1: return PARAM_DESC_DE_EN("Palette: Farbpalette auswählen (0-N)", "Palette: Select color palette (0-N)");
+            case 2: return PARAM_DESC_DE_EN("Überblendung: Farbüberblendung (0=aus, 1=an)", "Blend: Color blending (0=off, 1=on)");
+            case 3: return PARAM_DESC_DE_EN("Abstand: Farbabstand (0=automatisch)", "Spacing: Color spacing (0=auto)");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t) const override { return ParameterType::PARAM_UINT8; }
     uint32_t getParameterDefault(uint8_t idx) const override
     {

@@ -40,6 +40,19 @@ class NoiseEffect : public Effect
             default: return nullptr;
         }
     }
+
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Zeitliche Entwicklung (0-255)", "Speed: Time evolution speed (0-255)");
+            case 1: return PARAM_DESC_DE_EN("Maßstab: Räumliche Rauschskalierung (0-255)", "Scale: Spatial noise scaling (0-255)");
+            case 2: return PARAM_DESC_DE_EN("Sättigung: Farbsättigung (0-255)", "Saturation: Color saturation (0-255)");
+            case 3: return PARAM_DESC_DE_EN("Farbton-Versatz: Basis-Farbverschiebung (0-255)", "Hue offset: Base color shift (0-255)");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t) const override { return ParameterType::PARAM_UINT8; }
     uint32_t getParameterDefault(uint8_t idx) const override
     {

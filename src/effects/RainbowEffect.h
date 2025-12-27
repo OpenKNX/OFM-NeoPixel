@@ -55,6 +55,16 @@ class RainbowEffect : public Effect
         }
     }
 
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Rotationsgeschwindigkeit (0-255)", "Speed: Rotation speed (0-255)");
+            case 1: return PARAM_DESC_DE_EN("Delta: Farbabstand zwischen LEDs (1-255)", "Delta: Hue spacing between LEDs (1-255)");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t index) const override
     {
         return ParameterType::PARAM_UINT8;

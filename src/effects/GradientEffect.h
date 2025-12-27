@@ -37,6 +37,19 @@ class GradientEffect : public Effect
             default: return nullptr;
         }
     }
+
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Animationsgeschwindigkeit (0-255)", "Speed: Animation speed (0-255)");
+            case 1: return PARAM_DESC_DE_EN("Start-Farbton: Anfangsfarbe des Gradienten (0-255)", "Start hue: Gradient start color (0-255)");
+            case 2: return PARAM_DESC_DE_EN("End-Farbton: Endfarbe des Gradienten (0-255)", "End hue: Gradient end color (0-255)");
+            case 3: return PARAM_DESC_DE_EN("Sättigung: Farbsättigung (0-255)", "Saturation: Color saturation (0-255)");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t) const override { return ParameterType::PARAM_UINT8; }
     uint32_t getParameterDefault(uint8_t idx) const override
     {

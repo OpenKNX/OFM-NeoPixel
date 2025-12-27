@@ -55,6 +55,18 @@ class JuggleEffect : public Effect
         }
     }
 
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Bewegungsgeschwindigkeit (BPM Basis)", "Speed: Movement speed (BPM base)");
+            case 1: return PARAM_DESC_DE_EN("Anzahl Punkte: Anzahl der Jonglier-Punkte (1-16)", "Num dots: Number of juggling dots (1-16)");
+            case 2: return PARAM_DESC_DE_EN("Ausblendrate: Wie schnell Punkte verblassen (1-50)", "Fade speed: How fast dots fade (1-50)");
+            case 3: return PARAM_DESC_DE_EN("Farbton-Versatz: Farbverschiebung (0-255)", "Hue offset: Color shift (0-255)");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t index) const override
     {
         return ParameterType::PARAM_UINT8;

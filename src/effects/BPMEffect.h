@@ -45,6 +45,16 @@ class BPMEffect : public Effect
         }
     }
 
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Schläge pro Minute (0-255)", "Speed: Beats per minute (0-255)");
+            case 1: return PARAM_DESC_DE_EN("Farbton: Basis-Farbton der Welle (0-255)", "Hue: Base hue of the wave (0-255)");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t index) const override
     {
         return ParameterType::PARAM_UINT8;

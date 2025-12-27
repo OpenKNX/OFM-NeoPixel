@@ -51,6 +51,16 @@ class ConfettiEffect : public Effect
         }
     }
 
+    const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
+    {
+        switch (index)
+        {
+            case 0: return PARAM_DESC_DE_EN("Ausblendrate: Wie schnell Pixel verblassen (1-50)", "Fade speed: How fast pixels fade (1-50)");
+            case 1: return PARAM_DESC_DE_EN("Sättigung: Farbsättigung (0-255)", "Saturation: Color saturation (0-255)");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t index) const override
     {
         return ParameterType::PARAM_UINT8;
