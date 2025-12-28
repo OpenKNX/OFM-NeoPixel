@@ -40,7 +40,9 @@ VirtualStrip::VirtualStrip(uint16_t totalLeds, ColorOrder colorOrder)
     : _totalLeds(totalLeds),
       _bytesPerLed((colorOrder == ColorOrder::RGBW || colorOrder == ColorOrder::GRBW) ? 4 : 3),
       _dirty(false),
-      _powerManager(nullptr)
+      _powerManager(nullptr),
+      _pixelTransformCallback(nullptr),
+      _pixelTransformUserData(nullptr)
 {
     // Allocate unified buffer (always RGB/RGBW format)
     _bufferSize = (size_t)totalLeds * _bytesPerLed;
@@ -461,6 +463,13 @@ bool VirtualStrip::syncToPhysical()
                 w = _buffer[bufferOffset + 3]; // White or Brightness
             }
 
+            // Apply pixel transform callback (HCL, gamma, etc.) if set
+            // This transforms the pixel BEFORE sending to hardware, without modifying the buffer
+            if (_pixelTransformCallback)
+            {
+                _pixelTransformCallback(r, g, b, (_bytesPerLed >= 4) ? &w : nullptr, _pixelTransformUserData);
+            }
+
             // Send RGBW to RGBW strips, RGB to RGB strips
             if (physicalIsRGBW && _bytesPerLed >= 4)
             {
@@ -567,4 +576,19 @@ uint16_t VirtualStrip::getTotalPhysicalLeds() const
         total += mapping.physicalLedCount;
     }
     return total;
+}
+
+/**
+ * @brief Set pixel transform callback for post-processing during sync
+ * @param callback Function to call for each pixel during syncToPhysical()
+ * @param userData User context passed to callback
+ *
+ * The callback is called for each pixel DURING syncToPhysical(), allowing
+ * color transformations (HCL, gamma, etc.) without modifying the effect buffer.
+ * This ensures effects that read back pixels (like Cylon fade) work correctly.
+ */
+void VirtualStrip::setPixelTransformCallback(PixelTransformCallback callback, void* userData)
+{
+    _pixelTransformCallback = callback;
+    _pixelTransformUserData = userData;
 }

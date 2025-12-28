@@ -124,6 +124,31 @@ class VirtualStrip
     uint16_t getTotalPhysicalLeds() const;
     size_t getMemoryUsage() const { return _bufferSize; } // Memory usage in bytes
 
+    // ====================================================================
+    // Pixel Transform Callback (for HCL, color correction, etc.)
+    // ====================================================================
+    /**
+     * @brief Pixel transform callback type
+     *
+     * Called during syncToPhysical() for each pixel BEFORE sending to hardware.
+     * This allows post-processing (HCL, gamma, etc.) without modifying the
+     * effect buffer, so effects that read back pixels (Cylon fade, etc.) work correctly.
+     *
+     * @param r Red component (in/out)
+     * @param g Green component (in/out)
+     * @param b Blue component (in/out)
+     * @param w White component (in/out, only valid if hasWhiteChannel)
+     * @param userData User-provided context pointer
+     */
+    using PixelTransformCallback = void (*)(uint8_t& r, uint8_t& g, uint8_t& b, uint8_t* w, void* userData);
+
+    /**
+     * @brief Set pixel transform callback for post-processing during sync
+     * @param callback Function to call for each pixel during syncToPhysical()
+     * @param userData User context passed to callback
+     */
+    void setPixelTransformCallback(PixelTransformCallback callback, void* userData = nullptr);
+
   private:
     std::vector<VirtualToPhysicalMapping> _physicalStrips; // Attached physical strips
     uint16_t _totalLeds;                                   // Virtual LED count
@@ -132,6 +157,8 @@ class VirtualStrip
     uint8_t _bytesPerLed;                                  // Bytes per LED (3 for RGB, 4 for RGBW)
     bool _dirty;                                           // Buffer modified?
     PowerManager* _powerManager;                           // Optional power manager for current limiting
+    PixelTransformCallback _pixelTransformCallback;        // Optional post-processing callback
+    void* _pixelTransformUserData;                         // User data for callback
 
     PhysicalStrip* findPhysicalAtIndex(uint16_t virtualIndex, uint16_t& outPhysicalIndex) const;
     void writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
