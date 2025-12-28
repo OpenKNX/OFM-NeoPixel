@@ -198,6 +198,67 @@ struct PhysicalStripConfig
         return _gammaLookupTable[value];
     }
 
+    // ===== White Balance =====
+
+    /**
+     * @brief Set white balance correction for RGB channels
+     * @param r Red channel multiplier (0-255, 255 = no change)
+     * @param g Green channel multiplier (0-255, 255 = no change)
+     * @param b Blue channel multiplier (0-255, 255 = no change)
+     * @note Values below 255 reduce channel intensity
+     */
+    void setWhiteBalance(uint8_t r, uint8_t g, uint8_t b)
+    {
+        _whiteBalanceRed = r;
+        _whiteBalanceGreen = g;
+        _whiteBalanceBlue = b;
+        _whiteBalanceEnabled = (r != 255 || g != 255 || b != 255);
+    }
+
+    /**
+     * @brief Enable/disable white balance correction
+     * @param enabled true to enable, false to disable
+     */
+    void setWhiteBalanceEnabled(bool enabled) { _whiteBalanceEnabled = enabled; }
+
+    /**
+     * @brief Check if white balance correction is enabled
+     * @return true if white balance is active
+     */
+    bool isWhiteBalanceEnabled() const { return _whiteBalanceEnabled; }
+
+    /**
+     * @brief Get white balance R value
+     * @return Red channel multiplier (0-255)
+     */
+    uint8_t getWhiteBalanceRed() const { return _whiteBalanceRed; }
+
+    /**
+     * @brief Get white balance G value
+     * @return Green channel multiplier (0-255)
+     */
+    uint8_t getWhiteBalanceGreen() const { return _whiteBalanceGreen; }
+
+    /**
+     * @brief Get white balance B value
+     * @return Blue channel multiplier (0-255)
+     */
+    uint8_t getWhiteBalanceBlue() const { return _whiteBalanceBlue; }
+
+    /**
+     * @brief Apply white balance to RGB values in-place
+     * @param r Red value (modified in-place)
+     * @param g Green value (modified in-place)
+     * @param b Blue value (modified in-place)
+     */
+    void applyWhiteBalance(uint8_t& r, uint8_t& g, uint8_t& b) const
+    {
+        if (!_whiteBalanceEnabled) return;
+        r = (uint8_t)(((uint16_t)r * _whiteBalanceRed) / 255);
+        g = (uint8_t)(((uint16_t)g * _whiteBalanceGreen) / 255);
+        b = (uint8_t)(((uint16_t)b * _whiteBalanceBlue) / 255);
+    }
+
   protected:
     /**
      * @brief Calculate gamma lookup table using the formula: output = (input/255)^(1/gamma) * 255
@@ -237,6 +298,11 @@ struct PhysicalStripConfig
     float _gammaCorrection = 1.0f;             // Default: 1.0 (linear, no correction)
     bool _gammaCorrectionEnabled = false;      // Default: disabled
     uint8_t _gammaLookupTable[256];            // Lookup table calculated at startup
+    // White balance
+    bool _whiteBalanceEnabled = false; // Default: disabled
+    uint8_t _whiteBalanceRed = 255;    // Default: no change
+    uint8_t _whiteBalanceGreen = 255;  // Default: no change
+    uint8_t _whiteBalanceBlue = 255;   // Default: no change
 };
 
 /**

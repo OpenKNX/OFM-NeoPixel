@@ -285,6 +285,12 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
             g = _config->getGammaCorrectedValue(g);
             b = _config->getGammaCorrectedValue(b);
         }
+
+        // Apply white balance correction if enabled
+        if (_config->isWhiteBalanceEnabled())
+        {
+            _config->applyWhiteBalance(r, g, b);
+        }
     }
 
     // Pass RGB directly to driver
@@ -325,6 +331,12 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, ui
             g = _config->getGammaCorrectedValue(g);
             b = _config->getGammaCorrectedValue(b);
             w = _config->getGammaCorrectedValue(w);
+        }
+
+        // Apply white balance correction if enabled (RGB only, not W)
+        if (_config->isWhiteBalanceEnabled())
+        {
+            _config->applyWhiteBalance(r, g, b);
         }
     }
 
