@@ -281,9 +281,18 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
         // Apply gamma correction if enabled (O(1) lookup table)
         else if (_config->isGammaCorrectionEnabled())
         {
+            // Remember which channels had color before gamma
+            bool hadR = (r > 0), hadG = (g > 0), hadB = (b > 0);
+
             r = _config->getGammaCorrectedValue(r);
             g = _config->getGammaCorrectedValue(g);
             b = _config->getGammaCorrectedValue(b);
+
+            // Minimum value protection: if a channel had color, ensure it doesn't go to 0
+            // This prevents LEDs from turning off completely at low brightness
+            if (hadR && r == 0) r = 1;
+            if (hadG && g == 0) g = 1;
+            if (hadB && b == 0) b = 1;
         }
 
         // Apply white balance correction if enabled
@@ -327,10 +336,20 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, ui
         // Apply gamma correction if enabled (O(1) lookup table)
         else if (_config->isGammaCorrectionEnabled())
         {
+            // Remember which channels had color before gamma
+            bool hadR = (r > 0), hadG = (g > 0), hadB = (b > 0), hadW = (w > 0);
+
             r = _config->getGammaCorrectedValue(r);
             g = _config->getGammaCorrectedValue(g);
             b = _config->getGammaCorrectedValue(b);
             w = _config->getGammaCorrectedValue(w);
+
+            // Minimum value protection: if a channel had color, ensure it doesn't go to 0
+            // This prevents LEDs from turning off completely at low brightness
+            if (hadR && r == 0) r = 1;
+            if (hadG && g == 0) g = 1;
+            if (hadB && b == 0) b = 1;
+            if (hadW && w == 0) w = 1;
         }
 
         // Apply white balance correction if enabled (RGB only, not W)

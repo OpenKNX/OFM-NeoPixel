@@ -188,7 +188,7 @@ struct PhysicalStripConfig
     bool isGammaCorrectionEnabled() const { return _gammaCorrectionEnabled; }
 
     /**
-     * @brief Get gamma-corrected value from lookup table
+     * @brief Get gamma-corrected value from lookup table (for colors)
      * @param value Input color value (0-255)
      * @return Gamma-corrected value (0-255)
      */
@@ -261,13 +261,15 @@ struct PhysicalStripConfig
 
   protected:
     /**
-     * @brief Calculate gamma lookup table using the formula: output = (input/255)^(1/gamma) * 255
+     * @brief Calculate gamma lookup table using the formula: output = (input/255)^gamma * 255
      *
      * For LED gamma correction (compensating for human eye perception):
-     * - Uses INVERSE gamma (1/gamma) for display/output correction
-     * - Gamma 2.2-2.8 brightens dim values, making gradients more perceptually linear
-     * - Formula: output = input^(1/gamma) - this EXPANDS low values
-     * - Example: gamma=2.2, input=128 → output=186 (brightens mid-tones)
+     * - LEDs have linear brightness output
+     * - Human eye perceives brightness logarithmically (more sensitive to dark)
+     * - Apply gamma directly: output = input^gamma - this COMPRESSES low values
+     * - Makes perceptual brightness changes appear linear
+     * - Gamma 2.2-2.8 darkens mid-tones for smooth gradients
+     * - Example: gamma=2.8, input=128 → output=34 (darkens mid-tones)
      */
     void calculateGammaLookupTable()
     {
@@ -281,12 +283,12 @@ struct PhysicalStripConfig
             return;
         }
 
-        // Use INVERSE gamma (1/gamma) for LED display correction
-        float gammaInv = 1.0f / _gammaCorrection;
+        // Apply gamma directly for LED output correction
+        // This compresses low/mid values, making gradients perceptually linear
         for (int i = 0; i < 256; i++)
         {
             float normalized = i / 255.0f;
-            float corrected = powf(normalized, gammaInv);
+            float corrected = powf(normalized, _gammaCorrection);
             _gammaLookupTable[i] = (uint8_t)(corrected * 255.0f + 0.5f);
         }
     }
@@ -297,7 +299,7 @@ struct PhysicalStripConfig
     std::vector<bool> _skipMask;               // Flexible skip mask (empty = disabled)
     float _gammaCorrection = 1.0f;             // Default: 1.0 (linear, no correction)
     bool _gammaCorrectionEnabled = false;      // Default: disabled
-    uint8_t _gammaLookupTable[256];            // Lookup table calculated at startup
+    uint8_t _gammaLookupTable[256];            // Lookup table for color gamma
     // White balance
     bool _whiteBalanceEnabled = false; // Default: disabled
     uint8_t _whiteBalanceRed = 255;    // Default: no change

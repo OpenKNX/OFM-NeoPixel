@@ -85,7 +85,9 @@ bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
         return false;
     }
 
-    // Apply segment brightness
+    uint16_t virtualIndex = _startLed + index;
+
+    // Apply segment brightness (gamma correction happens later in PhysicalStrip)
     if (_config.brightness < 255)
     {
         r = (r * _config.brightness + 127) / 255;
@@ -93,10 +95,9 @@ bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
         b = (b * _config.brightness + 127) / 255;
     }
 
-    uint16_t virtualIndex = _startLed + index;
     _dirty = true;
 
-    // Write pixel to VirtualStrip (hardware brightness is applied later in syncToPhysical())
+    // Write pixel to VirtualStrip (gamma correction applied in PhysicalStrip::setPixel)
     return _virtualStrip->setPixel(virtualIndex, r, g, b);
 }
 
@@ -116,7 +117,9 @@ bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t 
         return false;
     }
 
-    // Apply segment brightness to ALL channels (RGB + W)
+    uint16_t virtualIndex = _startLed + index;
+
+    // Apply segment brightness (gamma correction happens later in PhysicalStrip)
     if (_config.brightness < 255)
     {
         r = (r * _config.brightness + 127) / 255;
@@ -125,7 +128,6 @@ bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t 
         w = (w * _config.brightness + 127) / 255;
     }
 
-    uint16_t virtualIndex = _startLed + index;
     _dirty = true;
     return _virtualStrip->setPixel(virtualIndex, r, g, b, w);
 }
