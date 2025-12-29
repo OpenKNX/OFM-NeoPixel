@@ -86,6 +86,15 @@ class PhysicalStrip
     }
     ColorOrder getColorOrder() const { return _colorOrder; }
 
+    /**
+     * @brief Check if this strip has a white channel (RGBW)
+     * @return true if color order is RGBW or GRBW
+     */
+    bool hasWhiteChannel() const
+    {
+        return (_colorOrder == ColorOrder::RGBW || _colorOrder == ColorOrder::GRBW);
+    }
+
     // ====================================================================
     // Hardware Configuration (NEW API)
     // ====================================================================

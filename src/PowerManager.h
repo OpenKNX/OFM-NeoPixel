@@ -63,6 +63,16 @@ namespace LedProfiles
 } // namespace LedProfiles
 
 /**
+ * Power Limit Mode - how current limiting is applied
+ */
+enum class PowerLimitMode : uint8_t
+{
+    GLOBAL = 0,      // Limit total current across all strips (default)
+    PER_CHANNEL = 1, // Limit current per physical output channel
+    PER_LED = 2      // Limit current per individual LED
+};
+
+/**
  * Power Manager - Current Limiting for LED Strips
  */
 class PowerManager
@@ -73,7 +83,19 @@ class PowerManager
      * @param maxCurrentMA Maximum allowed current in milliamps (mA)
      */
     PowerManager(uint32_t maxCurrentMA = 5000)
-        : _maxCurrentMA(maxCurrentMA), _enabled(true), _profile(LedProfiles::WS2812B), _lastCalculatedCurrent(0), _lastActualCurrent(0)
+        : _maxCurrentMA(maxCurrentMA),
+          _enabled(true),
+          _profile(LedProfiles::WS2812B),
+          _lastCalculatedCurrent(0),
+          _lastActualCurrent(0),
+          _mode(PowerLimitMode::GLOBAL),
+          _maxCurrentPerChannel(0),
+          _maxCurrentPerLed(0),
+          _thresholdPercent(100),
+          _maxBrightnessPercent(100),
+          _slewRatePercentPerSec(0),
+          _currentBrightnessPercent(100.0f),
+          _targetBrightnessPercent(100.0f)
     {
     }
 
@@ -130,6 +152,193 @@ class PowerManager
     {
         return _enabled;
     }
+
+    // ====================================================================
+    // Power Limit Mode (Phase 1: Core Features)
+    // ====================================================================
+
+    /**
+     * @brief Set power limiting mode
+     * @param mode Power limit mode (GLOBAL, PER_CHANNEL, PER_LED)
+     */
+    void setPowerLimitMode(PowerLimitMode mode)
+    {
+        _mode = mode;
+    }
+
+    /**
+     * @brief Get current power limiting mode
+     * @return Power limit mode
+     */
+    PowerLimitMode getPowerLimitMode() const
+    {
+        return _mode;
+    }
+
+    /**
+     * @brief Set maximum current per channel (for PER_CHANNEL mode)
+     * @param mA Maximum current per physical output channel
+     */
+    void setMaxCurrentPerChannel(uint16_t mA)
+    {
+        _maxCurrentPerChannel = mA;
+    }
+
+    /**
+     * @brief Get maximum current per channel
+     * @return Maximum current per channel in mA
+     */
+    uint16_t getMaxCurrentPerChannel() const
+    {
+        return _maxCurrentPerChannel;
+    }
+
+    /**
+     * @brief Set maximum current per LED (for PER_LED mode)
+     * @param mA Maximum current per individual LED (typically 0-70mA)
+     */
+    void setMaxCurrentPerLed(uint8_t mA)
+    {
+        _maxCurrentPerLed = mA;
+    }
+
+    /**
+     * @brief Get maximum current per LED
+     * @return Maximum current per LED in mA
+     */
+    uint8_t getMaxCurrentPerLed() const
+    {
+        return _maxCurrentPerLed;
+    }
+
+    // ====================================================================
+    // Soft Limiting (Phase 2: Threshold)
+    // ====================================================================
+
+    /**
+     * @brief Set soft-limiting threshold percentage
+     * @param percent Threshold (0-100%, default 100 = no soft limit)
+     *
+     * When current exceeds this percentage of the limit, start reducing
+     * brightness gradually instead of hard-limiting.
+     *
+     * Example: With 1000mA limit and 80% threshold:
+     *  - 0-800mA: No limiting
+     *  - 800-1000mA: Gradual brightness reduction
+     *  - >1000mA: Hard limit to 1000mA
+     */
+    void setThresholdPercent(uint8_t percent)
+    {
+        if (percent > 100) percent = 100;
+        _thresholdPercent = percent;
+    }
+
+    /**
+     * @brief Get soft-limiting threshold
+     * @return Threshold percentage (0-100)
+     */
+    uint8_t getThresholdPercent() const
+    {
+        return _thresholdPercent;
+    }
+
+    // ====================================================================
+    // Auto Brightness Limit (Phase 2: Brightness Cap)
+    // ====================================================================
+
+    /**
+     * @brief Set maximum brightness cap
+     * @param percent Maximum brightness (0-100%, default 100)
+     *
+     * Caps brightness regardless of power consumption. Useful for
+     * preventing strips from being too bright in specific installations.
+     */
+    void setMaxBrightnessPercent(uint8_t percent)
+    {
+        if (percent > 100) percent = 100;
+        _maxBrightnessPercent = percent;
+    }
+
+    /**
+     * @brief Get maximum brightness cap
+     * @return Maximum brightness percentage (0-100)
+     */
+    uint8_t getMaxBrightnessPercent() const
+    {
+        return _maxBrightnessPercent;
+    }
+
+    // ====================================================================
+    // Slew Rate Control (Phase 3: Smooth Transitions)
+    // ====================================================================
+
+    /**
+     * @brief Set brightness slew rate
+     * @param percentPerSecond Rate of change (0-100%/s, 0 = instant)
+     *
+     * Controls how fast brightness changes when power limiting kicks in.
+     * 0 = instant change, 100 = full range in 1 second.
+     */
+    void setBrightnessSlewRate(uint8_t percentPerSecond)
+    {
+        if (percentPerSecond > 100) percentPerSecond = 100;
+        _slewRatePercentPerSec = percentPerSecond;
+    }
+
+    /**
+     * @brief Get brightness slew rate
+     * @return Slew rate in percent per second
+     */
+    uint8_t getBrightnessSlewRate() const
+    {
+        return _slewRatePercentPerSec;
+    }
+
+    /**
+     * @brief Update slew rate controller
+     * @param deltaTimeMs Time since last update in milliseconds
+     *
+     * Call this periodically to update the slew rate controller.
+     * Updates _currentBrightnessPercent towards _targetBrightnessPercent.
+     */
+    void updateSlewRate(uint32_t deltaTimeMs)
+    {
+        if (_slewRatePercentPerSec == 0 || _currentBrightnessPercent == _targetBrightnessPercent)
+        {
+            return; // Instant or already at target
+        }
+
+        // Calculate maximum change allowed in this time step
+        float maxChange = (_slewRatePercentPerSec * deltaTimeMs) / 1000.0f;
+
+        // Move towards target, but not past it
+        float diff = _targetBrightnessPercent - _currentBrightnessPercent;
+        if (diff > maxChange)
+        {
+            _currentBrightnessPercent += maxChange;
+        }
+        else if (diff < -maxChange)
+        {
+            _currentBrightnessPercent -= maxChange;
+        }
+        else
+        {
+            _currentBrightnessPercent = _targetBrightnessPercent;
+        }
+    }
+
+    /**
+     * @brief Get current brightness after slew rate limiting
+     * @return Current brightness (0.0-100.0)
+     */
+    float getCurrentBrightnessPercent() const
+    {
+        return _currentBrightnessPercent;
+    }
+
+    // ====================================================================
+    // Current Calculation
+    // ====================================================================
 
     /**
      * @brief Calculate current consumption for a single pixel
@@ -198,19 +407,68 @@ class PowerManager
      * @return Scale factor (0.0 to 1.0)
      *         1.0 = no limiting needed
      *         <1.0 = reduce brightness by this factor
+     *
+     * Enhanced with soft-limiting threshold and auto brightness cap.
      */
     float calculateBrightnessScale(const uint8_t* pixels, uint16_t numPixels, uint8_t bytesPerPixel, uint8_t hardwareBrightness = 255) const
     {
         if (!_enabled)
             return 1.0f;
 
+        // Apply auto brightness limit cap first
+        float brightnessCapScale = _maxBrightnessPercent / 100.0f;
+
+        // Calculate total current based on mode
         uint32_t totalCurrent = calculateTotalCurrent(pixels, numPixels, bytesPerPixel, hardwareBrightness);
 
-        if (totalCurrent <= _maxCurrentMA)
-            return 1.0f;
+        // Determine effective limit based on mode
+        uint32_t effectiveLimit = _maxCurrentMA;
+        if (_mode == PowerLimitMode::PER_CHANNEL && _maxCurrentPerChannel > 0)
+        {
+            // For per-channel mode, limit is per channel (simplified: assume 1 channel here)
+            effectiveLimit = _maxCurrentPerChannel;
+        }
+        else if (_mode == PowerLimitMode::PER_LED && _maxCurrentPerLed > 0)
+        {
+            // For per-LED mode, limit is per LED × number of LEDs
+            effectiveLimit = (uint32_t)_maxCurrentPerLed * numPixels;
+        }
 
-        // Scale down to fit within limit
-        return (float)_maxCurrentMA / (float)totalCurrent;
+        // Calculate threshold (where soft-limiting starts)
+        uint32_t thresholdCurrent = (effectiveLimit * _thresholdPercent) / 100;
+
+        // No limiting needed if below threshold
+        if (totalCurrent <= thresholdCurrent)
+        {
+            return brightnessCapScale; // Only apply brightness cap
+        }
+
+        // Calculate power scale factor
+        float powerScale = 1.0f;
+
+        if (totalCurrent <= effectiveLimit)
+        {
+            // Soft-limiting region (threshold to limit)
+            // Apply gradual reduction using smooth curve
+            // Scale linearly from 1.0 at threshold to (threshold/limit) at limit
+            float excess = (float)(totalCurrent - thresholdCurrent);
+            float range = (float)(effectiveLimit - thresholdCurrent);
+            if (range > 0)
+            {
+                float t = excess / range; // 0.0 at threshold, 1.0 at limit
+                // Smooth curve: start at 1.0, end at threshold/limit ratio
+                float targetScale = (float)thresholdCurrent / (float)totalCurrent;
+                powerScale = 1.0f - t * (1.0f - targetScale);
+            }
+        }
+        else
+        {
+            // Hard limit (above limit)
+            powerScale = (float)effectiveLimit / (float)totalCurrent;
+        }
+
+        // Combine power scale with brightness cap (take minimum)
+        return (powerScale < brightnessCapScale) ? powerScale : brightnessCapScale;
     }
 
     /**
@@ -219,9 +477,12 @@ class PowerManager
      * @param numPixels Number of pixels
      * @param bytesPerPixel 3 for RGB, 4 for RGBW
      * @param hardwareBrightness Hardware brightness (0-255, default 255 = full)
+     * @param deltaTimeMs Time since last update (for slew rate, 0 = no slew)
      * @return true if scaling was applied, false if not needed
+     *
+     * Enhanced with slew rate control for smooth transitions.
      */
-    bool applyCurrentLimit(uint8_t* pixels, uint16_t numPixels, uint8_t bytesPerPixel, uint8_t hardwareBrightness = 255)
+    bool applyCurrentLimit(uint8_t* pixels, uint16_t numPixels, uint8_t bytesPerPixel, uint8_t hardwareBrightness = 255, uint32_t deltaTimeMs = 0)
     {
         if (!_enabled)
         {
@@ -234,32 +495,44 @@ class PowerManager
         uint32_t totalCurrent = calculateTotalCurrent(pixels, numPixels, bytesPerPixel, hardwareBrightness);
         _lastCalculatedCurrent = totalCurrent;
 
-        if (totalCurrent <= _maxCurrentMA)
+        // Calculate target scale factor
+        float targetScale = calculateBrightnessScale(pixels, numPixels, bytesPerPixel, hardwareBrightness);
+        _targetBrightnessPercent = targetScale * 100.0f;
+
+        // Apply slew rate if enabled
+        if (_slewRatePercentPerSec > 0 && deltaTimeMs > 0)
+        {
+            updateSlewRate(deltaTimeMs);
+            targetScale = _currentBrightnessPercent / 100.0f;
+        }
+        else
+        {
+            // Instant change - update current to match target
+            _currentBrightnessPercent = _targetBrightnessPercent;
+        }
+
+        if (targetScale >= 1.0f)
         {
             // No limiting needed - actual = requested
             _lastActualCurrent = totalCurrent;
             return false;
         }
 
-        // Calculate scale factor
-        float scale = (float)_maxCurrentMA / (float)totalCurrent;
-
         // Scale all pixel values
         for (uint16_t i = 0; i < numPixels; i++)
         {
             uint16_t offset = i * bytesPerPixel;
-            pixels[offset] = (uint8_t)(pixels[offset] * scale);         // R
-            pixels[offset + 1] = (uint8_t)(pixels[offset + 1] * scale); // G
-            pixels[offset + 2] = (uint8_t)(pixels[offset + 2] * scale); // B
+            pixels[offset] = (uint8_t)(pixels[offset] * targetScale);         // R
+            pixels[offset + 1] = (uint8_t)(pixels[offset + 1] * targetScale); // G
+            pixels[offset + 2] = (uint8_t)(pixels[offset + 2] * targetScale); // B
             if (bytesPerPixel == 4)
             {
-                pixels[offset + 3] = (uint8_t)(pixels[offset + 3] * scale); // W
+                pixels[offset + 3] = (uint8_t)(pixels[offset + 3] * targetScale); // W
             }
         }
 
         // Actual current after limiting = requested * scale
-        // Or simply: capped at max current
-        _lastActualCurrent = _maxCurrentMA;
+        _lastActualCurrent = (uint32_t)(totalCurrent * targetScale);
 
         return true; // Scaling applied
     }
@@ -330,10 +603,53 @@ class PowerManager
         _lastActualCurrent = actualCurrent;
     }
 
+    // ====================================================================
+    // Helper Methods
+    // ====================================================================
+
+    /**
+     * @brief Get default LED current profile for a protocol
+     * @param protocol LED protocol
+     * @return Default current profile for the protocol
+     *
+     * Auto-detects appropriate current profile based on LED strip type.
+     */
+    static LedCurrentProfile getDefaultProfile(LedProtocol protocol)
+    {
+        switch (protocol)
+        {
+            case LedProtocol::SK6812:
+                return LedProfiles::SK6812_RGBW;
+            case LedProtocol::APA102:
+            case LedProtocol::SK9822:
+                return LedProfiles::APA102;
+            case LedProtocol::WS2812B:
+            default:
+                return LedProfiles::WS2812B;
+        }
+    }
+
   private:
-    uint32_t _maxCurrentMA;                  // Maximum allowed current (mA)
-    bool _enabled;                           // Enable/disable power management
-    LedCurrentProfile _profile;              // Current profile for LEDs
+    // Core settings
+    uint32_t _maxCurrentMA;     // Maximum allowed current (mA) - GLOBAL mode
+    bool _enabled;              // Enable/disable power management
+    LedCurrentProfile _profile; // Current profile for LEDs
+
+    // Statistics
     mutable uint32_t _lastCalculatedCurrent; // Cached current from last calculation (BEFORE limiting)
     mutable uint32_t _lastActualCurrent;     // Cached current AFTER limiting was applied
+
+    // Phase 1: Power Limit Modes
+    PowerLimitMode _mode;           // Power limiting mode
+    uint16_t _maxCurrentPerChannel; // Maximum current per channel (PER_CHANNEL mode)
+    uint8_t _maxCurrentPerLed;      // Maximum current per LED (PER_LED mode)
+
+    // Phase 2: Soft Limiting & Brightness Cap
+    uint8_t _thresholdPercent;     // Soft-limiting threshold (0-100%, default 100)
+    uint8_t _maxBrightnessPercent; // Maximum brightness cap (0-100%, default 100)
+
+    // Phase 3: Slew Rate Control
+    uint8_t _slewRatePercentPerSec;  // Brightness change rate (%/s, 0 = instant)
+    float _currentBrightnessPercent; // Current brightness (slew-rate limited)
+    float _targetBrightnessPercent;  // Target brightness (from power calc)
 };
