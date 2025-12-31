@@ -44,13 +44,17 @@ struct EffectConfig
     uint8_t intensity;          // Intensity 1-255
     uint8_t brightness;         // Software brightness 0-255 (255 = no dimming, ALL LED types)
     uint8_t hardwareBrightness; // Hardware brightness 0-255 (255 = max, only for APA102/SK9822)
-    uint32_t primaryRGBW;       // Primary color (RGBW packed)
+    uint32_t primaryRGBW;       // Primary color (RGBW packed: R<<24 | G<<16 | B<<8 | W)
     uint32_t secondaryRGBW;     // Secondary color (RGBW packed)
     uint8_t reverse;            // Reverse direction (0/1)
     uint8_t count;              // Count (e.g. dots, drops)
     uint8_t fade;               // Fade amount 0-255
     uint8_t mode;               // Effect-specific mode
     uint8_t effectType;         // Current effect type ID (for parameter loading)
+
+    // 5-Channel extension: Additional white channels for RGBCCT strips
+    uint8_t primaryCW;   // Primary Cool White (0-255) for 5-channel strips
+    uint8_t secondaryCW; // Secondary Cool White (0-255) for 5-channel strips
 
     // OAM Interface Parameters
     uint8_t option1; // Effekt Option 1 (0-255) - Effect-specific parameter
@@ -65,22 +69,27 @@ struct EffectConfig
     uint32_t legacyOption1; // Legacy option1 (32-bit)
     uint32_t legacyOption2; // Legacy option2 (32-bit)
 
-    // Convenience accessors for color components
+    // Convenience accessors for color components (RGBW)
     inline uint8_t r() const { return (primaryRGBW >> 24) & 0xFF; }
     inline uint8_t g() const { return (primaryRGBW >> 16) & 0xFF; }
     inline uint8_t b() const { return (primaryRGBW >> 8) & 0xFF; }
-    inline uint8_t w() const { return primaryRGBW & 0xFF; }
+    inline uint8_t w() const { return primaryRGBW & 0xFF; }  // Warm White for 5-channel, single White for 4-channel
+    inline uint8_t ww() const { return primaryRGBW & 0xFF; } // Alias for w() - Warm White
+    inline uint8_t cw() const { return primaryCW; }          // Cool White (5-channel only)
 
     inline uint8_t r2() const { return (secondaryRGBW >> 24) & 0xFF; }
     inline uint8_t g2() const { return (secondaryRGBW >> 16) & 0xFF; }
     inline uint8_t b2() const { return (secondaryRGBW >> 8) & 0xFF; }
-    inline uint8_t w2() const { return secondaryRGBW & 0xFF; }
+    inline uint8_t w2() const { return secondaryRGBW & 0xFF; }  // Warm White for 5-channel, single White for 4-channel
+    inline uint8_t ww2() const { return secondaryRGBW & 0xFF; } // Alias for w2() - Warm White
+    inline uint8_t cw2() const { return secondaryCW; }          // Cool White (5-channel only)
 
     // Default Constructor
     EffectConfig()
         : speed(128), intensity(128), brightness(255), hardwareBrightness(255),
           primaryRGBW(0xFFFFFFFF), secondaryRGBW(0x00000000),
-          reverse(0), count(1), fade(128), mode(0),
+          reverse(0), count(1), fade(128), mode(0), effectType(0),
+          primaryCW(0), secondaryCW(0),
           option1(0), option2(0), option3(0),
           feature1(false), feature2(false), feature3(false),
           legacyOption1(0), legacyOption2(0) {}
@@ -139,24 +148,42 @@ class Segment
     // ====================================================================
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
+    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw);
     void setAll(uint8_t r, uint8_t g, uint8_t b);
     void setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t w);
+    void setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw);
     void clear();
     void clearAll();
     bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) const;
     bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& w) const;
+    bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& ww, uint8_t& cw) const;
     inline uint32_t getPrimaryColor() const { return _config.primaryRGBW; }     // Get primary color
     inline uint32_t getSecondaryColor() const { return _config.secondaryRGBW; } // Get secondary color
     inline bool setPrimaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t w)
     {
         _config.primaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)w;
         return true;
-    } // Set primary color
+    } // Set primary color (4-channel RGBW)
+
+    inline bool setPrimaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t ww, uint32_t cw)
+    {
+        _config.primaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)ww;
+        _config.primaryCW = (uint8_t)cw;
+        return true;
+    } // Set primary color (5-channel RGBCCT)
+
     inline bool setSecondaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t w)
     {
         _config.secondaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)w;
         return true;
-    } // Set secondary color
+    } // Set secondary color (4-channel RGBW)
+
+    inline bool setSecondaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t ww, uint32_t cw)
+    {
+        _config.secondaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)ww;
+        _config.secondaryCW = (uint8_t)cw;
+        return true;
+    } // Set secondary color (5-channel RGBCCT)
 
     // ====================================================================
     // Update & Control

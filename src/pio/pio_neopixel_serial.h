@@ -84,6 +84,7 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
     bool init() override;
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b) override;
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w) override;
+    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw) override;
     bool show() override;
     bool isBusy() override;
     void clear() override;
@@ -183,7 +184,7 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
     void sendDataDMA();
     void packDataToDMABuffer();
     static void dmaIRQHandler();
-    void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
+    void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww = 0, uint8_t cw = 0);
 
     static PIO_NeoPixel_Serial* _dmaHandlers[12];
     static void registerDMAHandler(int channel, PIO_NeoPixel_Serial* instance);

@@ -24,23 +24,40 @@
  */
 struct LedCurrentProfile
 {
-    uint16_t redMA;   // Red channel max current (mA) at full brightness
-    uint16_t greenMA; // Green channel max current (mA)
-    uint16_t blueMA;  // Blue channel max current (mA)
-    uint16_t whiteMA; // White channel max current (mA, 0 for RGB-only)
+    uint16_t redMA;       // Red channel max current (mA) at full brightness
+    uint16_t greenMA;     // Green channel max current (mA)
+    uint16_t blueMA;      // Blue channel max current (mA)
+    uint16_t warmWhiteMA; // Warm white channel max current (mA), was 'whiteMA'
+    uint16_t coolWhiteMA; // Cool white channel max current (mA), 0 for RGB/RGBW
 
-    // Default: WS2812B typical values
+    // Default: WS2812B typical values (RGB only)
     LedCurrentProfile()
-        : redMA(60), greenMA(40), blueMA(40), whiteMA(0) {}
+        : redMA(20), greenMA(20), blueMA(20), warmWhiteMA(0), coolWhiteMA(0) {}
 
-    LedCurrentProfile(uint16_t r, uint16_t g, uint16_t b, uint16_t w = 0)
-        : redMA(r), greenMA(g), blueMA(b), whiteMA(w) {}
+    // RGB-only constructor (backward compatible)
+    LedCurrentProfile(uint16_t r, uint16_t g, uint16_t b)
+        : redMA(r), greenMA(g), blueMA(b), warmWhiteMA(0), coolWhiteMA(0) {}
+
+    // RGBW constructor (backward compatible - maps w to warmWhiteMA)
+    LedCurrentProfile(uint16_t r, uint16_t g, uint16_t b, uint16_t w)
+        : redMA(r), greenMA(g), blueMA(b), warmWhiteMA(w), coolWhiteMA(0) {}
+
+    // RGBCCT constructor (5-channel)
+    LedCurrentProfile(uint16_t r, uint16_t g, uint16_t b, uint16_t ww, uint16_t cw)
+        : redMA(r), greenMA(g), blueMA(b), warmWhiteMA(ww), coolWhiteMA(cw) {}
+
+    // Total max current per LED
+    uint16_t totalMA() const
+    {
+        return redMA + greenMA + blueMA + warmWhiteMA + coolWhiteMA;
+    }
 
     // Equality operator for profile comparison
     bool operator==(const LedCurrentProfile& other) const
     {
         return redMA == other.redMA && greenMA == other.greenMA &&
-               blueMA == other.blueMA && whiteMA == other.whiteMA;
+               blueMA == other.blueMA && warmWhiteMA == other.warmWhiteMA &&
+               coolWhiteMA == other.coolWhiteMA;
     }
 };
 
@@ -50,16 +67,24 @@ struct LedCurrentProfile
 namespace LedProfiles
 {
     // WS2812B: 60mA max (20mA per channel, all on = white)
-    static const LedCurrentProfile WS2812B(20, 20, 20, 0);
+    static const LedCurrentProfile WS2812B(20, 20, 20);
 
     // SK6812 RGBW: Similar to WS2812B + white channel
     static const LedCurrentProfile SK6812_RGBW(20, 20, 20, 20);
 
     // APA102: Lower current per LED (configurable via global brightness)
-    static const LedCurrentProfile APA102(15, 15, 15, 0);
+    static const LedCurrentProfile APA102(15, 15, 15);
 
-    // Conservative estimate (max current)
+    // Conservative estimate (max current for 4-channel)
     static const LedCurrentProfile CONSERVATIVE(20, 20, 20, 20);
+
+    // 5-Channel RGBCCT (RGB + Warm White + Cool White)
+    static const LedCurrentProfile SK6812_RGBCCT(20, 20, 20, 20, 20);
+    static const LedCurrentProfile WS2814_RGBCCT(20, 20, 20, 20, 20);
+    static const LedCurrentProfile WS2805_RGBCCT(20, 20, 20, 20, 20);
+
+    // Conservative estimate for 5-channel
+    static const LedCurrentProfile CONSERVATIVE_5CH(20, 20, 20, 20, 20);
 } // namespace LedProfiles
 
 /**
@@ -341,17 +366,18 @@ class PowerManager
     // ====================================================================
 
     /**
-     * @brief Calculate current consumption for a single pixel
+     * @brief Calculate current consumption for a single pixel (5-channel)
      * @param r Red value (0-255)
      * @param g Green value (0-255)
      * @param b Blue value (0-255)
-     * @param w White value (0-255)
+     * @param ww Warm white value (0-255)
+     * @param cw Cool white value (0-255)
      * @param hardwareBrightness Hardware brightness (0-255, default 255 = full)
      *                           For APA102/SK9822: 5-bit global brightness (0-31 mapped from 0-255)
      *                           For WS2812B/SK6812: ignored (always 255)
      * @return Current in mA
      */
-    uint32_t calculatePixelCurrent(uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0, uint8_t hardwareBrightness = 255) const
+    uint32_t calculatePixelCurrent(uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw, uint8_t hardwareBrightness = 255) const
     {
         // For APA102/SK9822: Hardware brightness is a 5-bit global multiplier (0-31)
         // Convert 0-255 -> 0-31 scale, then apply as additional multiplier
@@ -365,15 +391,38 @@ class PowerManager
         current += (r * _profile.redMA * hwScale) / 65025; // 65025 = 255*255
         current += (g * _profile.greenMA * hwScale) / 65025;
         current += (b * _profile.blueMA * hwScale) / 65025;
-        current += (w * _profile.whiteMA * hwScale) / 65025;
+        current += (ww * _profile.warmWhiteMA * hwScale) / 65025;
+        current += (cw * _profile.coolWhiteMA * hwScale) / 65025;
         return current;
     }
 
     /**
+     * @brief Calculate current consumption for a single pixel (4-channel backward compat)
+     * @param r Red value (0-255)
+     * @param g Green value (0-255)
+     * @param b Blue value (0-255)
+     * @param w White value (0-255) - mapped to warm white
+     * @param hardwareBrightness Hardware brightness (0-255, default 255 = full)
+     * @return Current in mA
+     */
+    uint32_t calculatePixelCurrent(uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint8_t hardwareBrightness) const
+    {
+        return calculatePixelCurrent(r, g, b, w, 0, hardwareBrightness);
+    }
+
+    /**
+     * @brief Calculate current consumption for a single pixel (RGB only)
+     */
+    uint32_t calculatePixelCurrentRGB(uint8_t r, uint8_t g, uint8_t b, uint8_t hardwareBrightness = 255) const
+    {
+        return calculatePixelCurrent(r, g, b, 0, 0, hardwareBrightness);
+    }
+
+    /**
      * @brief Calculate total current consumption
-     * @param pixels Pointer to pixel buffer (RGB or RGBW)
+     * @param pixels Pointer to pixel buffer (RGB, RGBW, or RGBCCT)
      * @param numPixels Number of pixels
-     * @param bytesPerPixel 3 for RGB, 4 for RGBW
+     * @param bytesPerPixel 3 for RGB, 4 for RGBW, 5 for RGBCCT
      * @param hardwareBrightness Hardware brightness (0-255, default 255 = full)
      * @return Total current in mA
      */
@@ -390,9 +439,10 @@ class PowerManager
             uint8_t r = pixels[offset];
             uint8_t g = pixels[offset + 1];
             uint8_t b = pixels[offset + 2];
-            uint8_t w = (bytesPerPixel == 4) ? pixels[offset + 3] : 0;
+            uint8_t ww = (bytesPerPixel >= 4) ? pixels[offset + 3] : 0;
+            uint8_t cw = (bytesPerPixel >= 5) ? pixels[offset + 4] : 0;
 
-            totalCurrent += calculatePixelCurrent(r, g, b, w, hardwareBrightness);
+            totalCurrent += calculatePixelCurrent(r, g, b, ww, cw, hardwareBrightness);
         }
 
         return totalCurrent;
@@ -475,7 +525,7 @@ class PowerManager
      * @brief Apply brightness scaling to pixel buffer (modifies in-place)
      * @param pixels Pointer to pixel buffer (will be modified)
      * @param numPixels Number of pixels
-     * @param bytesPerPixel 3 for RGB, 4 for RGBW
+     * @param bytesPerPixel 3 for RGB, 4 for RGBW, 5 for RGBCCT
      * @param hardwareBrightness Hardware brightness (0-255, default 255 = full)
      * @param deltaTimeMs Time since last update (for slew rate, 0 = no slew)
      * @return true if scaling was applied, false if not needed
@@ -525,9 +575,13 @@ class PowerManager
             pixels[offset] = (uint8_t)(pixels[offset] * targetScale);         // R
             pixels[offset + 1] = (uint8_t)(pixels[offset + 1] * targetScale); // G
             pixels[offset + 2] = (uint8_t)(pixels[offset + 2] * targetScale); // B
-            if (bytesPerPixel == 4)
+            if (bytesPerPixel >= 4)
             {
-                pixels[offset + 3] = (uint8_t)(pixels[offset + 3] * targetScale); // W
+                pixels[offset + 3] = (uint8_t)(pixels[offset + 3] * targetScale); // WW
+            }
+            if (bytesPerPixel >= 5)
+            {
+                pixels[offset + 4] = (uint8_t)(pixels[offset + 4] * targetScale); // CW
             }
         }
 
@@ -618,11 +672,27 @@ class PowerManager
     {
         switch (protocol)
         {
+            // 4-channel RGBW
             case LedProtocol::SK6812:
+            case LedProtocol::SK6805:
+            case LedProtocol::WS2814:
+            case LedProtocol::TM1814:
                 return LedProfiles::SK6812_RGBW;
+
+            // 5-channel RGBCCT (RGB + Warm White + Cool White)
+            case LedProtocol::SK6812_RGBCCT:
+                return LedProfiles::SK6812_RGBCCT;
+            case LedProtocol::WS2814_RGBCCT:
+                return LedProfiles::WS2814_RGBCCT;
+            case LedProtocol::WS2805_RGBCCT:
+                return LedProfiles::WS2805_RGBCCT;
+
+            // SPI protocols
             case LedProtocol::APA102:
             case LedProtocol::SK9822:
                 return LedProfiles::APA102;
+
+            // Default: 3-channel RGB
             case LedProtocol::WS2812B:
             default:
                 return LedProfiles::WS2812B;

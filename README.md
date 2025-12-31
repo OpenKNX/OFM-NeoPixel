@@ -5,7 +5,7 @@
 **License:** GNU GPL v3.0  
 **Author:** Erkan Çolak
 
-A high-performance, hardware-optimized LED control library for addressable RGB/RGBW strips on OpenKNX devices with **self-describing effects** and **stateless architecture**.
+A high-performance, hardware-optimized LED control library for addressable RGB/RGBW/RGBCCT strips on OpenKNX devices with **self-describing effects** and **stateless architecture**.
 
 ---
 
@@ -130,7 +130,7 @@ This design enables complex LED configurations with minimal CPU overhead through
 ### Hardware Layer
 
 - Multiple strip support (up to 7 on RP2040, 11 on RP2350, 7 on ESP32-S3)
-- Protocol support: WS2812, WS2812B, WS2813, WS2815, SK6812, APA102, WS2801
+- Protocol support: WS2812, WS2812B, WS2813, WS2815, WS2811, SK6812, SK6812_RGBCCT, WS2814, WS2814_RGBCCT, WS2805_RGBCCT, APA102, SK9822, WS2801
 - Automatic driver selection based on platform and protocol
 - DMA transfers for zero-CPU overhead (RP2040/RP2350)
 - RMT hardware acceleration (ESP32-S3)
@@ -142,7 +142,7 @@ This design enables complex LED configurations with minimal CPU overhead through
 - Segment-based effect system
 - Integrated effects: Solid, Rainbow, Pride2015, Confetti, Juggle, BPM, Cylon, Wipe
 - Per-segment brightness control
-- Color order abstraction (RGB, GRB, BGR, RGBW, GRBW)
+- Color order abstraction (RGB, GRB, BGR, RGBW, GRBW, RGBCCT, GRBCCT, RGBCTW, GRBCTW)
 - Performance tracking and statistics
 
 ### Integration
@@ -438,7 +438,7 @@ neo phys config 0 skipmask clear
 ┌──────────────────────────────────────────────────────────┐
 │ PHASE 1: Effect Updates                                  │
 │ Effect.update() -> Segment.setPixel() -> VirtualStrip    │
-│ Calculates ideal pixel colors (RGB/RGBW)                 │
+│ Calculates ideal pixel colors (RGB/RGBW/RGBCCT)          │
 └───────────────────────┬──────────────────────────────────┘
                         ▼
 ┌──────────────────────────────────────────────────────────┐
@@ -512,10 +512,10 @@ The ColorOrder system provides automatic color byte reordering for different LED
 │ Application  │  Always uses logical RGB(W) colors
 │   (Effects)  │  Example: RED = RGB(255, 0, 0)
 └──────┬───────┘
-       │ Always RGB/RGBW
+       │ Always RGB/RGBW/RGBCCT
        ▼
 ┌──────────────┐
-│ VirtualStrip │  Stores pixels in RGB/RGBW format
+│ VirtualStrip │  Stores pixels in RGB/RGBW/RGBCCT format
 │   Buffer     │  [R, G, B] or [R, G, B, W]
 └──────┬───────┘
        │ syncToPhysical() sends RGB
@@ -562,7 +562,16 @@ The ColorOrder system provides automatic color byte reordering for different LED
 | `BRGW`     | Rare variants      | [B, R, G, W]       | [0, 255, 0, 0]     |
 | `BGRW`     | Rare variants      | [B, G, R, W]       | [0, 0, 255, 0]     |
 
-**Total:** All 13 possible color byte orders (1 auto + 6 RGB + 6 RGBW)
+**RGBCCT Protocols (5-byte):**
+
+| ColorOrder | LED Chips          | Byte Mapping       | Example (RED)          |
+|------------|-------------------|--------------------|------------------------|
+| `RGBCCT`   | RGBCCT variants   | [R, G, B, WW, CW]  | [255, 0, 0, 0, 0]      |
+| `GRBCCT`   | RGBCCT variants   | [G, R, B, WW, CW]  | [0, 255, 0, 0, 0]      |
+| `RGBCTW`   | RGBCCT variants   | [R, G, B, CW, WW]  | [255, 0, 0, 0, 0]      |
+| `GRBCTW`   | RGBCCT variants   | [G, R, B, CW, WW]  | [0, 255, 0, 0, 0]      |
+
+**Total:** All 17 possible color byte orders (1 auto + 6 RGB + 6 RGBW + 4 RGBCCT)
 
 #### Data Flow Example
 
@@ -593,7 +602,7 @@ The ColorOrder system provides automatic color byte reordering for different LED
 #### Key Design Principles
 
 1. **VirtualStrip is ColorOrder-agnostic**
-   - Always stores RGB/RGBW internally
+   - Always stores RGB/RGBW/RGBCCT internally
    - No color conversion in VirtualStrip layer
    - Simplifies effect development
 
@@ -660,7 +669,7 @@ neo spi add 8 9 40 5 4     # MOSI=8, SCK=9, 40 LEDs, APA102, ColorOrder=BGR
 
 **VirtualStrip ColorOrder (Legacy/Ignored):**
 
-VirtualStrip has a ColorOrder parameter for backward compatibility, but it's **not used** for color conversion. VirtualStrip always stores RGB/RGBW internally.
+VirtualStrip has a ColorOrder parameter for backward compatibility, but it's **not used** for color conversion. VirtualStrip always stores RGB/RGBW/RGBCCT internally.
 
 ```cpp
 // This parameter is ignored for color conversion
@@ -812,8 +821,11 @@ build_flags =
 | WS2815   | 12V     | RGB    | 800kHz | GRB | High voltage |
 | WS2811   | 12V     | RGB    | 400kHz | RGB | Slower timing |
 | SK6812   | 5V/12V  | RGBW   | 800kHz | GRBW | 4-channel |
+| SK6812_RGBCCT | 5V/12V  | RGBCCT | 800kHz | RGBCCT/GRBCCT/RGBCTW/GRBCTW | 5-channel (RGB+WW+CW) |
 | SK6805   | 5V      | RGBW   | 800kHz | GRBW | 4-channel |
 | WS2814   | 12V     | RGBW   | 800kHz | GRBW | 4-channel |
+| WS2814_RGBCCT | 12V     | RGBCCT | 800kHz | RGBCCT/GRBCCT/RGBCTW/GRBCTW | 5-channel (RGB+WW+CW) |
+| WS2805_RGBCCT | 12V     | RGBCCT | 400kHz | RGBCCT/GRBCCT/RGBCTW/GRBCTW | 5-channel (RGB+WW+CW), slow timing |
 | TM1814   | 12V     | RGBW   | 800kHz | GRBW | 4-channel |
 | GS8208   | 12V     | RGB    | 800kHz | GRB | High voltage |
 
@@ -861,6 +873,7 @@ GND         ────────► GND
 - **Current Draw:**
   - WS2812B: ~60mA per LED at full white
   - SK6812 RGBW: ~80mA per LED at full white
+  - RGBCCT (RGB+WW+CW): depends on profile (two white channels)
   - APA102: ~60mA per LED at full brightness
   
 - **Power Supply:**
@@ -1090,6 +1103,7 @@ neo phys add <pin> <count> [protocol]
     # Examples:
     neo phys add 9 64              # GPIO 9, 64 LEDs, WS2812B (default)
     neo phys add 22 100 SK6812     # GPIO 22, 100 LEDs, SK6812 RGBW
+    neo phys add 22 100 SK6812_RGBCCT  # GPIO 22, 100 LEDs, SK6812 RGBCCT (5-channel)
     neo phys add 5 50 APA102       # GPIO 5, 50 LEDs, APA102 (SPI)
 
 neo phys del <index>
@@ -1207,6 +1221,7 @@ neo virt add <count> [colorOrder]
     neo virt add 72                # 72 LEDs, GRB (default)
     neo virt add 100 RGB           # 100 LEDs, RGB order
     neo virt add 150 RGBW          # 150 LEDs, RGBW (4-channel)
+    neo virt add 150 RGBCCT        # 150 LEDs, RGBCCT (5-channel: RGB+WW+CW)
 
 neo virt del <index>
     # Delete virtual strip
@@ -1295,6 +1310,7 @@ neo garage <segIndex> <phase>
     neo garage 0 3                 # Stop/pause
 
 neo color <segIndex> <r> <g> <b> [w]
+    neo color <segIndex> <r> <g> <b> <ww> <cw>     # RGBCCT (RGB+WW+CW)
     # Set primary color for segment
     neo color 0 255 0 0            # Red
     neo color 1 0 255 0            # Green
@@ -1438,6 +1454,7 @@ public:
     // Pixel Control
     void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b);  // RGB only
     void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w);  // RGBW (Serial only)
+    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw);  // RGBCCT (Serial only)
     void setPixel(uint16_t index, uint32_t color);
     void fill(uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
     void clear();
@@ -1482,7 +1499,9 @@ public:
     bool detachPhysical(PhysicalStrip* physical);
     
     // Pixel API
-    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
+    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
+    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w);        // RGBW
+    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw); // RGBCCT
     void fill(uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
     void clear();
     
@@ -1521,7 +1540,9 @@ public:
     bool isRunning() const;
     
     // Configuration
-    void setColor(uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
+    void setColor(uint8_t r, uint8_t g, uint8_t b);                    // RGB
+    void setColor(uint8_t r, uint8_t g, uint8_t b, uint8_t w);         // RGBW
+    void setColor(uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw); // RGBCCT
     void setBrightness(uint8_t brightness);
     LedConfig& getConfig();
     LedState& getState();             // Access state (for effects)
@@ -1984,7 +2005,10 @@ Each LED color channel draws current proportional to its brightness:
 
 ```
 Current(channel) = MaxCurrent(channel) × (Brightness / 255)
-Current(LED) = Current(R) + Current(G) + Current(B) + Current(W)
+Current(LED) = Current(R) + Current(G) + Current(B)
+
+RGBW:   Current(LED) += Current(W)
+RGBCCT: Current(LED) += Current(WW) + Current(CW)
 ```
 
 **Example:** WS2812B at full white (R=255, G=255, B=255)
@@ -2020,7 +2044,7 @@ Result: Max current = 5A ✓
 └────────┬────────┘
          ↓
 ┌─────────────────┐
-│ Segment Buffer  │  -> Stores RGB/RGBW values (0-255)
+│ Segment Buffer  │  -> Stores RGB/RGBW/RGBCCT values (0-255)
 └────────┬────────┘
          ↓
 ┌─────────────────┐

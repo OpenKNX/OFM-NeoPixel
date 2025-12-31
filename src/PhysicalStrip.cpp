@@ -398,6 +398,83 @@ void PhysicalStrip::setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 }
 
 /**
+ * @brief Set a single RGBCCT pixel (5-channel: RGB + Warm White + Cool White)
+ * @param index LED index
+ * @param r Red (0-255)
+ * @param g Green (0-255)
+ * @param b Blue (0-255)
+ * @param ww Warm white (0-255, ~2700-3000K)
+ * @param cw Cool white (0-255, ~5000-6500K)
+ * @return true on success
+ */
+bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
+{
+    if (!_driver || !isInitialized()) return false;
+
+    // Check if this LED should be skipped (forced to black)
+    if (_config)
+    {
+        // Fast path: First N LEDs (O(1), ~2 cycles)
+        if (index < _config->getSkipFirstLeds())
+        {
+            r = g = b = ww = cw = 0;
+        }
+        // Flexible path: Bitset (O(1), ~3 cycles, only if mask initialized)
+        else if (_config->isLedSkipped(index))
+        {
+            r = g = b = ww = cw = 0;
+        }
+        // Apply gamma correction if enabled (O(1) lookup table)
+        else if (_config->isGammaCorrectionEnabled())
+        {
+            // Remember which channels had color before gamma
+            bool hadR = (r > 0), hadG = (g > 0), hadB = (b > 0);
+            bool hadWW = (ww > 0), hadCW = (cw > 0);
+
+            r = _config->getGammaCorrectedValue(r);
+            g = _config->getGammaCorrectedValue(g);
+            b = _config->getGammaCorrectedValue(b);
+            ww = _config->getGammaCorrectedValue(ww);
+            cw = _config->getGammaCorrectedValue(cw);
+
+            // Minimum value protection: if a channel had color, ensure it doesn't go to 0
+            if (hadR && r == 0) r = 1;
+            if (hadG && g == 0) g = 1;
+            if (hadB && b == 0) b = 1;
+            if (hadWW && ww == 0) ww = 1;
+            if (hadCW && cw == 0) cw = 1;
+        }
+
+        // Apply white balance correction if enabled (RGB only, not WW/CW)
+        if (_config->isWhiteBalanceEnabled())
+        {
+            _config->applyWhiteBalance(r, g, b);
+        }
+    }
+
+    // Pass RGBCCT directly to driver - driver handles ColorOrder mapping
+    return _driver->setPixel(index, r, g, b, ww, cw);
+}
+
+/**
+ * @brief Set all LEDs to same color (RGBCCT - 5 channel)
+ * @param r Red (0-255)
+ * @param g Green (0-255)
+ * @param b Blue (0-255)
+ * @param ww Warm white (0-255)
+ * @param cw Cool white (0-255)
+ */
+void PhysicalStrip::setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
+{
+    if (!_driver || !isInitialized()) return;
+
+    for (uint16_t i = 0; i < _ledCount; i++)
+    {
+        setPixel(i, r, g, b, ww, cw);
+    }
+}
+
+/**
  * @brief Turn off all LEDs (black)
  */
 void PhysicalStrip::clear()

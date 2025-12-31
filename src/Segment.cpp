@@ -166,6 +166,47 @@ void Segment::setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 }
 
 /**
+ * @brief Set single pixel - RGBCCT (5-channel)
+ * @param index Pixel index within the segment
+ * @param r Red component (0-255)
+ * @param g Green component (0-255)
+ * @param b Blue component (0-255)
+ * @param ww Warm white component (0-255, ~2700-3000K)
+ * @param cw Cool white component (0-255, ~5000-6500K)
+ * @return true on success, false on failure
+ */
+bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
+{
+    if (!_virtualStrip || index >= _length)
+    {
+        return false;
+    }
+
+    uint16_t virtualIndex = _startLed + index;
+
+    _dirty = true;
+    return _virtualStrip->setPixel(virtualIndex, r, g, b, ww, cw);
+}
+
+/**
+ * @brief Set all pixels - RGBCCT (5-channel)
+ * @param r Red component (0-255)
+ * @param g Green component (0-255)
+ * @param b Blue component (0-255)
+ * @param ww Warm white component (0-255)
+ * @param cw Cool white component (0-255)
+ */
+void Segment::setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
+{
+    if (!_virtualStrip) return;
+
+    for (uint16_t i = 0; i < _length; i++)
+    {
+        setPixel(i, r, g, b, ww, cw);
+    }
+}
+
+/**
  * @brief Clear all pixels - RGB
  */
 void Segment::clear()
@@ -218,6 +259,27 @@ bool Segment::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8
 
     uint16_t virtualIndex = _startLed + index;
     return _virtualStrip->getPixel(virtualIndex, r, g, b, w);
+}
+
+/**
+ * @brief Get pixel - RGBCCT (5-channel)
+ * @param index Pixel index within the segment
+ * @param r Reference to store Red component (0-255)
+ * @param g Reference to store Green component (0-255)
+ * @param b Reference to store Blue component (0-255)
+ * @param ww Reference to store Warm White component (0-255)
+ * @param cw Reference to store Cool White component (0-255)
+ * @return true on success, false on failure
+ */
+bool Segment::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& ww, uint8_t& cw) const
+{
+    if (!_virtualStrip || index >= _length)
+    {
+        return false;
+    }
+
+    uint16_t virtualIndex = _startLed + index;
+    return _virtualStrip->getPixel(virtualIndex, r, g, b, ww, cw);
 }
 
 /**

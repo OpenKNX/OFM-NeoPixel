@@ -638,7 +638,7 @@ bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
     // CRITICAL: Don't modify buffer while DMA transfer is in progress!
     if (_inst->busy) return false;
 
-    rgbToBuffer(index, r, g, b, 0);
+    rgbToBuffer(index, r, g, b, 0, 0);
     return true;
 }
 
@@ -663,7 +663,33 @@ bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
     // CRITICAL: Don't modify buffer while DMA transfer is in progress!
     if (_inst->busy) return false;
 
-    rgbToBuffer(index, r, g, b, w);
+    rgbToBuffer(index, r, g, b, w, 0);
+    return true;
+}
+
+/**
+ * @brief Sets RGBCCT color values for an LED (5-channel)
+ *
+ * Stores RGBCCT color values for a specific LED in the internal buffer.
+ * Only available for LED types with dual white channels (warm + cool white).
+ *
+ * @param index LED index (0-based)
+ * @param r Red component (0-255)
+ * @param g Green component (0-255)
+ * @param b Blue component (0-255)
+ * @param ww Warm White component (0-255)
+ * @param cw Cool White component (0-255)
+ * @return true if successful, false if index invalid or not an RGBCCT strip
+ */
+bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
+{
+    if (!_inst || !_inst->buffer || index >= _inst->ledCount) return false;
+    if (_inst->bytesPerLed < 5) return false; // Not RGBCCT
+
+    // CRITICAL: Don't modify buffer while DMA transfer is in progress!
+    if (_inst->busy) return false;
+
+    rgbToBuffer(index, r, g, b, ww, cw);
     return true;
 }
 
@@ -677,9 +703,10 @@ bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
  * @param r Red component
  * @param g Green component
  * @param b Blue component
- * @param w White component (optional)
+ * @param ww Warm White component (optional, 0 for RGB/RGBW)
+ * @param cw Cool White component (optional, 0 for RGB/RGBW)
  */
-void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
+void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
 {
     if (!_inst || !_inst->buffer) return;
 
@@ -722,14 +749,47 @@ void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
             _inst->buffer[offset] = r;
             _inst->buffer[offset + 1] = g;
             _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = w;
+            _inst->buffer[offset + 3] = ww; // Use ww as single white
             break;
 
         case ColorOrder::GRBW:
             _inst->buffer[offset] = g;
             _inst->buffer[offset + 1] = r;
             _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = w;
+            _inst->buffer[offset + 3] = ww; // Use ww as single white
+            break;
+
+        // 5-channel color orders (RGBCCT)
+        case ColorOrder::RGBCCT:
+            _inst->buffer[offset] = r;
+            _inst->buffer[offset + 1] = g;
+            _inst->buffer[offset + 2] = b;
+            _inst->buffer[offset + 3] = ww;
+            _inst->buffer[offset + 4] = cw;
+            break;
+
+        case ColorOrder::GRBCCT:
+            _inst->buffer[offset] = g;
+            _inst->buffer[offset + 1] = r;
+            _inst->buffer[offset + 2] = b;
+            _inst->buffer[offset + 3] = ww;
+            _inst->buffer[offset + 4] = cw;
+            break;
+
+        case ColorOrder::RGBCTW:
+            _inst->buffer[offset] = r;
+            _inst->buffer[offset + 1] = g;
+            _inst->buffer[offset + 2] = b;
+            _inst->buffer[offset + 3] = cw; // Cool white first
+            _inst->buffer[offset + 4] = ww; // Warm white second
+            break;
+
+        case ColorOrder::GRBCTW:
+            _inst->buffer[offset] = g;
+            _inst->buffer[offset + 1] = r;
+            _inst->buffer[offset + 2] = b;
+            _inst->buffer[offset + 3] = cw; // Cool white first
+            _inst->buffer[offset + 4] = ww; // Warm white second
             break;
 
         default:

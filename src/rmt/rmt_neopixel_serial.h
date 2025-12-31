@@ -71,6 +71,7 @@ class RMT_NeoPixel_Serial : public IHardwareDriver
     bool init() override;
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b) override;
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w) override;
+    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw) override;
     bool show() override;
     bool isBusy() override;
     void clear() override;
@@ -104,7 +105,7 @@ class RMT_NeoPixel_Serial : public IHardwareDriver
   private:
     rmt_neopixel_serial_inst_t* _inst;
 
-    void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
+    void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww = 0, uint8_t cw = 0);
 
   public:
     /**
