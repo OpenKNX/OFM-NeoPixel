@@ -102,7 +102,8 @@ enum class ColorOrder
  */
 struct DriverCapabilities
 {
-    bool supportsRGBW;     // Supports 32-bit RGBW
+    bool supportsRGBW;     // Supports 32-bit RGBW (4 channels)
+    bool supportsRGBCCT;   // Supports 40-bit RGBCCT (5 channels)
     bool supportsDMA;      // DMA transfer available
     bool supportsAsync;    // Non-blocking show() possible
     uint32_t maxFrequency; // Maximum update frequency (Hz)
@@ -171,8 +172,15 @@ namespace ProtocolHelper
      */
     inline bool is1Wire(LedProtocol protocol)
     {
-        return protocol >= LedProtocol::WS2812 &&
-               protocol <= LedProtocol::GS8208;
+        // Standard 1-Wire protocols (WS2812 to GS8208)
+        if (protocol >= LedProtocol::WS2812 && protocol <= LedProtocol::GS8208)
+            return true;
+        // 5-Channel RGBCCT protocols (also 1-Wire)
+        if (protocol == LedProtocol::SK6812_RGBCCT ||
+            protocol == LedProtocol::WS2814_RGBCCT ||
+            protocol == LedProtocol::WS2805_RGBCCT)
+            return true;
+        return false;
     }
 
     /**
@@ -299,9 +307,14 @@ namespace ProtocolHelper
      */
     inline uint32_t getDefaultFrequency(LedProtocol protocol)
     {
-        if (protocol == LedProtocol::WS2811 || protocol == LedProtocol::WS2805_RGBCCT)
+        if (protocol == LedProtocol::WS2811)
         {
-            return 400000; // 400kHz
+            return 400000; // 400kHz (WS2811 slow mode)
+        }
+        if (protocol == LedProtocol::WS2805 ||
+            protocol == LedProtocol::WS2805_RGBCCT)
+        {
+            return 917431; // uses ~917kHz (300ns + 790ns = 1090ns per bit)
         }
         if (isSPI(protocol))
         {
