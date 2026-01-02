@@ -25,7 +25,6 @@ struct PhysicalStripConfig;
 enum class LedProtocol
 {
     // 1-Wire Protocols (Clock embedded in data)
-    WS2805,  // 12V RGB, 400kHz, RGB order
     WS2812,  // 5V RGB, 800kHz, GRB order
     WS2812B, // Same as WS2812 (common variant)
     WS2813,  // 5V RGB, 800kHz, GRB, data backup
@@ -40,7 +39,7 @@ enum class LedProtocol
     // 5-Channel Protocols (RGB + Warm White + Cool White = CCT)
     SK6812_RGBCCT, // 5V RGBCCT (5-channel), 800kHz, GRBCCT order
     WS2814_RGBCCT, // 12V RGBCCT (5-channel), 800kHz, GRBCCT order
-    WS2805_RGBCCT, // 12V RGBCCT (5-channel), 400kHz, GRBCCT order
+    WS2805_RGBCCT, // 12V/24V RGBCCT (5-channel), 917kHz, GRBCCT order
 
     // SPI Protocols (Separate clock and data)
     APA102,       // 5V RGB+Brightness, up to 20MHz (original chip)
@@ -311,8 +310,7 @@ namespace ProtocolHelper
         {
             return 400000; // 400kHz (WS2811 slow mode)
         }
-        if (protocol == LedProtocol::WS2805 ||
-            protocol == LedProtocol::WS2805_RGBCCT)
+        if (protocol == LedProtocol::WS2805_RGBCCT)
         {
             return 917431; // uses ~917kHz (300ns + 790ns = 1090ns per bit)
         }

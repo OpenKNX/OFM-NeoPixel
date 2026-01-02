@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file VirtualStrip.cpp
  * @brief VirtualStrip Implementation - Unified RGB/RGBW Buffer Management
  *
@@ -522,12 +522,13 @@ bool VirtualStrip::syncToPhysical()
 
         // Read RGB from VirtualStrip buffer, send to PhysicalStrip
         // PhysicalStrip handles ColorOrder conversion based on its hardware
-        // Check if this PHYSICAL strip supports RGBW (not the virtual strip)
-        bool physicalIsRGBW = (pstrip->getColorOrder() >= ColorOrder::RGBW);
+        // Check if this PHYSICAL strip supports RGBW or RGBCCT
+        bool physicalIsRGBW = ProtocolHelper::hasWhiteChannel(pstrip->getColorOrder());
+        bool physicalIsRGBCCT = ProtocolHelper::hasDualWhiteChannel(pstrip->getColorOrder());
 
         for (uint16_t i = 0; i < count; i++)
         {
-            uint8_t r, g, b, w = 0;
+            uint8_t r, g, b, ww = 0, cw = 0;
 
             // Normal operation: read from virtual buffer
             uint16_t virtualIdx = offset + i;
@@ -539,25 +540,34 @@ bool VirtualStrip::syncToPhysical()
             b = _buffer[bufferOffset + 2]; // Blue
             if (_bytesPerLed >= 4)
             {
-                w = _buffer[bufferOffset + 3]; // White or Brightness
+                ww = _buffer[bufferOffset + 3]; // Warm White (or single White for RGBW)
+            }
+            if (_bytesPerLed >= 5)
+            {
+                cw = _buffer[bufferOffset + 4]; // Cool White
             }
 
             // Apply pixel transform callback (HCL, gamma, etc.) if set
             // This transforms the pixel BEFORE sending to hardware, without modifying the buffer
             if (_pixelTransformCallback)
             {
-                _pixelTransformCallback(r, g, b, (_bytesPerLed >= 4) ? &w : nullptr, _pixelTransformUserData);
+                _pixelTransformCallback(r, g, b, (_bytesPerLed >= 4) ? &ww : nullptr, _pixelTransformUserData);
             }
 
-            // Send RGBW to RGBW strips, RGB to RGB strips
-            if (physicalIsRGBW && _bytesPerLed >= 4)
+            // Send to physical strip based on its capabilities
+            if (physicalIsRGBCCT && _bytesPerLed >= 5)
+            {
+                // Physical strip supports RGBCCT and virtual buffer has WW+CW channels
+                pstrip->setPixel(i, r, g, b, ww, cw);
+            }
+            else if (physicalIsRGBW && _bytesPerLed >= 4)
             {
                 // Physical strip supports RGBW and virtual buffer has W channel
-                pstrip->setPixel(i, r, g, b, w);
+                pstrip->setPixel(i, r, g, b, ww);
             }
             else
             {
-                // Physical strip is RGB only, send RGB (ignore W channel if present)
+                // Physical strip is RGB only, send RGB (ignore W channels if present)
                 pstrip->setPixel(i, r, g, b);
             }
         }

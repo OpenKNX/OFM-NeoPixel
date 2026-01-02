@@ -61,8 +61,9 @@ struct pio_neopixel_serial_inst
     uint8_t* buffer;   // LED data buffer (RGB/RGBW bytes)
     size_t bufferSize; // Buffer size in bytes
 
-    uint32_t* dmaBuffer;  // DMA transfer buffer (32-bit words) - PACKED!
-    size_t dmaBufferSize; // DMA buffer size in 32-bit words
+    uint32_t* dmaBuffer;  // DMA transfer buffer (32-bit words) - for RGB/RGBW only, nullptr for RGBCCT
+    size_t dmaBufferSize; // DMA buffer size (in words/halfwords/bytes depending on fifoWordBits)
+    uint fifoWordBits;    // FIFO word size in bits (8/16/32) - for RGBCCT dynamic sizing
 
     int dmaChannel;     // DMA channel (-1 if not used)
     int dmaIrqNum;      // DMA IRQ number (0 or 1, -1 if not used)
