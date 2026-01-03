@@ -33,6 +33,7 @@
 // #define NEOPIXEL_DISABLE_BPM
 // #define NEOPIXEL_DISABLE_CYLON
 // #define NEOPIXEL_DISABLE_RGBWTEST
+// #define NEOPIXEL_DISABLE_RGBCCTTEST
 // #define NEOPIXEL_DISABLE_GARAGEDOOR
 // #define NEOPIXEL_DISABLE_FIRE
 // #define NEOPIXEL_DISABLE_THEATERCHASE
@@ -84,6 +85,10 @@
 
 #ifndef NEOPIXEL_DISABLE_RGBWTEST
     #include "RGBWTestEffect.h"
+#endif
+
+#ifndef NEOPIXEL_DISABLE_RGBCCTTEST
+    #include "RGBCCTTestEffect.h"
 #endif
 
 #ifndef NEOPIXEL_DISABLE_GARAGEDOOR
@@ -188,6 +193,10 @@ static CylonEffect* s_cylon = nullptr;
 
 #ifndef NEOPIXEL_DISABLE_RGBWTEST
 static RGBWTestEffect* s_rgbwTest = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_RGBCCTTEST
+static RGBCCTTestEffect* s_rgbcctTest = nullptr;
 #endif
 
 #ifndef NEOPIXEL_DISABLE_GARAGEDOOR
@@ -388,6 +397,23 @@ Effect* EffectPool::getRGBWTest()
         s_rgbwTest = new RGBWTestEffect();
     }
     return s_rgbwTest;
+}
+
+/**
+ * @brief Get RGBCCT 5-Channel Test Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getRGBCCTTest()
+{
+    #ifndef NEOPIXEL_DISABLE_RGBCCTTEST
+    if (!s_rgbcctTest)
+    {
+        s_rgbcctTest = new RGBCCTTestEffect();
+    }
+    return s_rgbcctTest;
+    #else
+    return nullptr;
+    #endif
 }
 
 /**
@@ -675,6 +701,9 @@ uint8_t EffectPool::getEffectCount()
     #ifndef NEOPIXEL_DISABLE_GRADIENT
     count++;
     #endif
+    #ifndef NEOPIXEL_DISABLE_RGBCCTTEST
+    count++;
+    #endif
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 
     return count;
@@ -764,6 +793,9 @@ Effect* EffectPool::getEffectByIndex(uint8_t index)
     #endif
     #ifndef NEOPIXEL_DISABLE_GRADIENT
     if (index == currentIndex++) return getGradient();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_RGBCCTTEST
+    if (index == currentIndex++) return getRGBCCTTest();
     #endif
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 

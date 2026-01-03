@@ -64,32 +64,36 @@ class TheaterChaseEffect : public Effect
         {
             if (trailMode)
             {
-                // Fade existing pixels for trail effect
-                uint8_t r, g, b;
-                segment->getPixel(i, r, g, b);
+                // Fade existing pixels for trail effect (5-channel support)
+                uint8_t r, g, b, ww, cw;
+                segment->getPixel(i, r, g, b, ww, cw);
                 r = r * 0.85; // 15% fade
                 g = g * 0.85;
                 b = b * 0.85;
-                segment->setPixel(i, r, g, b);
+                ww = ww * 0.85;
+                cw = cw * 0.85;
+                segment->setPixel(i, r, g, b, ww, cw);
             }
             else
             {
-                segment->setPixel(i, 0, 0, 0);
+                segment->setPixel(i, 0, 0, 0, 0, 0);
             }
         }
 
         // Light pixels starting from current position with dot size
         for (uint16_t i = _position; i < length; i += spacing)
         {
-            // Apply master brightness to configured color
+            // Apply master brightness to configured color (5-channel support)
             uint8_t r = FastLEDMath::scale8(config.r(), config.intensity);
             uint8_t g = FastLEDMath::scale8(config.g(), config.intensity);
             uint8_t b = FastLEDMath::scale8(config.b(), config.intensity);
+            uint8_t ww = FastLEDMath::scale8(config.ww(), config.intensity);
+            uint8_t cw = FastLEDMath::scale8(config.cw(), config.intensity);
 
             // Set multiple pixels for larger dot size
             for (uint8_t d = 0; d < dotSize && (i + d) < length; d++)
             {
-                segment->setPixel(i + d, r, g, b);
+                segment->setPixel(i + d, r, g, b, ww, cw);
             }
         }
 

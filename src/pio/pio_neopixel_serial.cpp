@@ -68,11 +68,11 @@ static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, u
     // ===== GPIO OPTIMIZATION FOR HIGH-SPEED SERIAL (800 kHz - 1.25 MHz) =====
 
     // 1. Set GPIO drive strength and slew rate FIRST (persist through pio_gpio_init)
-    gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_12MA);
-    gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
+    // gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_12MA);
+    // gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
     // reduced aggressiveness:
-    // gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_4MA);
-    // gpio_set_slew_rate(pin, GPIO_SLEW_RATE_SLOW);
+    gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_4MA);
+    gpio_set_slew_rate(pin, GPIO_SLEW_RATE_SLOW);
 
     // 2. Transfer pin to PIO control (before setting state!)
     pio_gpio_init(pio, pin);

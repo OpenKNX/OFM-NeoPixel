@@ -14,17 +14,19 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
 
     EffectState& state = segment->getState(); // Get state (read/write)
 
-    // Use config getter methods for primary color (wipe color)
+    // Use config getter methods for primary color (wipe color) - 5-channel support
     uint8_t r = config.r();
     uint8_t g = config.g();
     uint8_t b = config.b();
-    uint8_t w = config.w();
+    uint8_t ww = config.ww();
+    uint8_t cw = config.cw();
 
-    // Use config getter methods for secondary color (background color)
+    // Use config getter methods for secondary color (background color) - 5-channel support
     uint8_t bgR = config.r2();
     uint8_t bgG = config.g2();
     uint8_t bgB = config.b2();
-    uint8_t bgW = config.w2();
+    uint8_t bgWW = config.ww2();
+    uint8_t bgCW = config.cw2();
 
     const uint8_t speedVal = config.speed; // 0 means "fastest"
 
@@ -47,28 +49,14 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
             case WIPE_LEFT_TO_RIGHT: // Simple left-to-right, direct mapping
                 if (state.position < length)
                 {
-                    if (w > 0)
-                    {
-                        segment->setPixel(state.position, r, g, b, w); // Set pixel (wipe color)
-                    }
-                    else
-                    {
-                        segment->setPixel(state.position, r, g, b); // Set pixel (wipe color)
-                    }
+                    segment->setPixel(state.position, r, g, b, ww, cw);
                 }
                 break;
 
             case WIPE_RIGHT_TO_LEFT: // Right-to-left, reverse index
                 if (state.position < length)
                 {
-                    if (w > 0)
-                    {
-                        segment->setPixel(length - 1 - state.position, r, g, b, w); // Set pixel (wipe color)
-                    }
-                    else
-                    {
-                        segment->setPixel(length - 1 - state.position, r, g, b); // Set pixel (wipe color)
-                    }
+                    segment->setPixel(length - 1 - state.position, r, g, b, ww, cw);
                 }
                 break;
 
@@ -78,14 +66,7 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
                 // For now, treat as left-to-right (1D strips)
                 if (state.position < length)
                 {
-                    if (w > 0)
-                    {
-                        segment->setPixel(state.position, r, g, b, w);
-                    }
-                    else
-                    {
-                        segment->setPixel(state.position, r, g, b);
-                    }
+                    segment->setPixel(state.position, r, g, b, ww, cw);
                 }
                 // ToDo: Add matrix dimensions to EffectConfig if needed
                 break;
@@ -101,14 +82,7 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
                     uint16_t idx = center + offset;
                     if (idx < length)
                     {
-                        if (w > 0)
-                        {
-                            segment->setPixel(idx, r, g, b, w);
-                        }
-                        else
-                        {
-                            segment->setPixel(idx, r, g, b);
-                        }
+                        segment->setPixel(idx, r, g, b, ww, cw);
                     }
                 }
                 else
@@ -117,14 +91,7 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
                     int16_t idx = center - offset - 1;
                     if (idx >= 0)
                     {
-                        if (w > 0)
-                        {
-                            segment->setPixel(idx, r, g, b, w);
-                        }
-                        else
-                        {
-                            segment->setPixel(idx, r, g, b);
-                        }
+                        segment->setPixel(idx, r, g, b, ww, cw);
                     }
                 }
             }
@@ -139,28 +106,14 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
                     // Even: from left edge
                     if (offset < length / 2)
                     {
-                        if (w > 0)
-                        {
-                            segment->setPixel(offset, r, g, b, w);
-                        }
-                        else
-                        {
-                            segment->setPixel(offset, r, g, b);
-                        }
+                        segment->setPixel(offset, r, g, b, ww, cw);
                     }
                 }
                 else
                 {
                     if (offset < length / 2) // From the right edge, towards center
                     {
-                        if (w > 0)
-                        {
-                            segment->setPixel(length - 1 - offset, r, g, b, w);
-                        }
-                        else
-                        {
-                            segment->setPixel(length - 1 - offset, r, g, b);
-                        }
+                        segment->setPixel(length - 1 - offset, r, g, b, ww, cw);
                     }
                 }
             }
@@ -171,14 +124,7 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
         {
             for (uint16_t i = 0; i < length; i++) // Clear all pixels to background color
             {
-                if (bgW > 0)
-                {
-                    segment->setPixel(i, bgR, bgG, bgB, bgW);
-                }
-                else
-                {
-                    segment->setPixel(i, bgR, bgG, bgB);
-                }
+                segment->setPixel(i, bgR, bgG, bgB, bgWW, bgCW);
             }
             state.position = 0;
         }

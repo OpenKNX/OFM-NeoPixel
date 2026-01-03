@@ -81,27 +81,31 @@ class PulseEffect : public Effect
         uint8_t currentBrightness = FastLEDMath::scale8(config.intensity, pulse);
 
         // Apply to all pixels
-        uint8_t r, g, b;
+        uint8_t r, g, b, ww, cw;
         if (rainbowPulse)
         {
-            // Rainbow pulse mode
+            // Rainbow pulse mode (no white channels)
             uint8_t hue = (_time / 30) % 256; // Medium speed hue cycle
             uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, currentBrightness);
             r = (rgb >> 16) & 0xFF;
             g = (rgb >> 8) & 0xFF;
             b = rgb & 0xFF;
+            ww = 0;
+            cw = 0;
         }
         else
         {
-            // Use configured color
+            // Use configured color with 5-channel support
             r = FastLEDMath::scale8(config.r(), currentBrightness);
             g = FastLEDMath::scale8(config.g(), currentBrightness);
             b = FastLEDMath::scale8(config.b(), currentBrightness);
+            ww = FastLEDMath::scale8(config.ww(), currentBrightness);
+            cw = FastLEDMath::scale8(config.cw(), currentBrightness);
         }
 
         for (uint16_t i = 0; i < length; i++)
         {
-            segment->setPixel(i, r, g, b);
+            segment->setPixel(i, r, g, b, ww, cw);
         }
     }
 
