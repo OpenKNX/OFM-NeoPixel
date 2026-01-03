@@ -39,7 +39,7 @@ enum class LedProtocol
     // 5-Channel Protocols (RGB + Warm White + Cool White = CCT)
     SK6812_RGBCCT, // 5V RGBCCT (5-channel), 800kHz, GRBCCT order
     WS2814_RGBCCT, // 12V RGBCCT (5-channel), 800kHz, GRBCCT order
-    WS2805_RGBCCT, // 12V/24V RGBCCT (5-channel), 917kHz, GRBCCT order
+    WS2805_RGBCCT, // 12V/24V RGBCCT (5-channel), 800kHz, GRBCCT order
 
     // SPI Protocols (Separate clock and data)
     APA102,       // 5V RGB+Brightness, up to 20MHz (original chip)

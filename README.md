@@ -825,7 +825,7 @@ build_flags =
 | SK6805   | 5V      | RGBW   | 800kHz | GRBW | 4-channel |
 | WS2814   | 12V     | RGBW   | 800kHz | GRBW | 4-channel |
 | WS2814_RGBCCT | 12V     | RGBCCT | 800kHz | RGBCCT/GRBCCT/RGBCTW/GRBCTW | 5-channel (RGB+WW+CW) |
-| WS2805_RGBCCT | 12V     | RGBCCT | 400kHz | RGBCCT/GRBCCT/RGBCTW/GRBCTW | 5-channel (RGB+WW+CW), slow timing |
+| WS2805_RGBCCT | 12V/24V     | RGBCCT | 800kHz | GRBCCT | 5-channel (RGB+WW+CW) |
 | TM1814   | 12V     | RGBW   | 800kHz | GRBW | 4-channel |
 | GS8208   | 12V     | RGB    | 800kHz | GRB | High voltage |
 

@@ -226,10 +226,10 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     //
     // RGB (3 bytes): 24-bit autopull, 1 uint32_t per LED (packed into 32-bit word)
     // RGBW (4 bytes): 32-bit autopull, 1 uint32_t per LED (perfect fit)
-    // RGBCCT (5 bytes): NO separate buffer!
+    // RGBCCT (5 bytes): NO separate packed buffer!
     //                   - Send byte buffer directly with bswap=true
-    //                   - Dynamic transfer size based on buffer alignment
-    //   dmaTransferSize and autopull must match!
+    //                   - Always 32-bit transfers (buffer padded to 4-byte alignment)
+    //                   - 32-bit autopull matches DMA transfer size
     if (useDMA)
     {
         // Calculate DMA buffer size based on LED type
@@ -565,7 +565,7 @@ bool PIO_NeoPixel_Serial::initPIO()
     uint32_t gpio_count = 1;
 
     bool success = pio_claim_free_sm_and_add_program_for_gpio_range(
-        selected_program, // PIO program (WS2805 or standard)
+        selected_program, // PIO program (WS2812B for all protocols)
         &pio_temp,        // Return PIO instance
         &sm_temp,         // Return state machine index
         &offset_temp,     // Return program offset
@@ -591,7 +591,7 @@ bool PIO_NeoPixel_Serial::initPIO()
     uint offset_temp = 0;
 
     bool success = pio_claim_free_sm_and_add_program(
-        selected_program, // PIO program (WS2805 or standard)
+        selected_program, // PIO program (WS2812B for all protocols)
         &pio_temp,        // Return PIO instance
         &sm_temp,         // Return state machine index
         &offset_temp      // Return program offset
