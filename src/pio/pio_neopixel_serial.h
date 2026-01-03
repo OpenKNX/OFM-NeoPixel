@@ -58,8 +58,9 @@ struct pio_neopixel_serial_inst
     float actual_bitrate;  // Actual bitrate used (may differ for AUTO_LEGACY)
     float actual_clkdiv;   // Actual clock divider used
 
-    uint8_t* buffer;   // LED data buffer (RGB/RGBW bytes)
-    size_t bufferSize; // Buffer size in bytes
+    uint8_t* buffer;        // LED data buffer (RGB/RGBW bytes) - user writes here
+    uint8_t* bufferSending; // RGBCCT only: DMA reads from here (double-buffer)
+    size_t bufferSize;      // Buffer size in bytes
 
     uint32_t* dmaBuffer;  // DMA transfer buffer (32-bit words) - for RGB/RGBW only, nullptr for RGBCCT
     size_t dmaBufferSize; // DMA buffer size (in words/halfwords/bytes depending on fifoWordBits)
@@ -69,7 +70,12 @@ struct pio_neopixel_serial_inst
     int dmaIrqNum;      // DMA IRQ number (0 or 1, -1 if not used)
     bool useDMA;        // Use DMA for transfers
     bool initialized;   // Initialization state
-    volatile bool busy; // Transfer in progress
+    volatile bool busy; // DMA transfer in progress
+
+    // Latch timing - prevents starting new transfer too early
+    volatile uint32_t fifoEmptyTime; // micros() when FIFO became empty (for reset timing)
+    uint32_t resetTimeUs;            // Required reset/latch time (50-300µs depending on protocol)
+    volatile bool waitingForReset;   // True after FIFO empty, waiting for reset pulse
 };
 typedef struct pio_neopixel_serial_inst pio_neopixel_serial_inst_t;
 

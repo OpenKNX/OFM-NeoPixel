@@ -310,10 +310,6 @@ namespace ProtocolHelper
         {
             return 400000; // 400kHz (WS2811 slow mode)
         }
-        if (protocol == LedProtocol::WS2805_RGBCCT)
-        {
-            return 917431; // uses ~917kHz (300ns + 790ns = 1090ns per bit)
-        }
         if (isSPI(protocol))
         {
             switch (protocol)
