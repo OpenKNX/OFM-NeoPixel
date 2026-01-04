@@ -131,7 +131,7 @@ class VirtualStrip
     // Pixel Transform Callback (for HCL, color correction, etc.)
     // ====================================================================
     /**
-     * @brief Pixel transform callback type
+     * @brief Pixel transform callback type for RGBCCT (5-channel) support
      *
      * Called during syncToPhysical() for each pixel BEFORE sending to hardware.
      * This allows post-processing (HCL, gamma, etc.) without modifying the
@@ -140,10 +140,16 @@ class VirtualStrip
      * @param r Red component (in/out)
      * @param g Green component (in/out)
      * @param b Blue component (in/out)
-     * @param w White component (in/out, only valid if hasWhiteChannel)
+     * @param ww Warm White component (in/out, nullptr for RGB strips)
+     * @param cw Cool White component (in/out, nullptr for RGB/RGBW strips)
      * @param userData User-provided context pointer
+     *
+     * For HCL color temperature control on RGBCCT strips:
+     * - Warm Kelvin (2700K): ww high, cw low
+     * - Cool Kelvin (6500K): ww low, cw high
+     * - Neutral: blend of both
      */
-    using PixelTransformCallback = void (*)(uint8_t& r, uint8_t& g, uint8_t& b, uint8_t* w, void* userData);
+    using PixelTransformCallback = void (*)(uint8_t& r, uint8_t& g, uint8_t& b, uint8_t* ww, uint8_t* cw, void* userData);
 
     /**
      * @brief Set pixel transform callback for post-processing during sync

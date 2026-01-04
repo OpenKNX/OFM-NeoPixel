@@ -303,7 +303,7 @@ void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
 bool VirtualStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
     if (index >= _totalLeds) return false;
-    writePixelToBuffer(index, r, g, b, 0);
+    writePixelToBuffer(index, r, g, b, 0, 0);
     _dirty = true;
     return true;
 }
@@ -551,7 +551,13 @@ bool VirtualStrip::syncToPhysical()
             // This transforms the pixel BEFORE sending to hardware, without modifying the buffer
             if (_pixelTransformCallback)
             {
-                _pixelTransformCallback(r, g, b, (_bytesPerLed >= 4) ? &ww : nullptr, _pixelTransformUserData);
+                // Pass WW and CW pointers based on buffer type
+                // For RGBCCT: both ww and cw are valid
+                // For RGBW: only ww is valid (cw is nullptr)
+                // For RGB: both are nullptr
+                uint8_t* wwPtr = (_bytesPerLed >= 4) ? &ww : nullptr;
+                uint8_t* cwPtr = (_bytesPerLed >= 5) ? &cw : nullptr;
+                _pixelTransformCallback(r, g, b, wwPtr, cwPtr, _pixelTransformUserData);
             }
 
             // Send to physical strip based on its capabilities
