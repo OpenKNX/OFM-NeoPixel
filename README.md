@@ -42,7 +42,8 @@ A high-performance, hardware-optimized LED control library for addressable RGB/R
   - [How It Works](#how-it-works)
   - [LED Current Profiles](#led-current-profiles)
   - [Configuration](#configuration)
-  - [Monitoring Power Consumption](#monitoring-power-consumption)
+  - [Advanced Power Management Features](#advanced-power-management-features)
+  - [Power Monitoring](#power-monitoring)
   - [Practical Examples](#practical-examples)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
@@ -119,10 +120,21 @@ This design enables complex LED configurations with minimal CPU overhead through
 - **Module Lifecycle**: Clean initialization and shutdown hooks
 - **KNX Bus Ready**: Prepares for GroupObject integration (planned)
 
+### Power Management (Enhanced)
+
+- **Three Power Modes**: GLOBAL (total budget), PER_CHANNEL (per output), PER_LED (per individual LED)
+- **Soft-Limiting**: Threshold-based gradual dimming instead of hard cutoff
+- **Auto Brightness Cap**: Maximum brightness limit independent of power consumption
+- **Slew Rate Control**: Smooth brightness transitions during power limiting
+- **5-Channel RGBCCT Profiles**: WS2805, SK6812_RGBCCT, WS2814_RGBCCT current profiles
+- **Requested vs. Actual Power**: Track both before and after limiting
+- **Real-Time Monitoring**: Current consumption tracking via console or API
+
 ### Effect System
 
 - **Parameter Introspection API**: Effects describe their own parameters
 - **Auto-Generated UI**: Console and web UI generate automatically
+- **5-Channel RGBCCT Support**: Effects support RGB + Warm White + Cool White LEDs
 - **12 Parameter Types**: UINT8, BOOL, COLOR_RGB, PERCENT, ENUM, etc.
 - **Zero Code Changes**: Add new effects without modifying Segment/Console/UI
 - **Type-Safe**: ParameterType enum for validation
@@ -2070,12 +2082,29 @@ Different LED types have different current consumption:
 | SK6812 RGBW | 20  | 20     | 20     | 20     | 80mA          |
 | APA102   | 15     | 15     | 15     | -      | 45mA          |
 
+**5-Channel RGBCCT LED Types:**
+
+| LED Type | R (mA) | G (mA) | B (mA) | WW (mA) | CW (mA) | Total @ White |
+|----------|--------|--------|--------|---------|---------|---------------|
+| SK6812 RGBCCT | 20 | 20   | 20     | 20      | 20      | 100mA         |
+| WS2814 RGBCCT | 20 | 20   | 20     | 20      | 20      | 100mA         |
+| WS2805 RGBCCT | 20 | 20   | 20     | 20      | 20      | 100mA         |
+
 **Predefined Profiles:**
 ```cpp
-LedProfiles::WS2812B       // 20mA per channel
-LedProfiles::SK6812_RGBW   // 20mA per channel + W
-LedProfiles::APA102        // 15mA per channel
-LedProfiles::CONSERVATIVE  // 20mA all channels (safe default)
+// RGB (3-channel)
+LedProfiles::WS2812B           // 20mA per channel (60mA max)
+LedProfiles::APA102            // 15mA per channel (45mA max)
+
+// RGBW (4-channel)
+LedProfiles::SK6812_RGBW       // 20mA per channel + W (80mA max)
+LedProfiles::CONSERVATIVE      // 20mA all channels (safe default)
+
+// RGBCCT (5-channel: RGB + Warm White + Cool White)
+LedProfiles::SK6812_RGBCCT     // 20mA all 5 channels (100mA max)
+LedProfiles::WS2814_RGBCCT     // 20mA all 5 channels (100mA max)
+LedProfiles::WS2805_RGBCCT     // 20mA all 5 channels (100mA max)
+LedProfiles::CONSERVATIVE_5CH  // 20mA all 5 channels (safe default)
 ```
 
 ### Configuration
@@ -2104,8 +2133,168 @@ void setup() {
 For non-standard LEDs with different current draws:
 
 ```cpp
-LedCurrentProfile customProfile(18, 22, 18, 0);  // R, G, B, W in mA
-mgr->getPowerManager()->setLedProfile(customProfile);
+// RGB (3-channel)
+LedCurrentProfile customRGB(18, 22, 18);
+
+// RGBW (4-channel)
+LedCurrentProfile customRGBW(18, 22, 18, 25);  // R, G, B, W in mA
+
+// RGBCCT (5-channel)
+LedCurrentProfile customRGBCCT(18, 22, 18, 20, 20);  // R, G, B, WW, CW in mA
+
+mgr->getPowerManager()->setLedProfile(customRGBCCT);
+```
+
+### Advanced Power Management Features
+
+#### Power Limit Modes
+
+Three different modes for current limiting:
+
+```cpp
+PowerManager* pm = mgr->getPowerManager();
+
+// GLOBAL (default): Total current across all strips
+pm->setPowerLimitMode(PowerLimitMode::GLOBAL);
+pm->setMaxCurrent(5000);  // 5A total
+
+// PER_CHANNEL: Limit per physical output channel
+pm->setPowerLimitMode(PowerLimitMode::PER_CHANNEL);
+pm->setMaxCurrentPerChannel(2000);  // 2A per channel
+
+// PER_LED: Limit per individual LED
+pm->setPowerLimitMode(PowerLimitMode::PER_LED);
+pm->setMaxCurrentPerLed(50);  // 50mA max per LED
+```
+
+| Mode | Use Case |
+|------|----------|
+| `GLOBAL` | Single power supply, total budget |
+| `PER_CHANNEL` | Multiple output channels, separate fusing |
+| `PER_LED` | Protect LEDs from over-driving |
+
+#### Soft-Limiting (Threshold)
+
+Gradual brightness reduction instead of hard cutoff:
+
+```cpp
+PowerManager* pm = mgr->getPowerManager();
+
+// Start dimming at 80% of limit (smooth transition)
+pm->setThresholdPercent(80);
+
+// With 1000mA limit and 80% threshold:
+//  - 0-800mA:    No limiting (full brightness)
+//  - 800-1000mA: Gradual brightness reduction (soft curve)
+//  - >1000mA:    Hard limit to 1000mA
+```
+
+**Why use soft-limiting?**
+- Prevents sudden brightness jumps during animations
+- Smoother visual transitions when approaching limit
+- Less noticeable power management intervention
+
+#### Auto Brightness Cap
+
+Maximum brightness limit independent of power consumption:
+
+```cpp
+PowerManager* pm = mgr->getPowerManager();
+
+// Cap brightness at 80% regardless of power consumption
+pm->setMaxBrightnessPercent(80);
+```
+
+**Use cases:**
+- Outdoor installations (prevent blinding)
+- Night mode operation
+- Preserving LED lifespan
+- Consistent brightness across different strip lengths
+
+#### Slew Rate Control (Smooth Transitions)
+
+Control how fast brightness changes when power limiting kicks in:
+
+```cpp
+PowerManager* pm = mgr->getPowerManager();
+
+// 50% brightness change per second (smooth)
+pm->setBrightnessSlewRate(50);
+
+// 0 = instant change (default)
+// 100 = full range in 1 second
+// 25 = full range in 4 seconds
+
+// IMPORTANT: Must call updateSlewRate() in your loop!
+void loop() {
+    uint32_t deltaTime = millis() - lastUpdate;
+    pm->updateSlewRate(deltaTime);
+    lastUpdate = millis();
+    
+    // ... rest of update logic
+}
+```
+
+**Why use slew rate?**
+- Prevents jarring brightness changes
+- Professional-looking power limiting
+- Reduces stress on power supply (gradual current changes)
+
+#### Combined Example:
+
+```cpp
+void setup() {
+    NeoPixelManager* mgr = neoPixelModule.getManager();
+    PowerManager* pm = mgr->getPowerManager();
+    
+    // 500 WS2805 RGBCCT LEDs, 15A power supply
+    mgr->setMaxCurrent(14000);  // Leave 1A safety margin
+    pm->setLedProfile(LedProfiles::WS2805_RGBCCT);
+    
+    // Advanced features
+    pm->setThresholdPercent(85);       // Soft-limit from 85%
+    pm->setMaxBrightnessPercent(90);   // Never exceed 90% brightness
+    pm->setBrightnessSlewRate(30);     // Smooth 3s transitions
+    
+    mgr->setPowerManagementEnabled(true);
+}
+
+void loop() {
+    static uint32_t lastUpdate = 0;
+    uint32_t now = millis();
+    uint32_t deltaTime = now - lastUpdate;
+    lastUpdate = now;
+    
+    PowerManager* pm = mgr->getPowerManager();
+    pm->updateSlewRate(deltaTime);
+    
+    // Normal update
+    mgr->update(deltaTime);
+}
+```
+
+### Power Monitoring
+
+#### Requested vs. Actual Power
+
+```cpp
+PowerManager* pm = mgr->getPowerManager();
+
+// After applyCurrentLimit() has been called:
+
+// What LEDs WANT to draw (before limiting)
+uint32_t requestedMA = pm->getLastCalculatedCurrent();
+float requestedWatts = pm->calculatePowerWatts(nullptr, 0, 0);
+
+// What LEDs ACTUALLY draw (after limiting)
+uint32_t actualMA = pm->getActualCurrent();
+float actualWatts = pm->getActualPowerWatts();
+
+// Current brightness level (with slew rate)
+float currentBrightness = pm->getCurrentBrightnessPercent();
+
+Serial.printf("Requested: %umA (%.2fW), Actual: %umA (%.2fW), Brightness: %.1f%%\n",
+              requestedMA, requestedWatts, actualMA, actualWatts, currentBrightness);
 ```
 
 #### Per-Strip Manual Limiting (Advanced)
