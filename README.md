@@ -139,6 +139,15 @@ This design enables complex LED configurations with minimal CPU overhead through
 - **Zero Code Changes**: Add new effects without modifying Segment/Console/UI
 - **Type-Safe**: ParameterType enum for validation
 
+### Segment Transformations
+
+- **Grouping**: Multiple physical LEDs display the same color as one logical pixel
+- **Spacing**: Skip LEDs between groups (turn them off) for sparse patterns
+- **Reverse Direction**: Run effects backwards without modifying effect code
+- **Mirror Effect**: Mirror animations from the center outward for symmetrical displays
+- **Offset**: Shift effect start position with wrap-around for rotating effects
+- **Virtual Length**: Effects see reduced pixel count with grouping/spacing enabled
+
 ### Hardware Layer
 
 - Multiple strip support (up to 7 on RP2040, 11 on RP2350, 7 on ESP32-S3)
@@ -1270,6 +1279,26 @@ neo seg del <index>
 
 neo seg list
     # List all segments with details
+
+neo seg grouping <segIndex> <value>
+    # Set LED grouping (LEDs per group)
+    neo seg grouping 0 3           # 3 LEDs show same color
+
+neo seg spacing <segIndex> <value>
+    # Set spacing between groups (LEDs turned off)
+    neo seg spacing 0 1            # 1 LED off between groups
+
+neo seg reverse <segIndex> <0|1>
+    # Reverse effect direction
+    neo seg reverse 0 1            # Enable reverse direction
+
+neo seg mirror <segIndex> <0|1>
+    # Mirror effect from center
+    neo seg mirror 0 1             # Enable mirroring
+
+neo seg offset <segIndex> <value>
+    # Shift effect start position
+    neo seg offset 0 5             # Start effect 5 LEDs in
 ```
 
 ### Effect Commands
@@ -1536,12 +1565,25 @@ public:
     // Properties
     uint16_t getStartLed() const;
     uint16_t getEndLed() const;
-    uint16_t getLedCount() const;
+    uint16_t getLength() const;           // Virtual length (for effects)
+    uint16_t getPhysicalLength() const;   // Physical LED count
     VirtualStrip* getVirtualStrip() const;
     
+    // Grouping & Spacing (Effect Transformation)
+    void setGrouping(uint16_t grouping);  // LEDs per group (1 = no grouping)
+    void setSpacing(uint16_t spacing);    // LEDs to skip between groups (0 = none)
+    void setReverse(bool reverse);        // Reverse effect direction
+    void setMirror(bool mirror);          // Mirror effect from center
+    void setOffset(uint16_t offset);      // Shift effect start position
+    
+    uint16_t getGrouping() const;
+    uint16_t getSpacing() const;
+    bool getReverse() const;
+    bool getMirror() const;
+    uint16_t getOffset() const;
+    
     // Effect Management
-    void setEffect(uint8_t effectId);
-    void setEffect(Effect* effect);
+    void setEffect(Effect* effect, bool initializeDefaults = false);
     Effect* getEffect() const;
     
     // State Machine
@@ -1556,9 +1598,129 @@ public:
     void setColor(uint8_t r, uint8_t g, uint8_t b, uint8_t w);         // RGBW
     void setColor(uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw); // RGBCCT
     void setBrightness(uint8_t brightness);
-    LedConfig& getConfig();
-    LedState& getState();             // Access state (for effects)
+    EffectConfig& getConfig();
+    EffectState& getState();
 };
+```
+
+### Segment Effect Transformations
+
+The Segment class provides powerful transformations to modify how effects are displayed:
+
+#### Grouping
+
+Multiple physical LEDs display the same color as one "logical pixel":
+
+```cpp
+segment->setGrouping(3);  // Every 3 LEDs show the same color
+
+// Physical LEDs: [111][222][333][444]  (12 LEDs)
+// Effect sees:     0    1    2    3    (4 virtual pixels)
+```
+
+**Use cases:**
+- Low-resolution strips that need chunky effects
+- Simulating large pixels
+- Reducing computational complexity for long strips
+
+#### Spacing
+
+Skip LEDs between groups (turn them off):
+
+```cpp
+segment->setGrouping(2);  // 2 LEDs per group
+segment->setSpacing(1);   // 1 LED off between groups
+
+// Physical LEDs: [GG_GG_GG_GG_]  (12 LEDs, G=group, _=off)
+// Effect sees:    0  1  2  3    (4 virtual pixels)
+```
+
+**Use cases:**
+- Christmas light patterns (every Nth LED)
+- Sparse decorations
+- Power saving (fewer LEDs lit)
+
+#### Reverse Direction
+
+Run effects backwards:
+
+```cpp
+segment->setReverse(true);   // Effect runs right-to-left
+
+// Normal:   Effect pixel 0 → Physical LED 0
+// Reverse:  Effect pixel 0 → Physical LED (length-1)
+```
+
+**Use cases:**
+- Symmetrical installations (two strips facing each other)
+- Wipe effects going "up" instead of "down"
+- Matching effect direction to physical layout
+
+#### Mirror Effect
+
+Mirror the effect from the center outward:
+
+```cpp
+segment->setMirror(true);    // Effect is mirrored from center
+
+// Physical LEDs:  [0 1 2 3 4 5 6 7]  (8 LEDs)
+// Effect output:  [A B C D D C B A]  (mirrored at center)
+```
+
+**Use cases:**
+- Symmetrical light bars
+- Center-outward animations
+- Theatrical/stage lighting effects
+- Automotive front/rear light bars
+
+#### Offset
+
+Shift the effect start position (with wrap-around):
+
+```cpp
+segment->setOffset(5);       // Effect starts 5 LEDs into the strip
+
+// Effect pixel 0 appears at physical LED 5
+// Effect wraps around: LED (length-1) → LED 0
+```
+
+**Use cases:**
+- Rotating effects without changing effect code
+- Phase-shifting between multiple segments
+- Adjusting visual alignment
+
+#### Combined Example
+
+```cpp
+// Create a segment with 24 physical LEDs
+Segment* seg = new Segment(vstrip, 0, 23);
+
+// Configure transformations
+seg->setGrouping(2);    // 2 LEDs per group
+seg->setSpacing(1);     // 1 LED off between groups
+seg->setMirror(true);   // Mirror from center
+seg->setOffset(3);      // Rotate by 3 positions
+
+// Effect now sees 8 virtual pixels (24 / (2+1) = 8)
+// Pattern: [AA_BB_CC_DD_DD_CC_BB_AA] with offset rotation
+```
+
+#### Virtual vs. Physical Length
+
+With grouping and spacing, the effect sees fewer "virtual pixels" than physical LEDs:
+
+```
+Virtual Length = Physical Length / (Grouping + Spacing)
+
+Example: 100 LEDs, Grouping=3, Spacing=2
+Virtual Length = 100 / (3+2) = 20 virtual pixels
+Effect runs on 20 pixels, each maps to 3 physical LEDs with 2 off
+```
+
+Access both:
+```cpp
+seg->getPhysicalLength();  // Actual LED count (100)
+seg->getLength();          // Virtual length for effects (20)
 ```
 
 ### TimingMode Enum

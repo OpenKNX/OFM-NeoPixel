@@ -130,9 +130,48 @@ class Segment
     // ====================================================================
     uint16_t getStartLed() const { return _startLed; }                    // Get start LED index
     uint16_t getEndLed() const { return _endLed; }                        // Get end LED index (inclusive)
-    uint16_t getLength() const { return _length; }                        // Get segment length
+    uint16_t getLength() const { return _virtualLength; }                 // Get virtual length (for effects) - accounts for grouping/spacing
+    uint16_t getPhysicalLength() const { return _physicalLength; }        // Get physical length (actual LEDs)
     VirtualStrip* getVirtualStrip() { return _virtualStrip; }             // Get parent virtual strip
     const VirtualStrip* getVirtualStrip() const { return _virtualStrip; } // Get parent virtual strip (const)
+
+    // ====================================================================
+    // Grouping & Spacing Configuration
+    // ====================================================================
+    /**
+     * @brief Set grouping - how many physical LEDs show the same color
+     * @param grouping Number of LEDs per group (1 = no grouping, default)
+     */
+    void setGrouping(uint16_t grouping);
+    uint16_t getGrouping() const { return _grouping; }
+
+    /**
+     * @brief Set spacing - how many LEDs to skip (turn off) between groups
+     * @param spacing Number of LEDs to skip (0 = no spacing, default)
+     */
+    void setSpacing(uint16_t spacing);
+    uint16_t getSpacing() const { return _spacing; }
+
+    /**
+     * @brief Set reverse direction - effects run backwards
+     * @param reverse true to reverse direction
+     */
+    void setReverse(bool reverse) { _reverse = reverse; }
+    bool getReverse() const { return _reverse; }
+
+    /**
+     * @brief Set mirror effect - effects are mirrored from center
+     * @param mirror true to enable mirroring
+     */
+    void setMirror(bool mirror) { _mirror = mirror; }
+    bool getMirror() const { return _mirror; }
+
+    /**
+     * @brief Set offset - shift effect start position within segment
+     * @param offset Number of LEDs to offset (0 = no offset, default)
+     */
+    void setOffset(uint16_t offset) { _offset = offset; }
+    uint16_t getOffset() const { return _offset; }
 
     // ====================================================================
     // Effect Management
@@ -148,17 +187,17 @@ class Segment
     // ====================================================================
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
-    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw);
+    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw); // 5-channel RGBCCT
     void setAll(uint8_t r, uint8_t g, uint8_t b);
     void setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t w);
-    void setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw);
+    void setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw); // 5-channel RGBCCT
     void clear();
     void clearAll();
     bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) const;
     bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& w) const;
-    bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& ww, uint8_t& cw) const;
-    inline uint32_t getPrimaryColor() const { return _config.primaryRGBW; }     // Get primary color
-    inline uint32_t getSecondaryColor() const { return _config.secondaryRGBW; } // Get secondary color
+    bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& ww, uint8_t& cw) const; // 5-channel RGBCCT
+    inline uint32_t getPrimaryColor() const { return _config.primaryRGBW; }                            // Get primary color
+    inline uint32_t getSecondaryColor() const { return _config.secondaryRGBW; }                        // Get secondary color
     inline bool setPrimaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t w)
     {
         _config.primaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)w;
@@ -226,11 +265,24 @@ class Segment
     VirtualStrip* _virtualStrip; // Belongs to this virtual strip
     uint16_t _startLed;          // Start LED in virtual strip
     uint16_t _endLed;            // End LED in virtual strip (inclusive)
-    uint16_t _length;            // Length (endLed - startLed + 1)
+    uint16_t _physicalLength;    // Physical length (endLed - startLed + 1)
+    uint16_t _virtualLength;     // Virtual length for effects (after grouping/spacing)
+    uint16_t _grouping;          // LEDs per group (1 = no grouping)
+    uint16_t _spacing;           // LEDs to skip between groups (0 = no spacing)
+    uint16_t _offset;            // Offset for effect start position (0 = no offset)
+    bool _reverse;               // Reverse effect direction
+    bool _mirror;                // Mirror effect from center
     Effect* _effect;             // Current effect (nullptr = none)
     bool _dirty;                 // Pixels changed?
     bool _paused;                // Effect paused?
     LedState _ledState;          // State machine (IDLE, RUNNING, etc)
     EffectConfig _config;        // Effect configuration (~40 bytes)
     EffectState _state;          // Effect runtime variables (~12 bytes)
+
+    // Helper: Recalculate virtual length based on grouping/spacing
+    void recalculateVirtualLength();
+
+    // Helper: Map virtual index to physical LED indices
+    // Returns start index in physical strip; groupSize LEDs starting from there get the color
+    uint16_t mapVirtualToPhysical(uint16_t virtualIndex) const;
 };
