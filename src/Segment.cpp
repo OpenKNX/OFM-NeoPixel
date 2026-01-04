@@ -133,6 +133,39 @@ bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t 
 }
 
 /**
+ * @brief Set pixel (RGBCCT - 5 channel)
+ * @param index Pixel index within the segment
+ * @param r Red component (0-255)
+ * @param g Green component (0-255)
+ * @param b Blue component (0-255)
+ * @param ww Warm White component (0-255)
+ * @param cw Cool White component (0-255)
+ * @return true on success, false on failure
+ */
+bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
+{
+    if (!_virtualStrip || index >= _length)
+    {
+        return false;
+    }
+
+    uint16_t virtualIndex = _startLed + index;
+
+    // Apply segment brightness (gamma correction happens later in PhysicalStrip)
+    if (_config.brightness < 255)
+    {
+        r = (r * _config.brightness + 127) / 255;
+        g = (g * _config.brightness + 127) / 255;
+        b = (b * _config.brightness + 127) / 255;
+        ww = (ww * _config.brightness + 127) / 255;
+        cw = (cw * _config.brightness + 127) / 255;
+    }
+
+    _dirty = true;
+    return _virtualStrip->setPixel(virtualIndex, r, g, b, ww, cw);
+}
+
+/**
  * @brief Set all pixels - RGB
  * @param r Red component (0-255)
  * @param g Green component (0-255)
@@ -166,35 +199,12 @@ void Segment::setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 }
 
 /**
- * @brief Set single pixel - RGBCCT (5-channel)
- * @param index Pixel index within the segment
+ * @brief Set all pixels - RGBCCT (5 channel)
  * @param r Red component (0-255)
  * @param g Green component (0-255)
  * @param b Blue component (0-255)
- * @param ww Warm white component (0-255, ~2700-3000K)
- * @param cw Cool white component (0-255, ~5000-6500K)
- * @return true on success, false on failure
- */
-bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
-{
-    if (!_virtualStrip || index >= _length)
-    {
-        return false;
-    }
-
-    uint16_t virtualIndex = _startLed + index;
-
-    _dirty = true;
-    return _virtualStrip->setPixel(virtualIndex, r, g, b, ww, cw);
-}
-
-/**
- * @brief Set all pixels - RGBCCT (5-channel)
- * @param r Red component (0-255)
- * @param g Green component (0-255)
- * @param b Blue component (0-255)
- * @param ww Warm white component (0-255)
- * @param cw Cool white component (0-255)
+ * @param ww Warm White component (0-255)
+ * @param cw Cool White component (0-255)
  */
 void Segment::setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
 {
@@ -262,7 +272,7 @@ bool Segment::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8
 }
 
 /**
- * @brief Get pixel - RGBCCT (5-channel)
+ * @brief Get pixel - RGBCCT (5 channel)
  * @param index Pixel index within the segment
  * @param r Reference to store Red component (0-255)
  * @param g Reference to store Green component (0-255)
