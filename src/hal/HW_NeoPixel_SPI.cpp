@@ -329,13 +329,25 @@ bool HW_NeoPixel_SPI::init()
     // Log requested vs achievable frequency
     openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
                                           "Init: Protocol=%u, Requested Freq=%lu Hz, SysClock=%lu Hz",
+#if defined(ARDUINO_ARCH_RP2040)
                                           (uint8_t)_inst->protocol, actualFrequency, clock_get_hz(clk_sys));
+#elif defined(ARDUINO_ARCH_ESP32)
+                                          (uint8_t)_inst->protocol, actualFrequency, ESP.getCpuFreqMHz() * 1000000UL);
+#else
+                                          (uint8_t)_inst->protocol, actualFrequency, F_CPU);
+#endif
 
     // Calculate actual achievable frequency based on system clock
     // SPI baudrate = sys_clk / (CPSR * (1 + SCR))
     // where CPSR = 2..254 (even), SCR = 0..255
     // For simplicity, calculate what we can actually achieve
+#if defined(ARDUINO_ARCH_RP2040)
     uint32_t sys_freq = clock_get_hz(clk_sys);
+#elif defined(ARDUINO_ARCH_ESP32)
+    uint32_t sys_freq = ESP.getCpuFreqMHz() * 1000000UL;
+#else
+    uint32_t sys_freq = F_CPU;
+#endif
     float best_div = (float)sys_freq / (float)actualFrequency;
     uint32_t achievable_freq = sys_freq / (uint32_t)(best_div + 0.5f);
     openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
