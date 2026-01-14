@@ -120,6 +120,17 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
     bool init() override;
     inline bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b) override;
     inline bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w) override;
+    // 5-channel RGBCCT stub implementation (not supported for SPI-based strips)
+    inline bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw) override
+    {
+        (void)index;
+        (void)r;
+        (void)g;
+        (void)b;
+        (void)ww;
+        (void)cw;
+        return false;
+    }
     bool show() override;
     inline bool isBusy() override;
     void clear() override;

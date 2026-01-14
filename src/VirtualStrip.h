@@ -63,11 +63,13 @@ class VirtualStrip
     // ====================================================================
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
+    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw);
     void setRange(uint16_t startIndex, uint16_t length, uint8_t r, uint8_t g, uint8_t b);
     void setAll(uint8_t r, uint8_t g, uint8_t b);
     void clear();
     bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) const;
     bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& w) const;
+    bool getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& ww, uint8_t& cw) const;
 
     // ====================================================================
     // Buffer Access
@@ -116,11 +118,12 @@ class VirtualStrip
     // ====================================================================
     // State & Properties
     // ====================================================================
-    inline uint16_t getLedCount() const { return _totalLeds; }        // Virtual LED count
-    inline bool hasWhiteChannel() const { return _bytesPerLed >= 4; } // True if RGBW buffer
-    inline bool isDirty() const { return _dirty; }                    // Is buffer modified?
-    inline void markDirty() { _dirty = true; }                        // Mark buffer as modified
-    inline void setClean() { _dirty = false; }                        // Mark buffer as clean after sync
+    inline uint16_t getLedCount() const { return _totalLeds; }            // Virtual LED count
+    inline bool hasWhiteChannel() const { return _bytesPerLed >= 4; }     // True if RGBW/RGBCCT buffer
+    inline bool hasDualWhiteChannel() const { return _bytesPerLed >= 5; } // True if RGBCCT buffer (5 channels)
+    inline bool isDirty() const { return _dirty; }                        // Is buffer modified?
+    inline void markDirty() { _dirty = true; }                            // Mark buffer as modified
+    inline void setClean() { _dirty = false; }                            // Mark buffer as clean after sync
     uint16_t getTotalPhysicalLeds() const;
     size_t getMemoryUsage() const { return _bufferSize; } // Memory usage in bytes
 
@@ -128,7 +131,7 @@ class VirtualStrip
     // Pixel Transform Callback (for HCL, color correction, etc.)
     // ====================================================================
     /**
-     * @brief Pixel transform callback type
+     * @brief Pixel transform callback type for RGBCCT (5-channel) support
      *
      * Called during syncToPhysical() for each pixel BEFORE sending to hardware.
      * This allows post-processing (HCL, gamma, etc.) without modifying the
@@ -137,10 +140,16 @@ class VirtualStrip
      * @param r Red component (in/out)
      * @param g Green component (in/out)
      * @param b Blue component (in/out)
-     * @param w White component (in/out, only valid if hasWhiteChannel)
+     * @param ww Warm White component (in/out, nullptr for RGB strips)
+     * @param cw Cool White component (in/out, nullptr for RGB/RGBW strips)
      * @param userData User-provided context pointer
+     *
+     * For HCL color temperature control on RGBCCT strips:
+     * - Warm Kelvin (2700K): ww high, cw low
+     * - Cool Kelvin (6500K): ww low, cw high
+     * - Neutral: blend of both
      */
-    using PixelTransformCallback = void (*)(uint8_t& r, uint8_t& g, uint8_t& b, uint8_t* w, void* userData);
+    using PixelTransformCallback = void (*)(uint8_t& r, uint8_t& g, uint8_t& b, uint8_t* ww, uint8_t* cw, void* userData);
 
     /**
      * @brief Set pixel transform callback for post-processing during sync
@@ -152,14 +161,14 @@ class VirtualStrip
   private:
     std::vector<VirtualToPhysicalMapping> _physicalStrips; // Attached physical strips
     uint16_t _totalLeds;                                   // Virtual LED count
-    uint8_t* _buffer;                                      // Unified RGB(W) buffer (ALWAYS in RGB/RGBW format!)
+    uint8_t* _buffer;                                      // Unified RGB(W)(CCT) buffer (ALWAYS in RGB/RGBW/RGBCCT format!)
     size_t _bufferSize;                                    // Buffer size in bytes
-    uint8_t _bytesPerLed;                                  // Bytes per LED (3 for RGB, 4 for RGBW)
+    uint8_t _bytesPerLed;                                  // Bytes per LED (3=RGB, 4=RGBW, 5=RGBCCT)
     bool _dirty;                                           // Buffer modified?
     PowerManager* _powerManager;                           // Optional power manager for current limiting
     PixelTransformCallback _pixelTransformCallback;        // Optional post-processing callback
     void* _pixelTransformUserData;                         // User data for callback
 
     PhysicalStrip* findPhysicalAtIndex(uint16_t virtualIndex, uint16_t& outPhysicalIndex) const;
-    void writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
+    void writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww = 0, uint8_t cw = 0);
 };

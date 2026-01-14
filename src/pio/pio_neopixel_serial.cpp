@@ -7,7 +7,8 @@
     #include <Arduino.h>
 
 // =============================================================================
-// WS2812B PIO PROGRAM (MSB FIRST!)
+// =============================================================================
+// WS2812B PIO PROGRAM (MSB FIRST!) - 10 CYCLES PER BIT
 // =============================================================================
 //
 // WS2812B Protocol Timing:
@@ -58,14 +59,20 @@ PIO_NeoPixel_Serial* PIO_NeoPixel_Serial::_dmaHandlers[12] = {nullptr};
  *
  * Works for all protocols (WS2812B @ 800kHz, WS2811 @ 400kHz, etc.)
  * Timing is controlled via clock divider parameter
+ *
+ * @param fifoWordBits For RGBCCT: autopull threshold (8/16/32) matching DMA transfer size
+ *                     For RGB/RGBW: ignored (uses 24/32 respectively)
  */
-static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, uint pin, float clkdiv, bool rgbw)
+static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, uint pin, float clkdiv, bool rgbw, bool rgbcct, uint fifoWordBits = 32)
 {
     // ===== GPIO OPTIMIZATION FOR HIGH-SPEED SERIAL (800 kHz - 1.25 MHz) =====
 
     // 1. Set GPIO drive strength and slew rate FIRST (persist through pio_gpio_init)
     gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_12MA);
     gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
+    // reduced aggressiveness:
+    // gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_4MA);
+    // gpio_set_slew_rate(pin, GPIO_SLEW_RATE_SLOW);
 
     // 2. Transfer pin to PIO control (before setting state!)
     pio_gpio_init(pio, pin);
@@ -78,9 +85,21 @@ static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, u
     sm_config_set_sideset(&c, 1, false, false);
     sm_config_set_sideset_pins(&c, pin);
 
-    // Autopull: 24 bits for RGB, 32 bits for RGBW
-    // WS2812B needs MSB-first! shift_right=FALSE (shift left = MSB first!)
-    sm_config_set_out_shift(&c, false, true, rgbw ? 32 : 24);
+    // Autopull configuration - WS2812B needs MSB-first! shift_right=FALSE (shift left = MSB first!)
+    // - RGB (3 bytes): 24-bit autopull for efficient 1 word per LED
+    // - RGBW (4 bytes): 32-bit autopull for efficient 1 word per LED
+    // - RGBCCT (5 bytes): Dynamic autopull matching DMA transfer size (fifoWordBits)
+    //   Data flows as continuous bit stream; bswap handles byte ordering
+    uint autopull_bits;
+    if (rgbcct)
+    {
+        autopull_bits = fifoWordBits; // Match DMA transfer size (8/16/32)
+    }
+    else
+    {
+        autopull_bits = rgbw ? 32 : 24; // RGBW=32, RGB=24
+    }
+    sm_config_set_out_shift(&c, false, true, autopull_bits);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX); // Use full TX FIFO
 
     sm_config_set_clkdiv(&c, clkdiv);
@@ -93,8 +112,8 @@ static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, u
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_set_enabled(pio, sm, true);
     #ifdef OPENKNX_DEBUG
-    openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "PIO Init: pin=%u, SM=%u, offset=%u, clkdiv=%.2f, RGBW=%d",
-                                          pin, sm, offset, clkdiv, rgbw);
+    openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "PIO Init: pin=%u, SM=%u, offset=%u, clkdiv=%.2f, RGBW=%d, RGBCCT=%d",
+                                          pin, sm, offset, clkdiv, rgbw, rgbcct);
     #endif
 }
 
@@ -183,6 +202,9 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     _inst->dmaIrqNum = -1;          // Will be claimed dynamically if DMA is used
     _inst->initialized = false;     // Set initialization state
     _inst->busy = false;            // Set busy state
+    _inst->fifoEmptyTime = 0;       // No previous transfer
+    _inst->resetTimeUs = 0;         // Will be set in initPIO based on protocol
+    _inst->waitingForReset = false; // Not waiting for reset yet
 
     // Determine bytes per LED and color order
     _inst->bytesPerLed = ProtocolHelper::getBytesPerLed(protocol);
@@ -200,24 +222,70 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     }
 
     // DMA buffer (if needed)
-    // For DMA: Each pixel needs ceil(bytesPerLed/4) uint32_t entries
-    // RGB (3 bytes): 1 pixel = 1 uint32_t (packed)
-    // RGBW (4 bytes): 1 pixel = 1 uint32_t (perfect fit)
+    // For DMA: Buffer handling depends on LED type
+    //
+    // RGB (3 bytes): 24-bit autopull, 1 uint32_t per LED (packed into 32-bit word)
+    // RGBW (4 bytes): 32-bit autopull, 1 uint32_t per LED (perfect fit)
+    // RGBCCT (5 bytes): NO separate packed buffer!
+    //                   - Send byte buffer directly with bswap=true
+    //                   - Always 32-bit transfers (buffer padded to 4-byte alignment)
+    //                   - 32-bit autopull matches DMA transfer size
     if (useDMA)
     {
-        // Calculate DMA buffer size: ledCount pixels, rounded up for partial uint32_t
+        // Calculate DMA buffer size based on LED type
         // CRITICAL: Cast to size_t to prevent overflow
-        _inst->dmaBufferSize = (size_t)ledCount * (((_inst->bytesPerLed + 3) / 4));
-        _inst->dmaBuffer = new uint32_t[_inst->dmaBufferSize];
-        if (_inst->dmaBuffer)
+        if (_inst->bytesPerLed == 5)
         {
-            memset(_inst->dmaBuffer, 0, _inst->dmaBufferSize * sizeof(uint32_t));
+            // RGBCCT: direct buffer DMA with bswap
+            //
+            // Send byte buffer directly via DMA - no separate packed buffer needed!
+            // bswap=true handles byte reordering on-the-fly
+            //
+            // CRITICAL: Always use 32-bit transfers!
+            // With 8-bit or 16-bit DMA transfers, the PIO OSR loads 32 bits but only
+            // the transferred bits are valid. Since we shift MSB-first, the undefined
+            // upper bits would be output as garbage (could be all 1s = white flash!)
+            //
+            // Solution: Pad buffer to 32-bit alignment and always use 32-bit transfers
+
+            size_t bufSize = _inst->bufferSize;
+            // Round up to next multiple of 4
+            size_t paddedSize = (bufSize + 3) & ~3;
+            _inst->fifoWordBits = 32;
+            _inst->dmaBufferSize = paddedSize / 4; // Transfer count in 32-bit words
+
+            // NO separate DMA buffer for RGBCCT - we use bufferSending instead
+            _inst->dmaBuffer = nullptr;
+
+            // RGBCCT: Allocate PADDED buffer for double-buffering
+            // CRITICAL: Must be 4-byte aligned for DMA with bswap!
+            // Extra bytes are zero-padded (ignored by LEDs)
+            // Use aligned_alloc for guaranteed 4-byte alignment
+            _inst->bufferSending = static_cast<uint8_t*>(aligned_alloc(4, paddedSize));
+            if (_inst->bufferSending)
+            {
+                memset(_inst->bufferSending, 0, paddedSize); // Zero-pad including extra bytes
+            }
+        }
+        else
+        {
+            // RGB/RGBW: 24/32-bit autopull, packed efficiently into uint32_t words
+            _inst->fifoWordBits = _inst->bytesPerLed == 4 ? 32 : 24; // RGBW=32, RGB=24
+            _inst->dmaBufferSize = (size_t)ledCount * (((_inst->bytesPerLed + 3) / 4));
+            _inst->dmaBuffer = new uint32_t[_inst->dmaBufferSize];
+            if (_inst->dmaBuffer)
+            {
+                memset(_inst->dmaBuffer, 0, _inst->dmaBufferSize * sizeof(uint32_t));
+            }
+            _inst->bufferSending = nullptr; // RGB/RGBW uses dmaBuffer instead
         }
     }
     else
     {
         _inst->dmaBuffer = nullptr;
         _inst->dmaBufferSize = 0;
+        _inst->fifoWordBits = 0;
+        _inst->bufferSending = nullptr;
     }
 }
 
@@ -247,7 +315,7 @@ PIO_NeoPixel_Serial::~PIO_NeoPixel_Serial()
             if (_inst->pio && _inst->sm < 4)
             {
                 pio_remove_program_and_unclaim_sm(
-                    &neopixel_serial_program, // Same program for all protocols
+                    &neopixel_serial_program,
                     _inst->pio,
                     _inst->sm,
                     _inst->offset);
@@ -259,6 +327,11 @@ PIO_NeoPixel_Serial::~PIO_NeoPixel_Serial()
         {
             delete[] _inst->dmaBuffer;
             _inst->dmaBuffer = nullptr;
+        }
+        if (_inst->bufferSending)
+        {
+            free(_inst->bufferSending); // Use free() for aligned_alloc
+            _inst->bufferSending = nullptr;
         }
         if (_inst->buffer)
         {
@@ -364,13 +437,14 @@ bool PIO_NeoPixel_Serial::init()
  * 3. Configures GPIO and FIFO settings
  *
  * Timing calculation:
- * - 10 PIO cycles per bit
+ * - All protocols use 10 PIO cycles per bit (standard WS2812B program)
  * - PIO clock = system clock / divider
- * - Divider = system clock / (freq * 10)
+ * - Divider = system clock / (freq * cycles_per_bit)
  *
  * Examples:
  * - WS2812B @ 800kHz → 125MHz / (800kHz * 10) = 15.625
  * - WS2811 @ 400kHz → 125MHz / (400kHz * 10) = 31.25
+ * - WS2805 @ 800kHz → 125MHz / (800kHz * 10) = 15.625 (uses WS2812B timing)
  *
  * @return true if PIO configured, false on error
  */
@@ -379,12 +453,18 @@ bool PIO_NeoPixel_Serial::initPIO()
     if (!_inst) return false;
 
     bool rgbw = (_inst->bytesPerLed == 4);
+    bool rgbcct = (_inst->bytesPerLed == 5);
+
+    // Detect WS2805 protocol (for reset time configuration)
+    bool isWS2805 = (_inst->protocol == LedProtocol::WS2805_RGBCCT);
+
+    // ALL protocols use 10 cycles per bit (standard WS2812B program)
+    const uint8_t cycles_per_bit = 10;
 
     // Calculate clock divider based on frequency and timing mode
-    // Timing: 10 PIO cycles per bit (fixed in PIO program)
     // PIO clock = sys_clock / clkdiv
-    // Need: frequency * 10 cycles = PIO clock
-    // clkdiv = sys_clock / (frequency * 10)
+    // Need: frequency * cycles_per_bit = PIO clock
+    // clkdiv = sys_clock / (frequency * cycles_per_bit)
     //
     // NOTE: RP2040 runs at 125 MHz, RP2350 at 150 MHz by default
     // The timing modes are overclock-safe: they work at any system clock speed
@@ -403,8 +483,9 @@ bool PIO_NeoPixel_Serial::initPIO()
     {
         case TimingMode::AUTO_LEGACY:
             // Target 960 kHz for WS2812C/D (adapts to any CPU frequency)
-            clkdiv = actual_sys_clk / (960000.0f * 10.0f);
-            actual_bitrate = (actual_sys_clk / clkdiv) / 10.0f;
+            // WS2805 uses standard frequency (800kHz) like other protocols
+            clkdiv = actual_sys_clk / (960000.0f * (float)cycles_per_bit);
+            actual_bitrate = (actual_sys_clk / clkdiv) / (float)cycles_per_bit;
             mode_name = "AUTO_LEGACY";
             break;
 
@@ -457,7 +538,7 @@ bool PIO_NeoPixel_Serial::initPIO()
     if (_inst->timingMode != TimingMode::AUTO_LEGACY)
     {
         float target_bitrate = (float)_inst->frequency * bitrate_multiplier;
-        clkdiv = actual_sys_clk / (target_bitrate * 10.0f);
+        clkdiv = actual_sys_clk / (target_bitrate * (float)cycles_per_bit);
         actual_bitrate = target_bitrate;
     }
 
@@ -465,9 +546,12 @@ bool PIO_NeoPixel_Serial::initPIO()
     _inst->actual_bitrate = actual_bitrate;
     _inst->actual_clkdiv = clkdiv;
 
+    // Use standard WS2812B PIO program for ALL protocols
+    const pio_program_t* selected_program = &neopixel_serial_program;
+
     #ifdef OPENKNX_DEBUG
-    openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "GPIO%u: sys_clk=%.0f MHz, clkdiv=%.3f, bitrate=%.0f kHz [%s]",
-                                          _inst->pin, actual_sys_clk / 1e6f, clkdiv, actual_bitrate / 1000.0f, mode_name);
+    openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "GPIO%u: sys_clk=%.0f MHz, clkdiv=%.3f, bitrate=%.0f kHz [%s], cycles=%d",
+                                          _inst->pin, actual_sys_clk / 1e6f, clkdiv, actual_bitrate / 1000.0f, mode_name, cycles_per_bit);
     #endif
 
     #if PICO_PIO_USE_GPIO_BASE
@@ -481,13 +565,13 @@ bool PIO_NeoPixel_Serial::initPIO()
     uint32_t gpio_count = 1;
 
     bool success = pio_claim_free_sm_and_add_program_for_gpio_range(
-        &neopixel_serial_program, // PIO program (same for all protocols)
-        &pio_temp,                // Return PIO instance
-        &sm_temp,                 // Return state machine index
-        &offset_temp,             // Return program offset
-        gpio_base,                // Base GPIO pin
-        gpio_count,               // Number of GPIOs needed
-        true                      // Allow setting GPIO base if needed
+        selected_program, // PIO program (WS2812B for all protocols)
+        &pio_temp,        // Return PIO instance
+        &sm_temp,         // Return state machine index
+        &offset_temp,     // Return program offset
+        gpio_base,        // Base GPIO pin
+        gpio_count,       // Number of GPIOs needed
+        true              // Allow setting GPIO base if needed
     );
 
     if (!success)
@@ -507,10 +591,10 @@ bool PIO_NeoPixel_Serial::initPIO()
     uint offset_temp = 0;
 
     bool success = pio_claim_free_sm_and_add_program(
-        &neopixel_serial_program, // PIO program (same for all protocols)
-        &pio_temp,                // Return PIO instance
-        &sm_temp,                 // Return state machine index
-        &offset_temp              // Return program offset
+        selected_program, // PIO program (WS2812B for all protocols)
+        &pio_temp,        // Return PIO instance
+        &sm_temp,         // Return state machine index
+        &offset_temp      // Return program offset
     );
 
     if (!success)
@@ -533,14 +617,28 @@ bool PIO_NeoPixel_Serial::initPIO()
     pio_sm_clkdiv_restart(_inst->pio, _inst->sm);     // Reset clock divider
 
     // Initialize the PIO program with calculated clock divider
-    neopixel_serial_program_init(_inst->pio, _inst->sm, _inst->offset, _inst->pin, clkdiv, rgbw);
+    neopixel_serial_program_init(_inst->pio, _inst->sm, _inst->offset, _inst->pin, clkdiv, rgbw, rgbcct, _inst->fifoWordBits);
 
     #ifdef OPENKNX_DEBUG
     const char* pioName = (_inst->pio == pio0) ? "PIO0" : (_inst->pio == pio1) ? "PIO1"
                                                                                : "PIO2";
+    const char* channelType = rgbcct ? "RGBCCT" : (rgbw ? "RGBW" : "RGB");
     openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "NeoPixel PIO: %s/SM%d, GPIO%d, %.0fkHz, %s",
-                                          pioName, _inst->sm, _inst->pin, (float)_inst->frequency / 1000.0f, rgbw ? "RGBW" : "RGB");
+                                          pioName, _inst->sm, _inst->pin, _inst->actual_bitrate / 1000.0f, channelType);
     #endif
+
+    // Set reset/latch time based on protocol
+    // Intentionally longer than spec for compatibility
+    if (isWS2805)
+    {
+        _inst->resetTimeUs = 300; // WS2805 spec is 280µs, use 300µs for margin
+    }
+    else
+    {
+        // WS2812B/SK6812: spec is 50µs, but use 300µs for compatibility
+        // with older/clone chips that may need longer reset
+        _inst->resetTimeUs = 300;
+    }
 
     return true;
 }
@@ -550,11 +648,16 @@ bool PIO_NeoPixel_Serial::initPIO()
  *
  * Sets up DMA channel for automatic data transfer:
  * 1. Claims a free DMA channel
- * 2. Configures for 32-bit word transfers to PIO FIFO
+ * 2. Configures transfer size based on LED type
  * 3. Enables IRQ0 for transfer completion
  *
  * DMA configuration:
- * - 32-bit word transfers for efficient transfer
+ * - RGB/RGBW: 32-bit word transfers, manual packing, no bswap
+ * - RGBCCT (5-byte): direct buffer transfer
+ *   - Send byte buffer directly (no separate packed buffer)
+ *   - bswap=true for on-the-fly byte reordering
+ *   - Dynamic transfer size (8/16/32-bit) based on buffer alignment
+ *   - Autopull threshold matches DMA transfer size
  * - Source pointer increments (buffer)
  * - Destination pointer fixed (PIO FIFO)
  * - DREQ from PIO controls transfer timing
@@ -564,7 +667,13 @@ bool PIO_NeoPixel_Serial::initPIO()
  */
 bool PIO_NeoPixel_Serial::initDMA()
 {
-    if (!_inst || !_inst->dmaBuffer) return false; // Need DMA buffer!
+    // For RGBCCT: use byte buffer directly with bswap
+    // For RGB/RGBW: Use packed DMA buffer (bswap=false)
+    bool isRGBCCT = (_inst->bytesPerLed == 5);
+
+    if (!_inst) return false;
+    if (!isRGBCCT && !_inst->dmaBuffer) return false; // RGB/RGBW needs DMA buffer
+    if (isRGBCCT && !_inst->buffer) return false;     // RGBCCT needs byte buffer (sent directly)
 
     // Claim DMA channel
     int channel = dma_claim_unused_channel(false);
@@ -578,9 +687,51 @@ bool PIO_NeoPixel_Serial::initDMA()
     _inst->dmaChannel = channel;
     _inst->dmaIrqNum = 0; // ALL Serial strips use DMA_IRQ_0
 
-    // Configure DMA for 32-bit word transfers!
+    // Configure DMA based on LED type
     dma_channel_config c = dma_channel_get_default_config(channel);
-    channel_config_set_transfer_data_size(&c, DMA_SIZE_32);                 // 32-bit transfers!
+
+    void* srcBuffer;
+    size_t transferCount;
+
+    if (isRGBCCT)
+    {
+        // RGBCCT: direct buffer DMA with bswap
+        // Send byte buffer directly - no separate packed buffer!
+        //
+        // bswap=true for MSB-first transmission:
+        // - Memory: [A,B,C,D] at addresses 0,1,2,3
+        // - Normal 32-bit read (little-endian): 0xDDCCBBAA
+        // - With bswap: 0xAABBCCDD (byte A at MSB position)
+        // - PIO shifts MSB first: outputs bytes in order A,B,C,D
+        //
+        // Always use 32-bit transfers to avoid OSR undefined bit issues
+
+        if (!_inst->buffer) return false;
+
+        // Always 32-bit transfers for RGBCCT (buffer is padded to 32-bit alignment)
+        channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
+
+        // bswap=true: DMA reorders bytes for MSB-first transmission
+        channel_config_set_bswap(&c, true);
+
+        srcBuffer = _inst->buffer;            // Will be replaced with bufferSending in sendDataDMA
+        transferCount = _inst->dmaBufferSize; // Transfer count in 32-bit words (padded)
+
+    #ifdef OPENKNX_DEBUG
+        openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "RGBCCT DMA: 32-bit bswap=true, count=%u (padded from %u bytes)",
+                                              (uint32_t)transferCount, (uint32_t)_inst->bufferSize);
+    #endif
+    }
+    else
+    {
+        // RGB/RGBW: 32-bit transfers with manual packing, no bswap
+        channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
+        channel_config_set_bswap(&c, false); // Data is pre-packed in correct order
+
+        srcBuffer = _inst->dmaBuffer;
+        transferCount = _inst->dmaBufferSize; // Already in 32-bit words
+    }
+
     channel_config_set_read_increment(&c, true);                            // Increment read address
     channel_config_set_write_increment(&c, false);                          // Write always to same FIFO
     channel_config_set_dreq(&c, pio_get_dreq(_inst->pio, _inst->sm, true)); // PIO TX DREQ
@@ -588,9 +739,9 @@ bool PIO_NeoPixel_Serial::initDMA()
     dma_channel_configure(
         channel,
         &c,
-        &_inst->pio->txf[_inst->sm], // Write to PIO TX FIFO (32-bit)
-        _inst->dmaBuffer,            // Read from 32-bit word buffer
-        _inst->dmaBufferSize,        // Transfer count in 32-bit words
+        &_inst->pio->txf[_inst->sm], // Write to PIO TX FIFO
+        srcBuffer,                   // Read from DMA buffer
+        transferCount,               // Transfer count
         false                        // Don't start yet
     );
 
@@ -612,8 +763,10 @@ bool PIO_NeoPixel_Serial::initDMA()
     }
 
     #ifdef OPENKNX_DEBUG
-    openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "DMA initialized - Channel=%d, IRQ=0 (shared), Words=%u, Target=PIO%d SM%d",
-                                          channel, (uint32_t)_inst->dmaBufferSize, _inst->pio == pio0 ? 0 : 1, _inst->sm);
+    openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "DMA initialized - Channel=%d, IRQ=0 (shared), Count=%u, Target=PIO%d SM%d",
+                                          channel, (uint32_t)transferCount, _inst->pio == pio0 ? 0 : 1, _inst->sm);
+    openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "Latch timing: resetTime=%uµs (FIFO check via hardware)",
+                                          _inst->resetTimeUs);
     #endif
 
     return true;
@@ -638,7 +791,7 @@ bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
     // CRITICAL: Don't modify buffer while DMA transfer is in progress!
     if (_inst->busy) return false;
 
-    rgbToBuffer(index, r, g, b, 0);
+    rgbToBuffer(index, r, g, b, 0, 0);
     return true;
 }
 
@@ -663,7 +816,33 @@ bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
     // CRITICAL: Don't modify buffer while DMA transfer is in progress!
     if (_inst->busy) return false;
 
-    rgbToBuffer(index, r, g, b, w);
+    rgbToBuffer(index, r, g, b, w, 0);
+    return true;
+}
+
+/**
+ * @brief Sets RGBCCT color values for an LED (5-channel)
+ *
+ * Stores RGBCCT color values for a specific LED in the internal buffer.
+ * Only available for LED types with dual white channels (warm + cool white).
+ *
+ * @param index LED index (0-based)
+ * @param r Red component (0-255)
+ * @param g Green component (0-255)
+ * @param b Blue component (0-255)
+ * @param ww Warm White component (0-255)
+ * @param cw Cool White component (0-255)
+ * @return true if successful, false if index invalid or not an RGBCCT strip
+ */
+bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
+{
+    if (!_inst || !_inst->buffer || index >= _inst->ledCount) return false;
+    if (_inst->bytesPerLed < 5) return false; // Not RGBCCT
+
+    // CRITICAL: Don't modify buffer while DMA transfer is in progress!
+    if (_inst->busy) return false;
+
+    rgbToBuffer(index, r, g, b, ww, cw);
     return true;
 }
 
@@ -677,9 +856,10 @@ bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
  * @param r Red component
  * @param g Green component
  * @param b Blue component
- * @param w White component (optional)
+ * @param ww Warm White component (optional, 0 for RGB/RGBW)
+ * @param cw Cool White component (optional, 0 for RGB/RGBW)
  */
-void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
+void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
 {
     if (!_inst || !_inst->buffer) return;
 
@@ -722,14 +902,47 @@ void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
             _inst->buffer[offset] = r;
             _inst->buffer[offset + 1] = g;
             _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = w;
+            _inst->buffer[offset + 3] = ww; // Use ww as single white
             break;
 
         case ColorOrder::GRBW:
             _inst->buffer[offset] = g;
             _inst->buffer[offset + 1] = r;
             _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = w;
+            _inst->buffer[offset + 3] = ww; // Use ww as single white
+            break;
+
+        // 5-channel color orders (RGBCCT)
+        case ColorOrder::RGBCCT:
+            _inst->buffer[offset] = r;
+            _inst->buffer[offset + 1] = g;
+            _inst->buffer[offset + 2] = b;
+            _inst->buffer[offset + 3] = ww;
+            _inst->buffer[offset + 4] = cw;
+            break;
+
+        case ColorOrder::GRBCCT:
+            _inst->buffer[offset] = g;
+            _inst->buffer[offset + 1] = r;
+            _inst->buffer[offset + 2] = b;
+            _inst->buffer[offset + 3] = ww;
+            _inst->buffer[offset + 4] = cw;
+            break;
+
+        case ColorOrder::RGBCTW:
+            _inst->buffer[offset] = r;
+            _inst->buffer[offset + 1] = g;
+            _inst->buffer[offset + 2] = b;
+            _inst->buffer[offset + 3] = cw; // Cool white first
+            _inst->buffer[offset + 4] = ww; // Warm white second
+            break;
+
+        case ColorOrder::GRBCTW:
+            _inst->buffer[offset] = g;
+            _inst->buffer[offset + 1] = r;
+            _inst->buffer[offset + 2] = b;
+            _inst->buffer[offset + 3] = cw; // Cool white first
+            _inst->buffer[offset + 4] = ww; // Warm white second
             break;
 
         default:
@@ -751,9 +964,19 @@ void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
 bool PIO_NeoPixel_Serial::show()
 {
     if (!_inst || !_inst->initialized || !_inst->buffer) return false;
-    if (_inst->busy) return false; // Already transmitting
 
+    // Wait for previous transfer to complete including latch time
+    // busy-wait ensures proper reset pulse
+    // isBusy() checks: DMA in progress + FIFO drain time + reset time
+    while (isBusy())
+    {
+        // Could add yield() here for RTOS compatibility
+        // For now, tight loop is fine for LED timing
+    }
+
+    // Reset state for new transfer
     _inst->busy = true;
+    _inst->waitingForReset = false;
 
     if (_inst->useDMA && _inst->dmaChannel >= 0)
     {
@@ -803,6 +1026,8 @@ void PIO_NeoPixel_Serial::sendDataPIO()
     if (bytesPerTransfer == 3)
     {
         // 3-byte buffer: Pack REVERSED as Byte2<<24 | Byte1<<16 | Byte0<<8
+        // This is different from packDataToDMABuffer because direct PIO writes
+        // go through a different hardware path than DMA transfers
         for (uint32_t i = 0; i < numTransfers; i++)
         {
             uint32_t idx = i * 3;
@@ -812,7 +1037,7 @@ void PIO_NeoPixel_Serial::sendDataPIO()
             pio_sm_put_blocking(_inst->pio, _inst->sm, value);
         }
     }
-    else
+    else if (bytesPerTransfer == 4)
     {
         // 4-byte buffer (RGBW): Pack REVERSED
         for (uint32_t i = 0; i < numTransfers; i++)
@@ -825,30 +1050,88 @@ void PIO_NeoPixel_Serial::sendDataPIO()
             pio_sm_put_blocking(_inst->pio, _inst->sm, value);
         }
     }
+    else if (bytesPerTransfer == 5)
+    {
+        // 5-byte buffer (RGBCCT): streaming approach
+        // Use 32-bit autopull, pack bytes in MSB-first order (same as bswap does for DMA)
+        // Data flows as continuous bit stream across LED boundaries
+        // Pack 4 bytes per word, handle all bytes as continuous stream
+        size_t totalBytes = _inst->bufferSize;
+        size_t fullWords = totalBytes / 4;
+        size_t remainingBytes = totalBytes % 4;
+
+        // Send full 32-bit words
+        for (size_t w = 0; w < fullWords; w++)
+        {
+            size_t idx = w * 4;
+            uint32_t value = ((uint32_t)buf[idx] << 24) | // Byte at MSB
+                             ((uint32_t)buf[idx + 1] << 16) |
+                             ((uint32_t)buf[idx + 2] << 8) |
+                             (uint32_t)buf[idx + 3];
+            pio_sm_put_blocking(_inst->pio, _inst->sm, value);
+        }
+
+        // Send remaining bytes (1-3 bytes) padded to 32-bit
+        if (remainingBytes > 0)
+        {
+            size_t idx = fullWords * 4;
+            uint32_t value = 0;
+            if (remainingBytes >= 1) value |= ((uint32_t)buf[idx] << 24);
+            if (remainingBytes >= 2) value |= ((uint32_t)buf[idx + 1] << 16);
+            if (remainingBytes >= 3) value |= ((uint32_t)buf[idx + 2] << 8);
+            pio_sm_put_blocking(_inst->pio, _inst->sm, value);
+        }
+    }
 }
 
 /**
  * @brief Starts asynchronous DMA transfer
  *
  * Prepares data for DMA and starts the transfer:
- * 1. Packs color data into DMA buffer
- * 2. Configures DMA channel
- * 3. Starts transfer in background
+ * 1. For RGB/RGBW: Packs color data into DMA buffer, then starts DMA
+ * 2. For RGBCCT: Copies byte buffer to dmaBuffer (with padding), bswap handles byte order
  *
  * The busy flag is cleared by the DMA IRQ handler.
  */
 void PIO_NeoPixel_Serial::sendDataDMA()
 {
-    if (!_inst || _inst->dmaChannel < 0 || !_inst->dmaBuffer) return;
+    if (!_inst || _inst->dmaChannel < 0) return;
 
-    // Pack RGB/RGBW bytes → 32-bit words
-    packDataToDMABuffer();
+    bool isRGBCCT = (_inst->bytesPerLed == 5);
+    void* srcBuffer;
+
+    if (isRGBCCT)
+    {
+        // RGBCCT: Use double-buffering to prevent DMA reading corrupted data
+        // Copy current buffer to sending buffer, then DMA from sending buffer
+        // user can safely modify buffer while DMA is sending the copy
+        if (!_inst->buffer || !_inst->bufferSending) return;
+
+        // Copy editing buffer to sending buffer
+        memcpy(_inst->bufferSending, _inst->buffer, _inst->bufferSize);
+        srcBuffer = _inst->bufferSending;
+    }
+    else
+    {
+        // RGB/RGBW: Pack data into 32-bit words (bswap=false, manual packing)
+        if (!_inst->dmaBuffer) return;
+        packDataToDMABuffer();
+        srcBuffer = _inst->dmaBuffer;
+    }
 
     // CRITICAL: Memory barrier to ensure all buffer writes are visible to DMA!
     __dmb(); // Data Memory Barrier
 
-    // Start DMA transfer (non-blocking!)
-    dma_channel_set_read_addr(_inst->dmaChannel, _inst->dmaBuffer, true);
+    // SAFETY: Ensure DMA channel is fully stopped before reconfiguring
+    // (isBusy() should have waited)
+    dma_channel_abort(_inst->dmaChannel);
+
+    // CRITICAL: Must set BOTH read address AND transfer count before each transfer!
+    // After DMA completes, trans_count becomes 0. If we only set read_addr and start,
+    // the DMA will transfer 0 bytes (or use stale count), causing timing issues!
+    dma_channel_set_read_addr(_inst->dmaChannel, srcBuffer, false);
+    dma_channel_set_trans_count(_inst->dmaChannel, _inst->dmaBufferSize, false);
+    dma_channel_start(_inst->dmaChannel);
 
     // busy flag is cleared by DMA IRQ handler
 }
@@ -864,6 +1147,8 @@ void PIO_NeoPixel_Serial::sendDataDMA()
  * RGBW format (4 bytes → 1 word):
  * - Input: [Byte0, Byte1, Byte2, Byte3] as bytes
  * - Output: Byte0<<24 | Byte1<<16 | Byte2<<8 | Byte3 (MSB first)
+ *
+ * RGBCCT: NOT packed here! Uses raw buffer with bswap.
  *
  * NOTE: Buffer order is determined by ColorOrder setting (set via rgbToBuffer).
  *       This function is ColorOrder-agnostic and just packs bytes in buffer order.
@@ -901,15 +1186,71 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
                      (uint32_t)src[idx + 3];          // Byte3 → bits 7-0 (sent last!)
         }
     }
+    // RGBCCT (bytesPerLed == 5): Not packed here!
+    // Uses raw buffer sent directly with bswap=true
 }
 
 /**
- * @brief Checks if a transfer is in progress
- * @return true if DMA or PIO is actively transferring
+ * @brief Checks if strip is ready for new transfer
+ *
+ * Returns true if:
+ * - DMA transfer is still in progress, OR
+ * - PIO TX FIFO is not empty (still transmitting), OR
+ * - Reset/latch time hasn't passed
+ *
+ * This prevents starting a new transfer too early, which would
+ * cause visual glitches (flashing) on the LED strip.
+ *
+ * @return true if busy (not ready for new transfer)
  */
 bool PIO_NeoPixel_Serial::isBusy()
 {
-    return _inst ? _inst->busy : false;
+    if (!_inst) return false;
+
+    // No DMA = not busy (non-DMA mode is blocking)
+    if (!_inst->useDMA) return false;
+
+    // Check hardware directly: Is DMA channel still active?
+    // This is more reliable than relying on IRQ callback
+    if (_inst->dmaChannel >= 0 && dma_channel_is_busy(_inst->dmaChannel))
+    {
+        return true; // DMA still transferring
+    }
+
+    // DMA done - now check hardware: Is PIO TX FIFO actually empty?
+    if (!pio_sm_is_tx_fifo_empty(_inst->pio, _inst->sm))
+    {
+        return true; // FIFO still has data
+    }
+
+    // FIFO just became empty - record the time if we haven't already
+    // Note: FIFO empty does NOT mean all bits sent! OSR might still have up to 32 bits
+    // being shifted out. We account for this in the timing calculation below.
+    if (!_inst->waitingForReset)
+    {
+        _inst->fifoEmptyTime = micros();
+        _inst->waitingForReset = true;
+    }
+
+    // Calculate required wait time after FIFO empty:
+    // 1. OSR flush time: up to 32 bits at bit rate (worst case ~40µs at 800kHz)
+    // 2. Reset time: protocol-specific latch pulse (300µs for WS2805/WS2812B)
+    //
+    // OSR flush time = 32 / bitrate = 32 / 800000 = ~40µs
+    // We add a generous margin and include it in the reset time (already 300µs)
+    // so we don't need separate calculation.
+    //
+    // Total wait = resetTimeUs (which is already longer than spec for safety)
+
+    uint32_t elapsed = micros() - _inst->fifoEmptyTime;
+    if (elapsed < _inst->resetTimeUs)
+    {
+        return true; // Still waiting for OSR flush + reset pulse
+    }
+
+    // Ready for next transfer
+    _inst->waitingForReset = false;
+    return false;
 }
 
 /**
@@ -932,11 +1273,13 @@ void PIO_NeoPixel_Serial::clear()
  *
  * @return DriverCapabilities with supported features:
  *         - supportsRGBW: true for RGBW LEDs (4 bytes/LED)
+ *         - supportsRGBCCT: true for RGBCCT LEDs (5 bytes/LED)
  */
 DriverCapabilities PIO_NeoPixel_Serial::getCapabilities() const
 {
     DriverCapabilities caps;
-    caps.supportsRGBW = (_inst && _inst->bytesPerLed == 4);
+    caps.supportsRGBW = (_inst && _inst->bytesPerLed >= 4);
+    caps.supportsRGBCCT = (_inst && _inst->bytesPerLed == 5);
     caps.supportsDMA = (_inst && _inst->useDMA);
     caps.supportsAsync = caps.supportsDMA;
     caps.maxFrequency = _inst ? _inst->frequency : 800000;
@@ -972,13 +1315,18 @@ void PIO_NeoPixel_Serial::unregisterDMAHandler(int channel)
 
 /**
  * DMA completion callback - called from unified IRQ handler
+ *
+ * Records the time when DMA finished so isBusy() can enforce
+ * proper reset/latch timing before allowing next transfer.
  */
 void PIO_NeoPixel_Serial::onDmaComplete()
 {
     if (!_inst) return;
 
-    // Clear busy flag
+    // Clear DMA busy flag
+    // isBusy() will still return true until FIFO empties + reset time passes
     _inst->busy = false;
+    _inst->waitingForReset = false; // Will be set when FIFO actually empties
 }
 
 // Old per-class handler - now replaced by unifiedDmaIRQHandler in pio_dma_shared.h

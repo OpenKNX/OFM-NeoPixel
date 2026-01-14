@@ -5,7 +5,7 @@
 **License:** GNU GPL v3.0  
 **Author:** Erkan Çolak
 
-A high-performance, hardware-optimized LED control library for addressable RGB/RGBW strips on OpenKNX devices with **self-describing effects** and **stateless architecture**.
+A high-performance, hardware-optimized LED control library for addressable RGB/RGBW/RGBCCT strips on OpenKNX devices with **self-describing effects** and **stateless architecture**.
 
 ---
 
@@ -42,7 +42,8 @@ A high-performance, hardware-optimized LED control library for addressable RGB/R
   - [How It Works](#how-it-works)
   - [LED Current Profiles](#led-current-profiles)
   - [Configuration](#configuration)
-  - [Monitoring Power Consumption](#monitoring-power-consumption)
+  - [Advanced Power Management Features](#advanced-power-management-features)
+  - [Power Monitoring](#power-monitoring)
   - [Practical Examples](#practical-examples)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
@@ -119,18 +120,38 @@ This design enables complex LED configurations with minimal CPU overhead through
 - **Module Lifecycle**: Clean initialization and shutdown hooks
 - **KNX Bus Ready**: Prepares for GroupObject integration (planned)
 
+### Power Management (Enhanced)
+
+- **Three Power Modes**: GLOBAL (total budget), PER_CHANNEL (per output), PER_LED (per individual LED)
+- **Soft-Limiting**: Threshold-based gradual dimming instead of hard cutoff
+- **Auto Brightness Cap**: Maximum brightness limit independent of power consumption
+- **Slew Rate Control**: Smooth brightness transitions during power limiting
+- **5-Channel RGBCCT Profiles**: WS2805, SK6812_RGBCCT, WS2814_RGBCCT current profiles
+- **Requested vs. Actual Power**: Track both before and after limiting
+- **Real-Time Monitoring**: Current consumption tracking via console or API
+
 ### Effect System
 
 - **Parameter Introspection API**: Effects describe their own parameters
 - **Auto-Generated UI**: Console and web UI generate automatically
+- **5-Channel RGBCCT Support**: Effects support RGB + Warm White + Cool White LEDs
 - **12 Parameter Types**: UINT8, BOOL, COLOR_RGB, PERCENT, ENUM, etc.
 - **Zero Code Changes**: Add new effects without modifying Segment/Console/UI
 - **Type-Safe**: ParameterType enum for validation
 
+### Segment Transformations
+
+- **Grouping**: Multiple physical LEDs display the same color as one logical pixel
+- **Spacing**: Skip LEDs between groups (turn them off) for sparse patterns
+- **Reverse Direction**: Run effects backwards without modifying effect code
+- **Mirror Effect**: Mirror animations from the center outward for symmetrical displays
+- **Offset**: Shift effect start position with wrap-around for rotating effects
+- **Virtual Length**: Effects see reduced pixel count with grouping/spacing enabled
+
 ### Hardware Layer
 
 - Multiple strip support (up to 7 on RP2040, 11 on RP2350, 7 on ESP32-S3)
-- Protocol support: WS2812, WS2812B, WS2813, WS2815, SK6812, APA102, WS2801
+- Protocol support: WS2812, WS2812B, WS2813, WS2815, WS2811, SK6812, SK6812_RGBCCT, WS2814, WS2814_RGBCCT, WS2805_RGBCCT, APA102, SK9822, WS2801
 - Automatic driver selection based on platform and protocol
 - DMA transfers for zero-CPU overhead (RP2040/RP2350)
 - RMT hardware acceleration (ESP32-S3)
@@ -142,7 +163,7 @@ This design enables complex LED configurations with minimal CPU overhead through
 - Segment-based effect system
 - Integrated effects: Solid, Rainbow, Pride2015, Confetti, Juggle, BPM, Cylon, Wipe
 - Per-segment brightness control
-- Color order abstraction (RGB, GRB, BGR, RGBW, GRBW)
+- Color order abstraction (RGB, GRB, BGR, RGBW, GRBW, RGBCCT, GRBCCT, RGBCTW, GRBCTW)
 - Performance tracking and statistics
 
 ### Integration
@@ -438,7 +459,7 @@ neo phys config 0 skipmask clear
 ┌──────────────────────────────────────────────────────────┐
 │ PHASE 1: Effect Updates                                  │
 │ Effect.update() -> Segment.setPixel() -> VirtualStrip    │
-│ Calculates ideal pixel colors (RGB/RGBW)                 │
+│ Calculates ideal pixel colors (RGB/RGBW/RGBCCT)          │
 └───────────────────────┬──────────────────────────────────┘
                         ▼
 ┌──────────────────────────────────────────────────────────┐
@@ -512,10 +533,10 @@ The ColorOrder system provides automatic color byte reordering for different LED
 │ Application  │  Always uses logical RGB(W) colors
 │   (Effects)  │  Example: RED = RGB(255, 0, 0)
 └──────┬───────┘
-       │ Always RGB/RGBW
+       │ Always RGB/RGBW/RGBCCT
        ▼
 ┌──────────────┐
-│ VirtualStrip │  Stores pixels in RGB/RGBW format
+│ VirtualStrip │  Stores pixels in RGB/RGBW/RGBCCT format
 │   Buffer     │  [R, G, B] or [R, G, B, W]
 └──────┬───────┘
        │ syncToPhysical() sends RGB
@@ -562,7 +583,16 @@ The ColorOrder system provides automatic color byte reordering for different LED
 | `BRGW`     | Rare variants      | [B, R, G, W]       | [0, 255, 0, 0]     |
 | `BGRW`     | Rare variants      | [B, G, R, W]       | [0, 0, 255, 0]     |
 
-**Total:** All 13 possible color byte orders (1 auto + 6 RGB + 6 RGBW)
+**RGBCCT Protocols (5-byte):**
+
+| ColorOrder | LED Chips          | Byte Mapping       | Example (RED)          |
+|------------|-------------------|--------------------|------------------------|
+| `RGBCCT`   | RGBCCT variants   | [R, G, B, WW, CW]  | [255, 0, 0, 0, 0]      |
+| `GRBCCT`   | RGBCCT variants   | [G, R, B, WW, CW]  | [0, 255, 0, 0, 0]      |
+| `RGBCTW`   | RGBCCT variants   | [R, G, B, CW, WW]  | [255, 0, 0, 0, 0]      |
+| `GRBCTW`   | RGBCCT variants   | [G, R, B, CW, WW]  | [0, 255, 0, 0, 0]      |
+
+**Total:** All 17 possible color byte orders (1 auto + 6 RGB + 6 RGBW + 4 RGBCCT)
 
 #### Data Flow Example
 
@@ -593,7 +623,7 @@ The ColorOrder system provides automatic color byte reordering for different LED
 #### Key Design Principles
 
 1. **VirtualStrip is ColorOrder-agnostic**
-   - Always stores RGB/RGBW internally
+   - Always stores RGB/RGBW/RGBCCT internally
    - No color conversion in VirtualStrip layer
    - Simplifies effect development
 
@@ -660,7 +690,7 @@ neo spi add 8 9 40 5 4     # MOSI=8, SCK=9, 40 LEDs, APA102, ColorOrder=BGR
 
 **VirtualStrip ColorOrder (Legacy/Ignored):**
 
-VirtualStrip has a ColorOrder parameter for backward compatibility, but it's **not used** for color conversion. VirtualStrip always stores RGB/RGBW internally.
+VirtualStrip has a ColorOrder parameter for backward compatibility, but it's **not used** for color conversion. VirtualStrip always stores RGB/RGBW/RGBCCT internally.
 
 ```cpp
 // This parameter is ignored for color conversion
@@ -812,8 +842,11 @@ build_flags =
 | WS2815   | 12V     | RGB    | 800kHz | GRB | High voltage |
 | WS2811   | 12V     | RGB    | 400kHz | RGB | Slower timing |
 | SK6812   | 5V/12V  | RGBW   | 800kHz | GRBW | 4-channel |
+| SK6812_RGBCCT | 5V/12V  | RGBCCT | 800kHz | RGBCCT/GRBCCT/RGBCTW/GRBCTW | 5-channel (RGB+WW+CW) |
 | SK6805   | 5V      | RGBW   | 800kHz | GRBW | 4-channel |
 | WS2814   | 12V     | RGBW   | 800kHz | GRBW | 4-channel |
+| WS2814_RGBCCT | 12V     | RGBCCT | 800kHz | RGBCCT/GRBCCT/RGBCTW/GRBCTW | 5-channel (RGB+WW+CW) |
+| WS2805_RGBCCT | 12V/24V     | RGBCCT | 800kHz | GRBCCT | 5-channel (RGB+WW+CW) |
 | TM1814   | 12V     | RGBW   | 800kHz | GRBW | 4-channel |
 | GS8208   | 12V     | RGB    | 800kHz | GRB | High voltage |
 
@@ -861,6 +894,7 @@ GND         ────────► GND
 - **Current Draw:**
   - WS2812B: ~60mA per LED at full white
   - SK6812 RGBW: ~80mA per LED at full white
+  - RGBCCT (RGB+WW+CW): depends on profile (two white channels)
   - APA102: ~60mA per LED at full brightness
   
 - **Power Supply:**
@@ -1090,6 +1124,7 @@ neo phys add <pin> <count> [protocol]
     # Examples:
     neo phys add 9 64              # GPIO 9, 64 LEDs, WS2812B (default)
     neo phys add 22 100 SK6812     # GPIO 22, 100 LEDs, SK6812 RGBW
+    neo phys add 22 100 SK6812_RGBCCT  # GPIO 22, 100 LEDs, SK6812 RGBCCT (5-channel)
     neo phys add 5 50 APA102       # GPIO 5, 50 LEDs, APA102 (SPI)
 
 neo phys del <index>
@@ -1207,6 +1242,7 @@ neo virt add <count> [colorOrder]
     neo virt add 72                # 72 LEDs, GRB (default)
     neo virt add 100 RGB           # 100 LEDs, RGB order
     neo virt add 150 RGBW          # 150 LEDs, RGBW (4-channel)
+    neo virt add 150 RGBCCT        # 150 LEDs, RGBCCT (5-channel: RGB+WW+CW)
 
 neo virt del <index>
     # Delete virtual strip
@@ -1243,6 +1279,26 @@ neo seg del <index>
 
 neo seg list
     # List all segments with details
+
+neo seg grouping <segIndex> <value>
+    # Set LED grouping (LEDs per group)
+    neo seg grouping 0 3           # 3 LEDs show same color
+
+neo seg spacing <segIndex> <value>
+    # Set spacing between groups (LEDs turned off)
+    neo seg spacing 0 1            # 1 LED off between groups
+
+neo seg reverse <segIndex> <0|1>
+    # Reverse effect direction
+    neo seg reverse 0 1            # Enable reverse direction
+
+neo seg mirror <segIndex> <0|1>
+    # Mirror effect from center
+    neo seg mirror 0 1             # Enable mirroring
+
+neo seg offset <segIndex> <value>
+    # Shift effect start position
+    neo seg offset 0 5             # Start effect 5 LEDs in
 ```
 
 ### Effect Commands
@@ -1295,6 +1351,7 @@ neo garage <segIndex> <phase>
     neo garage 0 3                 # Stop/pause
 
 neo color <segIndex> <r> <g> <b> [w]
+    neo color <segIndex> <r> <g> <b> <ww> <cw>     # RGBCCT (RGB+WW+CW)
     # Set primary color for segment
     neo color 0 255 0 0            # Red
     neo color 1 0 255 0            # Green
@@ -1438,6 +1495,7 @@ public:
     // Pixel Control
     void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b);  // RGB only
     void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w);  // RGBW (Serial only)
+    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw);  // RGBCCT (Serial only)
     void setPixel(uint16_t index, uint32_t color);
     void fill(uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
     void clear();
@@ -1482,7 +1540,9 @@ public:
     bool detachPhysical(PhysicalStrip* physical);
     
     // Pixel API
-    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
+    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
+    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w);        // RGBW
+    void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw); // RGBCCT
     void fill(uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
     void clear();
     
@@ -1505,12 +1565,25 @@ public:
     // Properties
     uint16_t getStartLed() const;
     uint16_t getEndLed() const;
-    uint16_t getLedCount() const;
+    uint16_t getLength() const;           // Virtual length (for effects)
+    uint16_t getPhysicalLength() const;   // Physical LED count
     VirtualStrip* getVirtualStrip() const;
     
+    // Grouping & Spacing (Effect Transformation)
+    void setGrouping(uint16_t grouping);  // LEDs per group (1 = no grouping)
+    void setSpacing(uint16_t spacing);    // LEDs to skip between groups (0 = none)
+    void setReverse(bool reverse);        // Reverse effect direction
+    void setMirror(bool mirror);          // Mirror effect from center
+    void setOffset(uint16_t offset);      // Shift effect start position
+    
+    uint16_t getGrouping() const;
+    uint16_t getSpacing() const;
+    bool getReverse() const;
+    bool getMirror() const;
+    uint16_t getOffset() const;
+    
     // Effect Management
-    void setEffect(uint8_t effectId);
-    void setEffect(Effect* effect);
+    void setEffect(Effect* effect, bool initializeDefaults = false);
     Effect* getEffect() const;
     
     // State Machine
@@ -1521,11 +1594,133 @@ public:
     bool isRunning() const;
     
     // Configuration
-    void setColor(uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
+    void setColor(uint8_t r, uint8_t g, uint8_t b);                    // RGB
+    void setColor(uint8_t r, uint8_t g, uint8_t b, uint8_t w);         // RGBW
+    void setColor(uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw); // RGBCCT
     void setBrightness(uint8_t brightness);
-    LedConfig& getConfig();
-    LedState& getState();             // Access state (for effects)
+    EffectConfig& getConfig();
+    EffectState& getState();
 };
+```
+
+### Segment Effect Transformations
+
+The Segment class provides powerful transformations to modify how effects are displayed:
+
+#### Grouping
+
+Multiple physical LEDs display the same color as one "logical pixel":
+
+```cpp
+segment->setGrouping(3);  // Every 3 LEDs show the same color
+
+// Physical LEDs: [111][222][333][444]  (12 LEDs)
+// Effect sees:     0    1    2    3    (4 virtual pixels)
+```
+
+**Use cases:**
+- Low-resolution strips that need chunky effects
+- Simulating large pixels
+- Reducing computational complexity for long strips
+
+#### Spacing
+
+Skip LEDs between groups (turn them off):
+
+```cpp
+segment->setGrouping(2);  // 2 LEDs per group
+segment->setSpacing(1);   // 1 LED off between groups
+
+// Physical LEDs: [GG_GG_GG_GG_]  (12 LEDs, G=group, _=off)
+// Effect sees:    0  1  2  3    (4 virtual pixels)
+```
+
+**Use cases:**
+- Christmas light patterns (every Nth LED)
+- Sparse decorations
+- Power saving (fewer LEDs lit)
+
+#### Reverse Direction
+
+Run effects backwards:
+
+```cpp
+segment->setReverse(true);   // Effect runs right-to-left
+
+// Normal:   Effect pixel 0 → Physical LED 0
+// Reverse:  Effect pixel 0 → Physical LED (length-1)
+```
+
+**Use cases:**
+- Symmetrical installations (two strips facing each other)
+- Wipe effects going "up" instead of "down"
+- Matching effect direction to physical layout
+
+#### Mirror Effect
+
+Mirror the effect from the center outward:
+
+```cpp
+segment->setMirror(true);    // Effect is mirrored from center
+
+// Physical LEDs:  [0 1 2 3 4 5 6 7]  (8 LEDs)
+// Effect output:  [A B C D D C B A]  (mirrored at center)
+```
+
+**Use cases:**
+- Symmetrical light bars
+- Center-outward animations
+- Theatrical/stage lighting effects
+- Automotive front/rear light bars
+
+#### Offset
+
+Shift the effect start position (with wrap-around):
+
+```cpp
+segment->setOffset(5);       // Effect starts 5 LEDs into the strip
+
+// Effect pixel 0 appears at physical LED 5
+// Effect wraps around: LED (length-1) → LED 0
+```
+
+**Use cases:**
+- Rotating effects without changing effect code
+- Phase-shifting between multiple segments
+- Adjusting visual alignment
+
+#### Combined Example
+
+```cpp
+// Create a segment with 24 physical LEDs
+Segment* seg = new Segment(vstrip, 0, 23);
+
+// Configure transformations
+seg->setGrouping(2);    // 2 LEDs per group
+seg->setSpacing(1);     // 1 LED off between groups
+seg->setMirror(true);   // Mirror from center
+seg->setOffset(3);      // Rotate by 3 positions
+
+// Effect now sees 8 virtual pixels (24 / (2+1) = 8)
+// Pattern: [AA_BB_CC_DD_DD_CC_BB_AA] with offset rotation
+```
+
+#### Virtual vs. Physical Length
+
+With grouping and spacing, the effect sees fewer "virtual pixels" than physical LEDs:
+
+```
+Virtual Length = Physical Length / (Grouping + Spacing)
+
+Example: 100 LEDs, Grouping=3, Spacing=2
+Virtual Length = 100 / (3+2) = 20 virtual pixels
+Effect runs on 20 pixels, each maps to 3 physical LEDs with 2 off
+```
+
+Access both:
+```cpp
+seg->getPhysicalLength();  // Actual LED count (100)
+seg->getLength();          // Virtual length for effects (20)
 ```
 
 ### TimingMode Enum
@@ -1984,7 +2179,10 @@ Each LED color channel draws current proportional to its brightness:
 
 ```
 Current(channel) = MaxCurrent(channel) × (Brightness / 255)
-Current(LED) = Current(R) + Current(G) + Current(B) + Current(W)
+Current(LED) = Current(R) + Current(G) + Current(B)
+
+RGBW:   Current(LED) += Current(W)
+RGBCCT: Current(LED) += Current(WW) + Current(CW)
 ```
 
 **Example:** WS2812B at full white (R=255, G=255, B=255)
@@ -2020,7 +2218,7 @@ Result: Max current = 5A ✓
 └────────┬────────┘
          ↓
 ┌─────────────────┐
-│ Segment Buffer  │  -> Stores RGB/RGBW values (0-255)
+│ Segment Buffer  │  -> Stores RGB/RGBW/RGBCCT values (0-255)
 └────────┬────────┘
          ↓
 ┌─────────────────┐
@@ -2046,12 +2244,29 @@ Different LED types have different current consumption:
 | SK6812 RGBW | 20  | 20     | 20     | 20     | 80mA          |
 | APA102   | 15     | 15     | 15     | -      | 45mA          |
 
+**5-Channel RGBCCT LED Types:**
+
+| LED Type | R (mA) | G (mA) | B (mA) | WW (mA) | CW (mA) | Total @ White |
+|----------|--------|--------|--------|---------|---------|---------------|
+| SK6812 RGBCCT | 20 | 20   | 20     | 20      | 20      | 100mA         |
+| WS2814 RGBCCT | 20 | 20   | 20     | 20      | 20      | 100mA         |
+| WS2805 RGBCCT | 20 | 20   | 20     | 20      | 20      | 100mA         |
+
 **Predefined Profiles:**
 ```cpp
-LedProfiles::WS2812B       // 20mA per channel
-LedProfiles::SK6812_RGBW   // 20mA per channel + W
-LedProfiles::APA102        // 15mA per channel
-LedProfiles::CONSERVATIVE  // 20mA all channels (safe default)
+// RGB (3-channel)
+LedProfiles::WS2812B           // 20mA per channel (60mA max)
+LedProfiles::APA102            // 15mA per channel (45mA max)
+
+// RGBW (4-channel)
+LedProfiles::SK6812_RGBW       // 20mA per channel + W (80mA max)
+LedProfiles::CONSERVATIVE      // 20mA all channels (safe default)
+
+// RGBCCT (5-channel: RGB + Warm White + Cool White)
+LedProfiles::SK6812_RGBCCT     // 20mA all 5 channels (100mA max)
+LedProfiles::WS2814_RGBCCT     // 20mA all 5 channels (100mA max)
+LedProfiles::WS2805_RGBCCT     // 20mA all 5 channels (100mA max)
+LedProfiles::CONSERVATIVE_5CH  // 20mA all 5 channels (safe default)
 ```
 
 ### Configuration
@@ -2080,8 +2295,168 @@ void setup() {
 For non-standard LEDs with different current draws:
 
 ```cpp
-LedCurrentProfile customProfile(18, 22, 18, 0);  // R, G, B, W in mA
-mgr->getPowerManager()->setLedProfile(customProfile);
+// RGB (3-channel)
+LedCurrentProfile customRGB(18, 22, 18);
+
+// RGBW (4-channel)
+LedCurrentProfile customRGBW(18, 22, 18, 25);  // R, G, B, W in mA
+
+// RGBCCT (5-channel)
+LedCurrentProfile customRGBCCT(18, 22, 18, 20, 20);  // R, G, B, WW, CW in mA
+
+mgr->getPowerManager()->setLedProfile(customRGBCCT);
+```
+
+### Advanced Power Management Features
+
+#### Power Limit Modes
+
+Three different modes for current limiting:
+
+```cpp
+PowerManager* pm = mgr->getPowerManager();
+
+// GLOBAL (default): Total current across all strips
+pm->setPowerLimitMode(PowerLimitMode::GLOBAL);
+pm->setMaxCurrent(5000);  // 5A total
+
+// PER_CHANNEL: Limit per physical output channel
+pm->setPowerLimitMode(PowerLimitMode::PER_CHANNEL);
+pm->setMaxCurrentPerChannel(2000);  // 2A per channel
+
+// PER_LED: Limit per individual LED
+pm->setPowerLimitMode(PowerLimitMode::PER_LED);
+pm->setMaxCurrentPerLed(50);  // 50mA max per LED
+```
+
+| Mode | Use Case |
+|------|----------|
+| `GLOBAL` | Single power supply, total budget |
+| `PER_CHANNEL` | Multiple output channels, separate fusing |
+| `PER_LED` | Protect LEDs from over-driving |
+
+#### Soft-Limiting (Threshold)
+
+Gradual brightness reduction instead of hard cutoff:
+
+```cpp
+PowerManager* pm = mgr->getPowerManager();
+
+// Start dimming at 80% of limit (smooth transition)
+pm->setThresholdPercent(80);
+
+// With 1000mA limit and 80% threshold:
+//  - 0-800mA:    No limiting (full brightness)
+//  - 800-1000mA: Gradual brightness reduction (soft curve)
+//  - >1000mA:    Hard limit to 1000mA
+```
+
+**Why use soft-limiting?**
+- Prevents sudden brightness jumps during animations
+- Smoother visual transitions when approaching limit
+- Less noticeable power management intervention
+
+#### Auto Brightness Cap
+
+Maximum brightness limit independent of power consumption:
+
+```cpp
+PowerManager* pm = mgr->getPowerManager();
+
+// Cap brightness at 80% regardless of power consumption
+pm->setMaxBrightnessPercent(80);
+```
+
+**Use cases:**
+- Outdoor installations (prevent blinding)
+- Night mode operation
+- Preserving LED lifespan
+- Consistent brightness across different strip lengths
+
+#### Slew Rate Control (Smooth Transitions)
+
+Control how fast brightness changes when power limiting kicks in:
+
+```cpp
+PowerManager* pm = mgr->getPowerManager();
+
+// 50% brightness change per second (smooth)
+pm->setBrightnessSlewRate(50);
+
+// 0 = instant change (default)
+// 100 = full range in 1 second
+// 25 = full range in 4 seconds
+
+// IMPORTANT: Must call updateSlewRate() in your loop!
+void loop() {
+    uint32_t deltaTime = millis() - lastUpdate;
+    pm->updateSlewRate(deltaTime);
+    lastUpdate = millis();
+    
+    // ... rest of update logic
+}
+```
+
+**Why use slew rate?**
+- Prevents jarring brightness changes
+- Professional-looking power limiting
+- Reduces stress on power supply (gradual current changes)
+
+#### Combined Example:
+
+```cpp
+void setup() {
+    NeoPixelManager* mgr = neoPixelModule.getManager();
+    PowerManager* pm = mgr->getPowerManager();
+    
+    // 500 WS2805 RGBCCT LEDs, 15A power supply
+    mgr->setMaxCurrent(14000);  // Leave 1A safety margin
+    pm->setLedProfile(LedProfiles::WS2805_RGBCCT);
+    
+    // Advanced features
+    pm->setThresholdPercent(85);       // Soft-limit from 85%
+    pm->setMaxBrightnessPercent(90);   // Never exceed 90% brightness
+    pm->setBrightnessSlewRate(30);     // Smooth 3s transitions
+    
+    mgr->setPowerManagementEnabled(true);
+}
+
+void loop() {
+    static uint32_t lastUpdate = 0;
+    uint32_t now = millis();
+    uint32_t deltaTime = now - lastUpdate;
+    lastUpdate = now;
+    
+    PowerManager* pm = mgr->getPowerManager();
+    pm->updateSlewRate(deltaTime);
+    
+    // Normal update
+    mgr->update(deltaTime);
+}
+```
+
+### Power Monitoring
+
+#### Requested vs. Actual Power
+
+```cpp
+PowerManager* pm = mgr->getPowerManager();
+
+// After applyCurrentLimit() has been called:
+
+// What LEDs WANT to draw (before limiting)
+uint32_t requestedMA = pm->getLastCalculatedCurrent();
+float requestedWatts = pm->calculatePowerWatts(nullptr, 0, 0);
+
+// What LEDs ACTUALLY draw (after limiting)
+uint32_t actualMA = pm->getActualCurrent();
+float actualWatts = pm->getActualPowerWatts();
+
+// Current brightness level (with slew rate)
+float currentBrightness = pm->getCurrentBrightnessPercent();
+
+Serial.printf("Requested: %umA (%.2fW), Actual: %umA (%.2fW), Brightness: %.1f%%\n",
+              requestedMA, requestedWatts, actualMA, actualWatts, currentBrightness);
 ```
 
 #### Per-Strip Manual Limiting (Advanced)

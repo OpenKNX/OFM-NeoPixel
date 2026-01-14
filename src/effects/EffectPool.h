@@ -31,6 +31,7 @@ class JuggleEffect;
 class BPMEffect;
 class CylonEffect;
 class RGBWTestEffect;
+class RGBCCTTestEffect;
 class GarageDoorEffect;
 class FireEffect;
 class TheaterChaseEffect;
@@ -66,6 +67,7 @@ class EffectPool
     static Effect* getBPM();
     static Effect* getCylon();
     static Effect* getRGBWTest();
+    static Effect* getRGBCCTTest();
     static Effect* getGarageDoor();
     static Effect* getFire();
     static Effect* getTheaterChase();

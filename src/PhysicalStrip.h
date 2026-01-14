@@ -44,8 +44,10 @@ class PhysicalStrip
     // ====================================================================
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
+    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw);
     void setAll(uint8_t r, uint8_t g, uint8_t b);
     void setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t w);
+    void setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw);
     void clear();
 
     // ====================================================================
@@ -87,12 +89,21 @@ class PhysicalStrip
     ColorOrder getColorOrder() const { return _colorOrder; }
 
     /**
-     * @brief Check if this strip has a white channel (RGBW)
-     * @return true if color order is RGBW or GRBW
+     * @brief Check if this strip has a white channel (RGBW or RGBCCT)
+     * @return true if color order has at least one white channel
      */
     bool hasWhiteChannel() const
     {
-        return (_colorOrder == ColorOrder::RGBW || _colorOrder == ColorOrder::GRBW);
+        return ProtocolHelper::hasWhiteChannel(_colorOrder);
+    }
+
+    /**
+     * @brief Check if this strip has dual white channels (RGBCCT - 5 channel)
+     * @return true if color order is RGBCCT, GRBCCT, RGBCTW, or GRBCTW
+     */
+    bool hasDualWhiteChannel() const
+    {
+        return ProtocolHelper::hasDualWhiteChannel(_colorOrder);
     }
 
     // ====================================================================

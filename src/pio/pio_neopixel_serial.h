@@ -58,17 +58,24 @@ struct pio_neopixel_serial_inst
     float actual_bitrate;  // Actual bitrate used (may differ for AUTO_LEGACY)
     float actual_clkdiv;   // Actual clock divider used
 
-    uint8_t* buffer;   // LED data buffer (RGB/RGBW bytes)
-    size_t bufferSize; // Buffer size in bytes
+    uint8_t* buffer;        // LED data buffer (RGB/RGBW bytes) - user writes here
+    uint8_t* bufferSending; // RGBCCT only: DMA reads from here (double-buffer)
+    size_t bufferSize;      // Buffer size in bytes
 
-    uint32_t* dmaBuffer;  // DMA transfer buffer (32-bit words) - PACKED!
-    size_t dmaBufferSize; // DMA buffer size in 32-bit words
+    uint32_t* dmaBuffer;  // DMA transfer buffer (32-bit words) - for RGB/RGBW only, nullptr for RGBCCT
+    size_t dmaBufferSize; // DMA buffer size (in words/halfwords/bytes depending on fifoWordBits)
+    uint fifoWordBits;    // FIFO word size in bits (8/16/32) - for RGBCCT dynamic sizing
 
     int dmaChannel;     // DMA channel (-1 if not used)
     int dmaIrqNum;      // DMA IRQ number (0 or 1, -1 if not used)
     bool useDMA;        // Use DMA for transfers
     bool initialized;   // Initialization state
-    volatile bool busy; // Transfer in progress
+    volatile bool busy; // DMA transfer in progress
+
+    // Latch timing - prevents starting new transfer too early
+    volatile uint32_t fifoEmptyTime; // micros() when FIFO became empty (for reset timing)
+    uint32_t resetTimeUs;            // Required reset/latch time (50-300µs depending on protocol)
+    volatile bool waitingForReset;   // True after FIFO empty, waiting for reset pulse
 };
 typedef struct pio_neopixel_serial_inst pio_neopixel_serial_inst_t;
 
@@ -84,6 +91,7 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
     bool init() override;
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b) override;
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w) override;
+    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw) override;
     bool show() override;
     bool isBusy() override;
     void clear() override;
@@ -183,7 +191,7 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
     void sendDataDMA();
     void packDataToDMABuffer();
     static void dmaIRQHandler();
-    void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
+    void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww = 0, uint8_t cw = 0);
 
     static PIO_NeoPixel_Serial* _dmaHandlers[12];
     static void registerDMAHandler(int channel, PIO_NeoPixel_Serial* instance);

@@ -76,7 +76,7 @@ class StrobeEffect : public Effect
         uint32_t onDuration = (interval * onRatio) / 200; // Convert percentage to duration
         bool shouldBeOn = currentPhase < onDuration;
 
-        uint8_t r, g, b;
+        uint8_t r, g, b, ww, cw;
         if (_isOn && shouldBeOn)
         {
             // Full brightness when on
@@ -87,12 +87,16 @@ class StrobeEffect : public Effect
                 r = (rgb >> 16) & 0xFF;
                 g = (rgb >> 8) & 0xFF;
                 b = rgb & 0xFF;
+                ww = 0;
+                cw = 0;
             }
             else
             {
                 r = FastLEDMath::scale8(config.r(), config.intensity);
                 g = FastLEDMath::scale8(config.g(), config.intensity);
                 b = FastLEDMath::scale8(config.b(), config.intensity);
+                ww = FastLEDMath::scale8(config.ww(), config.intensity);
+                cw = FastLEDMath::scale8(config.cw(), config.intensity);
             }
         }
         else
@@ -106,19 +110,23 @@ class StrobeEffect : public Effect
                 r = (rgb >> 16) & 0xFF;
                 g = (rgb >> 8) & 0xFF;
                 b = rgb & 0xFF;
+                ww = 0;
+                cw = 0;
             }
             else
             {
                 r = FastLEDMath::scale8(config.r(), dimBrightness);
                 g = FastLEDMath::scale8(config.g(), dimBrightness);
                 b = FastLEDMath::scale8(config.b(), dimBrightness);
+                ww = FastLEDMath::scale8(config.ww(), dimBrightness);
+                cw = FastLEDMath::scale8(config.cw(), dimBrightness);
             }
         }
 
         // Apply to all pixels
         for (uint16_t i = 0; i < length; i++)
         {
-            segment->setPixel(i, r, g, b);
+            segment->setPixel(i, r, g, b, ww, cw);
         }
     }
 

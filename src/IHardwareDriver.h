@@ -25,7 +25,6 @@ struct PhysicalStripConfig;
 enum class LedProtocol
 {
     // 1-Wire Protocols (Clock embedded in data)
-    WS2805,  // 12V RGB, 400kHz, RGB order
     WS2812,  // 5V RGB, 800kHz, GRB order
     WS2812B, // Same as WS2812 (common variant)
     WS2813,  // 5V RGB, 800kHz, GRB, data backup
@@ -36,6 +35,11 @@ enum class LedProtocol
     WS2814,  // 12V RGBW, 800kHz, GRBW order
     TM1814,  // 12V RGBW, 800kHz, GRBW order
     GS8208,  // 12V RGB, 800kHz, GRB order
+
+    // 5-Channel Protocols (RGB + Warm White + Cool White = CCT)
+    SK6812_RGBCCT, // 5V RGBCCT (5-channel), 800kHz, GRBCCT order
+    WS2814_RGBCCT, // 12V RGBCCT (5-channel), 800kHz, GRBCCT order
+    WS2805_RGBCCT, // 12V/24V RGBCCT (5-channel), 800kHz, GRBCCT order
 
     // SPI Protocols (Separate clock and data)
     APA102,       // 5V RGB+Brightness, up to 20MHz (original chip)
@@ -84,6 +88,12 @@ enum class ColorOrder
     BRG,  // Blue, Red, Green (rare)
     RGBW, // Red, Green, Blue, White (SK6812)
     GRBW, // Green, Red, Blue, White (SK6812 standard)
+
+    // 5-Channel: RGB + Warm White + Cool White (CCT)
+    RGBCCT, // Red, Green, Blue, Warm White, Cool White
+    GRBCCT, // Green, Red, Blue, Warm White, Cool White (standard for 5-channel)
+    RGBCTW, // Red, Green, Blue, Cool White, Warm White (CW first)
+    GRBCTW, // Green, Red, Blue, Cool White, Warm White
 };
 
 /**
@@ -91,7 +101,8 @@ enum class ColorOrder
  */
 struct DriverCapabilities
 {
-    bool supportsRGBW;     // Supports 32-bit RGBW
+    bool supportsRGBW;     // Supports 32-bit RGBW (4 channels)
+    bool supportsRGBCCT;   // Supports 40-bit RGBCCT (5 channels)
     bool supportsDMA;      // DMA transfer available
     bool supportsAsync;    // Non-blocking show() possible
     uint32_t maxFrequency; // Maximum update frequency (Hz)
@@ -111,6 +122,7 @@ class IHardwareDriver
     virtual bool init() = 0;
     virtual bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b) = 0;
     virtual bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w) = 0;
+    virtual bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw) = 0; // 5-channel RGBCCT
     virtual bool show() = 0;
     virtual bool isBusy() = 0;
     virtual void clear() = 0;
@@ -159,8 +171,15 @@ namespace ProtocolHelper
      */
     inline bool is1Wire(LedProtocol protocol)
     {
-        return protocol >= LedProtocol::WS2812 &&
-               protocol <= LedProtocol::GS8208;
+        // Standard 1-Wire protocols (WS2812 to GS8208)
+        if (protocol >= LedProtocol::WS2812 && protocol <= LedProtocol::GS8208)
+            return true;
+        // 5-Channel RGBCCT protocols (also 1-Wire)
+        if (protocol == LedProtocol::SK6812_RGBCCT ||
+            protocol == LedProtocol::WS2814_RGBCCT ||
+            protocol == LedProtocol::WS2805_RGBCCT)
+            return true;
+        return false;
     }
 
     /**
@@ -184,6 +203,35 @@ namespace ProtocolHelper
     }
 
     /**
+     * Check if protocol supports RGBCCT (5 channels - RGB + Warm White + Cool White)
+     */
+    inline bool isRGBCCT(LedProtocol protocol)
+    {
+        return protocol == LedProtocol::SK6812_RGBCCT ||
+               protocol == LedProtocol::WS2814_RGBCCT ||
+               protocol == LedProtocol::WS2805_RGBCCT;
+    }
+
+    /**
+     * Check if color order has white channel (4+ bytes)
+     */
+    inline bool hasWhiteChannel(ColorOrder order)
+    {
+        return order == ColorOrder::RGBW || order == ColorOrder::GRBW ||
+               order == ColorOrder::RGBCCT || order == ColorOrder::GRBCCT ||
+               order == ColorOrder::RGBCTW || order == ColorOrder::GRBCTW;
+    }
+
+    /**
+     * Check if color order has dual white channels (5 bytes - WW + CW)
+     */
+    inline bool hasDualWhiteChannel(ColorOrder order)
+    {
+        return order == ColorOrder::RGBCCT || order == ColorOrder::GRBCCT ||
+               order == ColorOrder::RGBCTW || order == ColorOrder::GRBCTW;
+    }
+
+    /**
      * Get color order for protocol
      */
     inline ColorOrder getColorOrder(LedProtocol protocol)
@@ -198,6 +246,12 @@ namespace ProtocolHelper
             case LedProtocol::WS2814:
             case LedProtocol::TM1814:
                 return ColorOrder::GRBW;
+
+            // 5-Channel protocols
+            case LedProtocol::SK6812_RGBCCT:
+            case LedProtocol::WS2814_RGBCCT:
+            case LedProtocol::WS2805_RGBCCT:
+                return ColorOrder::GRBCCT;
 
             case LedProtocol::WS2812:
             case LedProtocol::WS2812B:
@@ -214,7 +268,37 @@ namespace ProtocolHelper
      */
     inline uint8_t getBytesPerLed(LedProtocol protocol)
     {
-        return isRGBW(protocol) ? 4 : 3;
+        if (isRGBCCT(protocol)) return 5;
+        if (isRGBW(protocol)) return 4;
+        return 3;
+    }
+
+    /**
+     * Get bytes per LED for color order
+     */
+    inline uint8_t getBytesPerLed(ColorOrder order)
+    {
+        switch (order)
+        {
+            case ColorOrder::RGBCCT:
+            case ColorOrder::GRBCCT:
+            case ColorOrder::RGBCTW:
+            case ColorOrder::GRBCTW:
+                return 5;
+            case ColorOrder::RGBW:
+            case ColorOrder::GRBW:
+                return 4;
+            default:
+                return 3;
+        }
+    }
+
+    /**
+     * Get number of color channels for color order
+     */
+    inline uint8_t getChannelCount(ColorOrder order)
+    {
+        return getBytesPerLed(order);
     }
 
     /**
@@ -224,7 +308,7 @@ namespace ProtocolHelper
     {
         if (protocol == LedProtocol::WS2811)
         {
-            return 400000; // 400kHz
+            return 400000; // 400kHz (WS2811 slow mode)
         }
         if (isSPI(protocol))
         {
@@ -239,4 +323,104 @@ namespace ProtocolHelper
         }
         return 800000; // 800kHz for most 1-Wire protocols
     }
+
+    // =========================================================================
+    // Color Temperature Utilities (for RGBCCT strips)
+    // =========================================================================
+
+    /**
+     * Convert color temperature (Kelvin) to Warm/Cool White values
+     *
+     * Maps a Kelvin temperature to WW (warm white) and CW (cool white) channel values.
+     * The function performs linear interpolation between the warm and cool endpoints.
+     *
+     * @param kelvin Color temperature in Kelvin (typically 2700-6500K)
+     * @param ww Output: Warm White value (0-255)
+     * @param cw Output: Cool White value (0-255)
+     * @param minKelvin Minimum temperature (default: 2700K = warm white 100%)
+     * @param maxKelvin Maximum temperature (default: 6500K = cool white 100%)
+     *
+     * @note At minKelvin: ww=255, cw=0
+     * @note At maxKelvin: ww=0, cw=255
+     * @note At midpoint: ww=127, cw=127 (mixed)
+     *
+     * Example usage:
+     *   uint8_t ww, cw;
+     *   kelvinToWWCW(4000, ww, cw); // Returns ww≈170, cw≈85 (warm-ish)
+     */
+    inline void kelvinToWWCW(uint16_t kelvin, uint8_t& ww, uint8_t& cw,
+                             uint16_t minKelvin = 2700, uint16_t maxKelvin = 6500)
+    {
+        // Clamp to valid range
+        if (kelvin <= minKelvin)
+        {
+            ww = 255;
+            cw = 0;
+            return;
+        }
+        if (kelvin >= maxKelvin)
+        {
+            ww = 0;
+            cw = 255;
+            return;
+        }
+
+        // Linear interpolation between warm and cool
+        uint32_t range = maxKelvin - minKelvin;
+        uint32_t position = kelvin - minKelvin;
+
+        // CW increases as temperature increases
+        cw = (uint8_t)((position * 255UL) / range);
+        // WW decreases as temperature increases
+        ww = 255 - cw;
+    }
+
+    /**
+     * Convert WW/CW values to approximate color temperature (Kelvin)
+     *
+     * Inverse of kelvinToWWCW - estimates the color temperature from
+     * the warm/cool white channel values.
+     *
+     * @param ww Warm White value (0-255)
+     * @param cw Cool White value (0-255)
+     * @param minKelvin Minimum temperature (default: 2700K)
+     * @param maxKelvin Maximum temperature (default: 6500K)
+     * @return Estimated color temperature in Kelvin
+     */
+    inline uint16_t wwcwToKelvin(uint8_t ww, uint8_t cw,
+                                 uint16_t minKelvin = 2700, uint16_t maxKelvin = 6500)
+    {
+        // Handle edge cases
+        if (ww == 0 && cw == 0) return (minKelvin + maxKelvin) / 2; // Neutral
+        if (cw == 0) return minKelvin;
+        if (ww == 0) return maxKelvin;
+
+        // Calculate ratio and interpolate
+        uint32_t total = (uint32_t)ww + (uint32_t)cw;
+        uint32_t range = maxKelvin - minKelvin;
+        uint32_t kelvin = minKelvin + (range * cw) / total;
+
+        return (uint16_t)kelvin;
+    }
+
+    /**
+     * Set white channels from color temperature and brightness
+     *
+     * Convenience function that combines kelvinToWWCW with brightness scaling.
+     *
+     * @param kelvin Color temperature in Kelvin
+     * @param brightness Overall white brightness (0-255)
+     * @param ww Output: Warm White value (0-255)
+     * @param cw Output: Cool White value (0-255)
+     */
+    inline void kelvinToWWCWWithBrightness(uint16_t kelvin, uint8_t brightness,
+                                           uint8_t& ww, uint8_t& cw)
+    {
+        kelvinToWWCW(kelvin, ww, cw);
+
+        // Scale by brightness
+        ww = (uint8_t)(((uint16_t)ww * brightness) / 255);
+        cw = (uint8_t)(((uint16_t)cw * brightness) / 255);
+    }
+
 }; // namespace ProtocolHelper

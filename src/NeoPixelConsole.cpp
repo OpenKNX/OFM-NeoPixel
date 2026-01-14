@@ -105,7 +105,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         printHelpSectionHeader("VirtualStrip Management");
         openknx.console.printHelpLine("neo virt ?", "Show detailed VirtualStrip commands");
         openknx.console.printHelpLine("neo virt list", "List all virtual strips");
-        openknx.console.printHelpLine("neo virt add ?", "Create virtual strip (RGB or RGBW)");
+        openknx.console.printHelpLine("neo virt add ?", "Create virtual strip (RGB, RGBW, or RGBCCT)");
         openknx.console.printHelpLine("neo virt del <i>", "Delete virtual strip by ID");
 
         printHelpSectionHeader("Segment Management");
@@ -194,13 +194,14 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     {
         printDetailHelpHeader("VirtualStrip Commands");
         openknx.console.printHelpLine("list", "List all virtual strips");
-        openknx.console.printHelpLine("add <n> [type]", "Create virtual strip (RGB or RGBW, default: RGB)");
+        openknx.console.printHelpLine("add <n> [type]", "Create virtual strip (RGB, RGBW, or RGBCCT, default: RGB)");
         openknx.console.printHelpLine("del <i>", "Delete virtual strip by ID");
         openknx.console.printHelpLine("attach <v> <p>", "Attach physical strip to virtual strip");
         openknx.console.printHelpLine("detach <v>", "Detach physical strip from virtual strip");
         printDetailHelpSeparator();
         printDetailHelpParameter("<i>=ID, <n>=LED Count, <v>=Virtual Strip ID, <p>=Physical Strip ID");
         printDetailHelpExample("neo virt add 72 rgb      Create RGB virtual strip with 72 LEDs");
+        printDetailHelpExample("neo virt add 72 rgbcct   Create RGBCCT (5-channel) virtual strip");
         printDetailHelpExample("neo virt attach 0 1      Attach physical strip 1 to virtual strip 0");
         printDetailHelpEnd();
         return true;
@@ -265,11 +266,13 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     if (command == "neo color ?" || command == "neo color help")
     {
         printDetailHelpHeader("Color Commands");
-        openknx.console.printHelpLine("color <s> <r> <g> <b> [w]", "Set segment color (0-255, w optional for RGBW)");
+        openknx.console.printHelpLine("color <s> <r> <g> <b> [w] [cw]", "Set segment color (0-255)");
         printDetailHelpSeparator();
-        printDetailHelpParameter("<s>=Segment ID, <r>=Red, <g>=Green, <b>=Blue, <w>=White (0-255)");
-        printDetailHelpExample("neo color 0 255 0 0      Set segment 0 to red");
+        printDetailHelpParameter("<s>=Segment ID, <r>=Red, <g>=Green, <b>=Blue");
+        printDetailHelpParameter("<w>=WarmWhite (optional), <cw>=CoolWhite (optional, 5-channel)");
+        printDetailHelpExample("neo color 0 255 0 0         Set segment 0 to red");
         printDetailHelpExample("neo color 1 0 255 128 200   Set RGBW segment 1 to green+blue+white");
+        printDetailHelpExample("neo color 2 0 0 0 255 128   Set RGBCCT to warm white + cool white");
         printDetailHelpEnd();
         return true;
     }
@@ -528,6 +531,10 @@ bool NeoPixel::processInfoCommand()
                     case LedProtocol::SK9822: protocolName = "SK9822"; break;
                     case LedProtocol::WS2801: protocolName = "WS2801"; break;
                     case LedProtocol::LPD8806: protocolName = "LPD8806"; break;
+                    // 5-Channel protocols (RGBCCT)
+                    case LedProtocol::SK6812_RGBCCT: protocolName = "SK6812_RGBCCT"; break;
+                    case LedProtocol::WS2814_RGBCCT: protocolName = "WS2814_RGBCCT"; break;
+                    case LedProtocol::WS2805_RGBCCT: protocolName = "WS2805_RGBCCT"; break;
                     default: protocolName = "Unknown"; break;
                 }
 
@@ -545,6 +552,11 @@ bool NeoPixel::processInfoCommand()
                     case ColorOrder::BRG: colorOrder = "BRG"; break;
                     case ColorOrder::RGBW: colorOrder = "RGBW"; break;
                     case ColorOrder::GRBW: colorOrder = "GRBW"; break;
+                    // 5-Channel color orders (RGBCCT)
+                    case ColorOrder::RGBCCT: colorOrder = "RGBCCT"; break;
+                    case ColorOrder::GRBCCT: colorOrder = "GRBCCT"; break;
+                    case ColorOrder::RGBCTW: colorOrder = "RGBCTW"; break;
+                    case ColorOrder::GRBCTW: colorOrder = "GRBCTW"; break;
                 }
 
                 // Display strip info (GPIO, LEDs, Status)
@@ -1543,6 +1555,7 @@ bool NeoPixel::processPhysListCommand()
                 const char* colorOrder = "???";
                 switch (strip->getColorOrder())
                 {
+                    case ColorOrder::NONE: colorOrder = "DEFAULT"; break;
                     case ColorOrder::RGB: colorOrder = "RGB"; break;
                     case ColorOrder::RBG: colorOrder = "RBG"; break;
                     case ColorOrder::GRB: colorOrder = "GRB"; break;
@@ -1551,6 +1564,11 @@ bool NeoPixel::processPhysListCommand()
                     case ColorOrder::BRG: colorOrder = "BRG"; break;
                     case ColorOrder::RGBW: colorOrder = "RGBW"; break;
                     case ColorOrder::GRBW: colorOrder = "GRBW"; break;
+                    // 5-Channel color orders (RGBCCT)
+                    case ColorOrder::RGBCCT: colorOrder = "RGBCCT"; break;
+                    case ColorOrder::GRBCCT: colorOrder = "GRBCCT"; break;
+                    case ColorOrder::RGBCTW: colorOrder = "RGBCTW"; break;
+                    case ColorOrder::GRBCTW: colorOrder = "GRBCTW"; break;
                 }
 
                 const char* driver = strip->getDriverName();
@@ -1870,18 +1888,26 @@ bool NeoPixel::processVirtListCommand()
     }
     else
     {
-        openknx.logger.log("ID │ Total LEDs │ Order │ Attached │ Status");
-        openknx.logger.log("───┼────────────┼───────┼──────────┼────────");
+        openknx.logger.log("ID │ Total LEDs │ Order  │ Attached │ Status");
+        openknx.logger.log("───┼────────────┼────────┼──────────┼────────");
 
         for (uint32_t i = 0; i < count; i++)
         {
             auto vstrip = _manager->getVirtualStrip(i);
             if (vstrip)
             {
-                // Display buffer format (RGB vs RGBW)
-                const char* bufferFormat = vstrip->hasWhiteChannel() ? "RGBW" : "RGB";
+                // Display buffer format (RGB vs RGBW vs RGBCCT)
+                const char* bufferFormat = "RGB";
+                if (vstrip->hasDualWhiteChannel())
+                {
+                    bufferFormat = "RGBCCT";
+                }
+                else if (vstrip->hasWhiteChannel())
+                {
+                    bufferFormat = "RGBW";
+                }
 
-                openknx.logger.logWithValues("%2d │ %10d │ %5s │ %8s │ %s",
+                openknx.logger.logWithValues("%2d │ %10d │ %6s │ %8s │ %s",
                                              i,
                                              vstrip->getLedCount(),
                                              bufferFormat,
@@ -1900,9 +1926,9 @@ bool NeoPixel::processVirtListCommand()
 
 /**
  * @brief Process 'neo virt add <leds> [type]' command
- * Type: RGB (3 bytes/LED) or RGBW (4 bytes/LED), default: RGB
+ * Type: RGB (3 bytes/LED), RGBW (4 bytes/LED), or RGBCCT (5 bytes/LED), default: RGB
  *
- * VirtualStrip stores pixels in RGB/RGBW format internally.
+ * VirtualStrip stores pixels in RGB/RGBW/RGBCCT format internally.
  * ColorOrder conversion (GRB, BGR, etc.) happens in PhysicalStrip!
  */
 bool NeoPixel::processVirtAddCommand(const std::string& args)
@@ -1921,8 +1947,8 @@ bool NeoPixel::processVirtAddCommand(const std::string& args)
     if (parsed < 1 || ledCount <= 0 || ledCount > 1000)
     {
         openknx.logger.log("ERROR: Usage: neo virt add <leds> [type]");
-        openknx.logger.log("       type: RGB (default) or RGBW");
-        openknx.logger.log("       Note: VirtualStrip stores pixels in RGB/RGBW format");
+        openknx.logger.log("       type: RGB (default), RGBW, or RGBCCT");
+        openknx.logger.log("       Note: VirtualStrip stores pixels in RGB/RGBW/RGBCCT format");
         openknx.logger.log("             ColorOrder conversion happens in PhysicalStrip");
         return true;
     }
@@ -1944,9 +1970,14 @@ bool NeoPixel::processVirtAddCommand(const std::string& args)
             colorOrder = ColorOrder::RGBW;
             typeName = "RGBW";
         }
+        else if (type == "rgbcct" || type == "RGBCCT")
+        {
+            colorOrder = ColorOrder::RGBCCT;
+            typeName = "RGBCCT";
+        }
         else
         {
-            openknx.logger.log("ERROR: Invalid type! Use: RGB or RGBW");
+            openknx.logger.log("ERROR: Invalid type! Use: RGB, RGBW, or RGBCCT");
             return true;
         }
     }
@@ -3020,7 +3051,7 @@ bool NeoPixel::processPowerCommand(const std::string& args)
 
         openknx.logger.logWithValues("LED Profile:      %s (R:%umA G:%umA B:%umA W:%umA)",
                                      profileName, profile.redMA, profile.greenMA,
-                                     profile.blueMA, profile.whiteMA);
+                                     profile.blueMA, profile.warmWhiteMA, profile.coolWhiteMA);
 
         // Current consumption - REQUESTED (before limiting)
         float totalPower = _manager->getTotalPowerWatts();

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file VirtualStrip.cpp
  * @brief VirtualStrip Implementation - Unified RGB/RGBW Buffer Management
  *
@@ -25,32 +25,34 @@
 /**
  * @brief Constructor
  * @param totalLeds Total number of virtual LEDs
- * @param colorOrder Only used to determine RGB (3 bytes) vs RGBW (4 bytes) buffer
+ * @param colorOrder Only used to determine RGB (3 bytes) vs RGBW (4 bytes) vs RGBCCT (5 bytes) buffer
  *
- * VirtualStrip ALWAYS stores pixels in RGB/RGBW format internally.
+ * VirtualStrip ALWAYS stores pixels in RGB/RGBW/RGBCCT format internally.
  * ColorOrder conversion (RGB→GRB, RGB→BGR, etc.) happens in PhysicalStrip!
  *
  * The colorOrder parameter determines:
  * - RGB/RBG/GRB/GBR/BGR/BRG → 3 bytes per LED (RGB buffer)
  * - RGBW/GRBW → 4 bytes per LED (RGBW buffer)
+ * - RGBCCT/GRBCCT/RGBCTW/GRBCTW → 5 bytes per LED (RGBCCT buffer)
  *
  * ColorOrder details (GRB vs RGB etc.) are handled by PhysicalStrip, not here!
  */
 VirtualStrip::VirtualStrip(uint16_t totalLeds, ColorOrder colorOrder)
     : _totalLeds(totalLeds),
-      _bytesPerLed((colorOrder == ColorOrder::RGBW || colorOrder == ColorOrder::GRBW) ? 4 : 3),
+      _bytesPerLed(ProtocolHelper::getBytesPerLed(colorOrder)),
       _dirty(false),
       _powerManager(nullptr),
       _pixelTransformCallback(nullptr),
       _pixelTransformUserData(nullptr)
 {
-    // Allocate unified buffer (always RGB/RGBW format)
+    // Allocate unified buffer (always RGB/RGBW/RGBCCT format)
     _bufferSize = (size_t)totalLeds * _bytesPerLed;
     _buffer = new uint8_t[_bufferSize];
     memset(_buffer, 0, _bufferSize);
 
+    const char* formatName = (_bytesPerLed == 5) ? "RGBCCT" : ((_bytesPerLed == 4) ? "RGBW" : "RGB");
     logDebugP("VirtualStrip initialized: %u LEDs, %u Bytes/LED (%s), Buffer=%u Bytes",
-              _totalLeds, _bytesPerLed, (_bytesPerLed == 4) ? "RGBW" : "RGB", (uint32_t)_bufferSize);
+              _totalLeds, _bytesPerLed, formatName, (uint32_t)_bufferSize);
 }
 
 /**
@@ -217,12 +219,13 @@ PhysicalStrip* VirtualStrip::findPhysicalAtIndex(uint16_t virtualIndex, uint16_t
  * @param r Red component (0-255)
  * @param g Green component (0-255)
  * @param b Blue component (0-255)
- * @param w White component or brightness (0-255)
+ * @param ww Warm white component (0-255)
+ * @param cw Cool white component (0-255)
  *
- * VirtualStrip ALWAYS stores in RGB/RGBW format.
+ * VirtualStrip ALWAYS stores in RGB/RGBW/RGBCCT format.
  * ColorOrder conversion happens later in PhysicalStrip::setPixel().
  */
-void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
+void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
 {
     if (index >= _totalLeds) return;
 
@@ -240,24 +243,36 @@ void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
     if (index == 0)
     {
         openknx.logger.logWithPrefixAndValues("VirtualStrip",
-                                              "writePixelToBuffer[0]: R=%d G=%d B=%d W=%d",
-                                              r, g, b, w);
+                                              "writePixelToBuffer[0]: R=%d G=%d B=%d WW=%d CW=%d",
+                                              r, g, b, ww, cw);
     }
 #endif
 
-    // Store in RGB/RGBW format (no ColorOrder conversion here!)
+    // Store in RGB/RGBW/RGBCCT format (no ColorOrder conversion here!)
     _buffer[offset] = r;     // Red
     _buffer[offset + 1] = g; // Green
     _buffer[offset + 2] = b; // Blue
     if (_bytesPerLed >= 4)
     {
-        _buffer[offset + 3] = w; // White channel or brightness
+        _buffer[offset + 3] = ww; // Warm white channel
+    }
+    if (_bytesPerLed >= 5)
+    {
+        _buffer[offset + 4] = cw; // Cool white channel
     }
 
 #ifdef OPENKNX_NEOPIXEL_TRACE1
     if (index == 0)
     {
-        if (_bytesPerLed >= 4)
+        if (_bytesPerLed >= 5)
+        {
+            openknx.logger.logWithPrefixAndValues("VirtualStrip",
+                                                  "  Buffer[0]: R=%02X G=%02X B=%02X WW=%02X CW=%02X",
+                                                  _buffer[offset], _buffer[offset + 1],
+                                                  _buffer[offset + 2], _buffer[offset + 3],
+                                                  _buffer[offset + 4]);
+        }
+        else if (_bytesPerLed >= 4)
         {
             openknx.logger.logWithPrefixAndValues("VirtualStrip",
                                                   "  Buffer[0]: R=%02X G=%02X B=%02X W=%02X",
@@ -288,7 +303,7 @@ void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
 bool VirtualStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
     if (index >= _totalLeds) return false;
-    writePixelToBuffer(index, r, g, b, 0);
+    writePixelToBuffer(index, r, g, b, 0, 0);
     _dirty = true;
     return true;
 }
@@ -304,8 +319,25 @@ bool VirtualStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 bool VirtualStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
     if (index >= _totalLeds) return false;
-    writePixelToBuffer(index, r, g, b, w);
+    writePixelToBuffer(index, r, g, b, w, 0);
     _dirty = true; // Mark as dirty for sync!
+    return true;
+}
+
+/**
+ * @brief Set single pixel (RGBCCT - 5 channel with Warm White and Cool White)
+ * @param index Index of the pixel
+ * @param r Red component
+ * @param g Green component
+ * @param b Blue component
+ * @param ww Warm white component (2700-3000K)
+ * @param cw Cool white component (5000-6500K)
+ */
+bool VirtualStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
+{
+    if (index >= _totalLeds) return false;
+    writePixelToBuffer(index, r, g, b, ww, cw);
+    _dirty = true;
     return true;
 }
 
@@ -378,9 +410,9 @@ bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) 
  * @param r Output parameter for Red component
  * @param g Output parameter for Green component
  * @param b Output parameter for Blue component
- * @param w Output parameter for White component
+ * @param w Output parameter for White component (warm white on 5-channel)
  *
- * VirtualStrip ALWAYS stores in RGB/RGBW format.
+ * VirtualStrip ALWAYS stores in RGB/RGBW/RGBCCT format.
  * No ColorOrder conversion needed here!
  */
 bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& w) const
@@ -399,11 +431,58 @@ bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, 
 
     if (_bytesPerLed >= 4)
     {
-        w = _buffer[offset + 3]; // White or Brightness
+        w = _buffer[offset + 3]; // Warm White or Brightness
     }
     else
     {
         w = 0; // No white channel in RGB-only strips
+    }
+
+    return true;
+}
+
+/**
+ * @brief Get pixel color (RGBCCT - 5 channel)
+ * @param index Index of the pixel
+ * @param r Output parameter for Red component
+ * @param g Output parameter for Green component
+ * @param b Output parameter for Blue component
+ * @param ww Output parameter for Warm White component
+ * @param cw Output parameter for Cool White component
+ *
+ * VirtualStrip ALWAYS stores in RGB/RGBW/RGBCCT format.
+ * No ColorOrder conversion needed here!
+ */
+bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& ww, uint8_t& cw) const
+{
+    if (index >= _totalLeds) return false;
+
+    size_t offset = (size_t)index * _bytesPerLed;
+
+    // CRITICAL: Bounds check to prevent buffer overflow
+    if (offset + _bytesPerLed > _bufferSize) return false;
+
+    // Read RGBCCT directly from buffer
+    r = _buffer[offset];     // Red
+    g = _buffer[offset + 1]; // Green
+    b = _buffer[offset + 2]; // Blue
+
+    if (_bytesPerLed >= 4)
+    {
+        ww = _buffer[offset + 3]; // Warm White
+    }
+    else
+    {
+        ww = 0;
+    }
+
+    if (_bytesPerLed >= 5)
+    {
+        cw = _buffer[offset + 4]; // Cool White
+    }
+    else
+    {
+        cw = 0;
     }
 
     return true;
@@ -443,12 +522,13 @@ bool VirtualStrip::syncToPhysical()
 
         // Read RGB from VirtualStrip buffer, send to PhysicalStrip
         // PhysicalStrip handles ColorOrder conversion based on its hardware
-        // Check if this PHYSICAL strip supports RGBW (not the virtual strip)
-        bool physicalIsRGBW = (pstrip->getColorOrder() >= ColorOrder::RGBW);
+        // Check if this PHYSICAL strip supports RGBW or RGBCCT
+        bool physicalIsRGBW = ProtocolHelper::hasWhiteChannel(pstrip->getColorOrder());
+        bool physicalIsRGBCCT = ProtocolHelper::hasDualWhiteChannel(pstrip->getColorOrder());
 
         for (uint16_t i = 0; i < count; i++)
         {
-            uint8_t r, g, b, w = 0;
+            uint8_t r, g, b, ww = 0, cw = 0;
 
             // Normal operation: read from virtual buffer
             uint16_t virtualIdx = offset + i;
@@ -460,25 +540,40 @@ bool VirtualStrip::syncToPhysical()
             b = _buffer[bufferOffset + 2]; // Blue
             if (_bytesPerLed >= 4)
             {
-                w = _buffer[bufferOffset + 3]; // White or Brightness
+                ww = _buffer[bufferOffset + 3]; // Warm White (or single White for RGBW)
+            }
+            if (_bytesPerLed >= 5)
+            {
+                cw = _buffer[bufferOffset + 4]; // Cool White
             }
 
             // Apply pixel transform callback (HCL, gamma, etc.) if set
             // This transforms the pixel BEFORE sending to hardware, without modifying the buffer
             if (_pixelTransformCallback)
             {
-                _pixelTransformCallback(r, g, b, (_bytesPerLed >= 4) ? &w : nullptr, _pixelTransformUserData);
+                // Pass WW and CW pointers based on buffer type
+                // For RGBCCT: both ww and cw are valid
+                // For RGBW: only ww is valid (cw is nullptr)
+                // For RGB: both are nullptr
+                uint8_t* wwPtr = (_bytesPerLed >= 4) ? &ww : nullptr;
+                uint8_t* cwPtr = (_bytesPerLed >= 5) ? &cw : nullptr;
+                _pixelTransformCallback(r, g, b, wwPtr, cwPtr, _pixelTransformUserData);
             }
 
-            // Send RGBW to RGBW strips, RGB to RGB strips
-            if (physicalIsRGBW && _bytesPerLed >= 4)
+            // Send to physical strip based on its capabilities
+            if (physicalIsRGBCCT && _bytesPerLed >= 5)
+            {
+                // Physical strip supports RGBCCT and virtual buffer has WW+CW channels
+                pstrip->setPixel(i, r, g, b, ww, cw);
+            }
+            else if (physicalIsRGBW && _bytesPerLed >= 4)
             {
                 // Physical strip supports RGBW and virtual buffer has W channel
-                pstrip->setPixel(i, r, g, b, w);
+                pstrip->setPixel(i, r, g, b, ww);
             }
             else
             {
-                // Physical strip is RGB only, send RGB (ignore W channel if present)
+                // Physical strip is RGB only, send RGB (ignore W channels if present)
                 pstrip->setPixel(i, r, g, b);
             }
         }
