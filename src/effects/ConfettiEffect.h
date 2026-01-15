@@ -142,7 +142,7 @@ class ConfettiEffect : public Effect
         }
 
         // Add new random confetti
-        int pos = FastLEDMath::random8(length);
+        uint16_t pos = FastLEDMath::random16(length);
         uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(gHue + FastLEDMath::random8(64), saturation, brightness, yellowBoost, greenCorr);
 
         uint8_t r, g, b;

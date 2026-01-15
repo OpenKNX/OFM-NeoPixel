@@ -414,6 +414,36 @@ bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, 
 }
 
 /**
+ * Set each pixel color (RGBCCT / 5-channel)
+ * SPI LEDs (APA102, WS2801, SK9822, LPD8806) are RGB-only and do not support
+ * separate warm-white/cold-white channels. RGBCCT requires 5-chip LEDs like SK6812-RGBCCT.
+ * This method exists for interface compatibility but ignores ww/cw parameters.
+ */
+bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
+{
+    (void)ww; // SPI LEDs have no warm-white channel - parameter unused
+    (void)cw; // SPI LEDs have no cold-white channel - parameter unused
+
+    if (!_inst || index >= _inst->ledCount)
+    {
+        return false;
+    }
+
+#ifdef OPENKNX_DEBUG
+    static bool warned = false;
+    if (!warned && (ww != 0 || cw != 0))
+    {
+        openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
+                                              "WARNING: setPixel(r,g,b,ww,cw) - SPI LEDs are RGB-only, no RGBCCT support. ww/cw parameters ignored!");
+        warned = true; // Only warn once
+    }
+#endif
+
+    // Forward to RGB version
+    return setPixel(index, r, g, b);
+}
+
+/**
  * @brief Convert hardware-ordered bytes to SPI buffer format
  * @param index LED index
  * @param r First color byte (already in hardware order)

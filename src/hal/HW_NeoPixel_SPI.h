@@ -93,6 +93,7 @@ class HW_NeoPixel_SPI : public IHardwareDriver
     bool init() override;
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b) override;
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w) override;
+    bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw) override;
     bool show() override;
     bool isBusy() override;
     void clear() override;
