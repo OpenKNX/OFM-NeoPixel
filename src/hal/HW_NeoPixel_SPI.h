@@ -60,6 +60,7 @@ struct hw_neopixel_spi_inst
     LedProtocol detectedChip;   // Detected chip type after auto-detect (APA102 or SK9822)
     bool autoDetectChip;        // Auto-detect chip type on init (default: false)
     uint8_t hwBrightness;       // Current hardware brightness (16-30, default: 30)
+    ColorOrder colorOrder;      // Color order (BGR for APA102, RGB for WS2801/LPD8806)
 
     bool initialized;   // Initialized?
     volatile bool busy; // Transfer in progress?
@@ -104,6 +105,10 @@ class HW_NeoPixel_SPI : public IHardwareDriver
     size_t getBufferSize() const override { return _inst ? _inst->bufferSize : 0; }
     bool isInitialized() const override { return _inst ? _inst->initialized : false; }
     DriverImplementation getDriverType() const override { return DriverImplementation::HARDWARE_SPI; }
+
+    // ColorOrder API
+    void setColorOrder(ColorOrder order) override { if (_inst) _inst->colorOrder = order; }
+    ColorOrder getColorOrder() const override { return _inst ? _inst->colorOrder : ColorOrder::RGB; }
 
     /**
      * @brief Set SPI frequency in Hz (only before init())

@@ -53,6 +53,7 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint16_t ledCount, LedProtocol protocol, uint32
     _inst->detectedChip = protocol;           // Start with protocol assumption
     _inst->autoDetectChip = false;            // Manual chip type (can enable via API)
     _inst->hwBrightness = BRIGHTNESS_DEFAULT; // Default to max safe brightness (30)
+    _inst->colorOrder = ProtocolHelper::getColorOrder(protocol); // Default ColorOrder from protocol
 
     // Allocate buffer: Start frames + Dummy LED (optional) + LED data + End frames
     // Calculate buffer components based on configuration
@@ -139,6 +140,7 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint32_t mosiPin, uint32_t sckPin, uint16_t led
     _inst->detectedChip = protocol;           // Start with protocol assumption
     _inst->autoDetectChip = false;            // Manual chip type
     _inst->hwBrightness = BRIGHTNESS_DEFAULT; // Default to max safe brightness (30)
+    _inst->colorOrder = ProtocolHelper::getColorOrder(protocol); // Default ColorOrder from protocol
 
     // Allocate buffer:
     if (_inst->hasGlobalBrightness)
@@ -228,6 +230,7 @@ bool HW_NeoPixel_SPI::applyConfig(const PhysicalStripConfig* config)
     if (!spiCfg) return false;
 
     // Apply SPI-specific settings
+    _inst->colorOrder = spiCfg->getColorOrder();
     _inst->hwBrightness = spiCfg->getHwBrightness();
     _inst->endFramePattern = spiCfg->getEndFramePattern();
     _inst->startFrameDelayUs = spiCfg->getStartFrameDelayUs();
@@ -381,8 +384,20 @@ bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
         return false;
     }
 
-    // Brightness from config (16-30 safe range)
-    rgbToBuffer(index, r, g, b);
+    // Apply ColorOrder conversion (RGB → hardware order)
+    uint8_t r_hw, g_hw, b_hw;
+    switch (_inst->colorOrder)
+    {
+        case ColorOrder::RGB: r_hw = r; g_hw = g; b_hw = b; break;
+        case ColorOrder::RBG: r_hw = r; g_hw = b; b_hw = g; break;
+        case ColorOrder::GRB: r_hw = g; g_hw = r; b_hw = b; break;
+        case ColorOrder::GBR: r_hw = g; g_hw = b; b_hw = r; break;
+        case ColorOrder::BRG: r_hw = b; g_hw = r; b_hw = g; break;
+        case ColorOrder::BGR: r_hw = b; g_hw = g; b_hw = r; break;
+        default:              r_hw = r; g_hw = g; b_hw = b; break;
+    }
+
+    rgbToBuffer(index, r_hw, g_hw, b_hw);
     return true;
 }
 
@@ -446,15 +461,13 @@ bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, 
 /**
  * @brief Convert hardware-ordered bytes to SPI buffer format
  * @param index LED index
- * @param r First color byte (already in hardware order)
- * @param g Second color byte (already in hardware order)
- * @param b Third color byte (already in hardware order)
- * @param brightness Brightness value (5-bit range: 16-30)
+ * @param r First color byte (already in hardware ColorOrder)
+ * @param g Second color byte (already in hardware ColorOrder)
+ * @param b Third color byte (already in hardware ColorOrder)
  *
- * IMPORTANT: PhysicalStrip has already converted RGB to hardware ColorOrder!
+ * IMPORTANT: setPixel() has already converted RGB to hardware ColorOrder!
  * For APA102 with BGR: r=B, g=G, b=R (not RGB!)
  *
- * Brightness is already scaled to safe range (16-30) by caller.
  * This function writes hardware-ordered bytes directly to protocol-specific buffer:
  * - APA102/SK9822: [Brightness byte][byte0][byte1][byte2]
  * - WS2801: [byte0][byte1][byte2]
@@ -469,10 +482,12 @@ void HW_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t 
         case LedProtocol::APA102:
         case LedProtocol::SK9822:
         {
-            // APA102: [Brightness][byte0][byte1][byte2]
-            // PhysicalStrip already converted RGB to hardware order (e.g., BGR)
-            // Brightness from config (16-30 safe range)
-            uint32_t offset = 4 + (index * 4);                           // Skip Start Frame
+            // APA102: [Start Frames][Dummy LED (optional)][LED Data][End Frames]
+            // Calculate correct offset: start frames + dummy LED (if enabled) + LED index
+            uint32_t startFrameBytes = _inst->startFrameCount * 4;
+            uint32_t dummyLedBytes = (_inst->dummyLedMode == 1) ? 4 : 0;
+            uint32_t offset = startFrameBytes + dummyLedBytes + (index * 4);
+            
             _inst->buffer[offset] = 0xE0 | (_inst->hwBrightness & 0x1F); // 111xxxxx format (5-bit brightness)
             _inst->buffer[offset + 1] = r;                               // Hardware byte 0
             _inst->buffer[offset + 2] = g;                               // Hardware byte 1

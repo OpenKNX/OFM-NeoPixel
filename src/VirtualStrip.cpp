@@ -50,9 +50,10 @@ VirtualStrip::VirtualStrip(uint16_t totalLeds, ColorOrder colorOrder)
     _buffer = new uint8_t[_bufferSize];
     memset(_buffer, 0, _bufferSize);
 
-    const char* formatName = (_bytesPerLed == 5) ? "RGBCCT" : ((_bytesPerLed == 4) ? "RGBW" : "RGB");
     logDebugP("VirtualStrip initialized: %u LEDs, %u Bytes/LED (%s), Buffer=%u Bytes",
-              _totalLeds, _bytesPerLed, formatName, (uint32_t)_bufferSize);
+              _totalLeds, _bytesPerLed, 
+              (_bytesPerLed == 5) ? "RGBCCT" : ((_bytesPerLed == 4) ? "RGBW" : "RGB"), 
+              (uint32_t)_bufferSize);
 }
 
 /**

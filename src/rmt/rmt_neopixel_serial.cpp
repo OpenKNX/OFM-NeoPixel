@@ -438,7 +438,10 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     const SerialStripConfig* serialCfg = config->isSerialConfig() ? static_cast<const SerialStripConfig*>(config) : nullptr;
     if (!serialCfg) return false;
 
-    // RMT has no runtime-configurable settings for serial strips
+    // Apply ColorOrder
+    _inst->colorOrder = serialCfg->getColorOrder();
+
+    // RMT has no other runtime-configurable settings for serial strips
     // Timing and protocol are fixed at initialization
     return true;
 }
