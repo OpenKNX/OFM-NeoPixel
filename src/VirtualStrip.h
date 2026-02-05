@@ -137,6 +137,7 @@ class VirtualStrip
      * This allows post-processing (HCL, gamma, etc.) without modifying the
      * effect buffer, so effects that read back pixels (Cylon fade, etc.) work correctly.
      *
+     * @param pixelIndex Index of the pixel being processed (0..totalLeds-1)
      * @param r Red component (in/out)
      * @param g Green component (in/out)
      * @param b Blue component (in/out)
@@ -149,7 +150,7 @@ class VirtualStrip
      * - Cool Kelvin (6500K): ww low, cw high
      * - Neutral: blend of both
      */
-    using PixelTransformCallback = void (*)(uint8_t& r, uint8_t& g, uint8_t& b, uint8_t* ww, uint8_t* cw, void* userData);
+    using PixelTransformCallback = void (*)(uint16_t pixelIndex, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t* ww, uint8_t* cw, void* userData);
 
     /**
      * @brief Set pixel transform callback for post-processing during sync

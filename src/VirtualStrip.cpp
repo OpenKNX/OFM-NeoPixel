@@ -558,7 +558,10 @@ bool VirtualStrip::syncToPhysical()
                 // For RGB: both are nullptr
                 uint8_t* wwPtr = (_bytesPerLed >= 4) ? &ww : nullptr;
                 uint8_t* cwPtr = (_bytesPerLed >= 5) ? &cw : nullptr;
-                _pixelTransformCallback(r, g, b, wwPtr, cwPtr, _pixelTransformUserData);
+                
+                // Calculate virtual pixel index (offset + physical index)
+                uint16_t virtualPixelIndex = mapping.virtualOffset + i;
+                _pixelTransformCallback(virtualPixelIndex, r, g, b, wwPtr, cwPtr, _pixelTransformUserData);
             }
 
             // Send to physical strip based on its capabilities
