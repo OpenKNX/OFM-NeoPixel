@@ -35,7 +35,7 @@ class LightningEffect : public Effect
             "Random lightning strikes with brief flashes and decay effect. Simulates realistic thunderstorm lightning with adjustable frequency, width and brightness.");
     }
 
-    uint8_t getParameterCount() const override { return 4; }
+    uint8_t getParameterCount() const override { return 5; }
     const char* getParameterName(uint8_t idx) const override
     {
         switch (idx)
@@ -44,6 +44,7 @@ class LightningEffect : public Effect
             case 1: return "Width";
             case 2: return "Decay";
             case 3: return "Hue";
+            case 4: return "Intensity";
             default: return nullptr;
         }
     }
@@ -64,6 +65,9 @@ class LightningEffect : public Effect
             case 3: return PARAM_DESC_DE_EN(
                 "Farbton: HSV-Farbwert für farbige Blitze (0-255, nur aktiv mit Feature 1). 0=rot, 85=grün, 170=blau. Für weiße Blitze Feature 1 deaktivieren.",
                 "Hue: HSV color value for colored lightning (0-255, only active with Feature 1). 0=red, 85=green, 170=blue. Disable Feature 1 for white lightning.");
+            case 4: return PARAM_DESC_DE_EN(
+                "Intensität: Maximale Helligkeit des Blitzes (0-255). Steuert die Spitzenhelligkeit während des Einschlags.",
+                "Intensity: Maximum brightness of lightning (0-255). Controls the peak brightness during strike.");
             default: return "";
         }
     }
@@ -77,6 +81,7 @@ class LightningEffect : public Effect
             case 1: return 0;  // auto width
             case 2: return 40; // decay
             case 3: return 0;  // hue
+            case 4: return 255; // intensity
             default: return 0;
         }
     }
@@ -91,6 +96,7 @@ class LightningEffect : public Effect
             case 1: return c.option1;
             case 2: return c.option2;
             case 3: return c.option3;
+            case 4: return c.intensity;
             default: return 0;
         }
     }
@@ -105,6 +111,7 @@ class LightningEffect : public Effect
             case 1: config.option1 = static_cast<uint8_t>(value); break; // Width (bolt width)
             case 2: config.option2 = static_cast<uint8_t>(value); break; // Decay (fade speed)
             case 3: config.option3 = static_cast<uint8_t>(value); break; // Hue (lightning color)
+            case 4: config.intensity = static_cast<uint8_t>(value); break; // Intensity (peak brightness)
             default: break;
         }
     }
