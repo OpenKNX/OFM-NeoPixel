@@ -10,7 +10,7 @@
 
 #include "NeoPixel.h"
 
-// Standard library includes
+// BStandard library includes
 #include <sstream>
 
 // Effect system includes
@@ -44,6 +44,41 @@
 
 // External performance tracker (defined in NeoPixel.cpp)!!
 extern PerformanceTracker g_perfTracker;
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * @brief Get protocol name string from LedProtocol enum
+ * @param protocol LED protocol enum value
+ * @return Protocol name as C-string
+ */
+static const char* getProtocolName(LedProtocol protocol)
+{
+    switch (protocol)
+    {
+        case LedProtocol::WS2812: return "WS2812";
+        case LedProtocol::WS2812B: return "WS2812B";
+        case LedProtocol::WS2813: return "WS2813";
+        case LedProtocol::WS2815: return "WS2815";
+        case LedProtocol::WS2811: return "WS2811";
+        case LedProtocol::SK6812: return "SK6812";
+        case LedProtocol::SK6805: return "SK6805";
+        case LedProtocol::WS2814: return "WS2814";
+        case LedProtocol::TM1814: return "TM1814";
+        case LedProtocol::GS8208: return "GS8208";
+        case LedProtocol::SK6812_RGBCCT: return "SK6812_RGBCCT";
+        case LedProtocol::WS2814_RGBCCT: return "WS2814_RGBCCT";
+        case LedProtocol::WS2805_RGBCCT: return "WS2805_RGBCCT";
+        case LedProtocol::APA102: return "APA102";
+        case LedProtocol::APA102_CLONE: return "APA102_CLONE";
+        case LedProtocol::SK9822: return "SK9822";
+        case LedProtocol::WS2801: return "WS2801";
+        case LedProtocol::LPD8806: return "LPD8806";
+        default: return "Unknown";
+    }
+}
 
 // ============================================================================
 // Console Command Interface
@@ -116,8 +151,13 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
 
         printHelpSectionHeader("Power Management");
         openknx.console.printHelpLine("neo power ?", "Show detailed Power commands");
-        openknx.console.printHelpLine("neo power status", "Show current consumption and power limit");
-        openknx.console.printHelpLine("neo  |off", "Enable/disable current limiting");
+        openknx.console.printHelpLine("neo power", "Show detailed status of global + all strips");
+        openknx.console.printHelpLine("neo power <n>", "Show power status for physical strip <n>");
+
+        printHelpSectionHeader("HCL (Human-Centric Lighting)");
+        openknx.console.printHelpLine("neo hcl", "Show HCL status for all segments");
+        openknx.console.printHelpLine("neo hcl <n>", "Show HCL status for segment <n>");
+        openknx.console.printHelpLine("neo hcl set <K>", "Set manual kelvin (2000-6500) for all segments");
 
         printHelpSectionHeader("Effect Control");
         openknx.console.printHelpLine("neo effect ?", "Show detailed Effect commands");
@@ -230,15 +270,20 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     if (command == "neo power ?" || command == "neo power help")
     {
         printDetailHelpHeader("Power Management Commands");
-        openknx.console.printHelpLine("status", "Show current consumption and power limit");
-        openknx.console.printHelpLine("limit <mA>", "Set maximum current limit (e.g., 5000 for 5A)");
-        openknx.console.printHelpLine("profile <type>", "Set LED profile: ws2812b|sk6812|apa102|conservative");
-        openknx.console.printHelpLine("on|off", "Enable/disable current limiting");
+        openknx.console.printHelpLine("", "Show global + all physical strips detailed status");
+        openknx.console.printHelpLine("<n>", "Show power status for physical strip <n>");
+        openknx.console.printHelpLine("g|global limit <mA>", "Set global maximum current limit");
+        openknx.console.printHelpLine("g|global profile <type>", "Set global LED profile: ws2812b|sk6812|apa102|conservative");
+        openknx.console.printHelpLine("g|global on|off", "Enable/disable global current limiting");
+        openknx.console.printHelpLine("<n> limit <mA>", "Set current limit for physical strip <n>");
+        openknx.console.printHelpLine("<n> mode <mode>", "Set power mode: 0=Disabled, 1=UseGlobal, 2=FixedValue, 3=PerLED");
         printDetailHelpSeparator();
-        printDetailHelpParameter("<mA>=Milliampere, <type>=Profile Type");
-        printDetailHelpExample("neo power limit 5000     Set maximum current to 5A (5000mA)");
-        printDetailHelpExample("neo power profile ws2812b   Use WS2812B power profile");
-        printDetailHelpExample("neo power on             Enable current limiting");
+        printDetailHelpParameter("<n>=Strip Index (0-based), <mA>=Milliampere, <type>=Profile Type");
+        printDetailHelpExample("neo power                Show all detailed power status");
+        printDetailHelpExample("neo power 0              Show power status for strip 0");
+        printDetailHelpExample("neo power g limit 5000   Set global limit to 5A");
+        printDetailHelpExample("neo power 0 limit 2000   Set strip 0 limit to 2A");
+        printDetailHelpExample("neo power 0 mode 1       Strip 0 uses global mode");
         printDetailHelpEnd();
         return true;
     }
@@ -377,6 +422,12 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     else if (command.compare(0, 10, "neo power ") == 0 || command == "neo power")
     {
         return processPowerCommand(command.length() > 10 ? command.substr(10) : "");
+    }
+
+    // HCL (Human-Centric Lighting) commands
+    else if (command.compare(0, 9, "neo hcl ") == 0 || command == "neo hcl")
+    {
+        return processHclCommand(command.length() > 8 ? command.substr(8) : "");
     }
 
 #ifdef OPENKNX_NEOPIXEL_TESTS
@@ -841,7 +892,7 @@ bool NeoPixel::processListCommand()
                                              i,
                                              strip->getDataPin(),
                                              strip->getLedCount(),
-                                             "WS2812B", // TODO: Get protocol name
+                                             getProtocolName(strip->getProtocol()),
                                              strip->getDriverName(),
                                              strip->isInitialized() ? "OK" : "ERROR");
             }
@@ -1167,7 +1218,7 @@ bool NeoPixel::processSimpleTestStopCommand()
  */
 bool NeoPixel::processBenchmarkCommand(const std::string& args)
 {
-    using namespace OpenKNX::NeoPixel;
+    using namespace NeoPixel;
 
     if (!_initialized || !_manager)
     {
@@ -1907,13 +1958,23 @@ bool NeoPixel::processVirtListCommand()
                     bufferFormat = "RGBW";
                 }
 
+                // Determine status: Check if physical strips attached and if busy
+                const char* status = "OK";
+                if (vstrip->getPhysicalStripCount() == 0)
+                {
+                    status = "NO STRIPS";
+                }
+                else if (vstrip->isAnyBusy())
+                {
+                    status = "BUSY";
+                }
+
                 openknx.logger.logWithValues("%2d │ %10d │ %6s │ %8s │ %s",
                                              i,
                                              vstrip->getLedCount(),
                                              bufferFormat,
                                              vstrip->getPhysicalStripCount() > 0 ? "Yes" : "No",
-                                             "OK" // TODO: Add proper status check
-                );
+                                             status);
             }
         }
     }
@@ -2615,7 +2676,7 @@ bool NeoPixel::processEffectCommand(const std::string& args)
     std::string action;
     int segId, effId;
 
-    // ToDo: check if is empty or with argument ?
+    // Check if help requested or no arguments provided
     if (args.empty() || args.compare("?") == 0)
     {
         openknx.logger.log("ERROR: Usage: neo effect <seg_id> <effect_id>");
@@ -2799,6 +2860,408 @@ bool NeoPixel::processGarageCommand(const std::string& args)
     openknx.logger.logWithValues("Segment [%d] GarageDoor phase set to: %s", segId, phaseNames[phase]);
 
     return true;
+}
+
+/**
+ * @brief Process HCL (Human-Centric Lighting) console commands
+ * Commands:
+ *   neo hcl              - Show global HCL status (all segments)
+ *   neo hcl <n>          - Show HCL status for segment <n>
+ *   neo hcl set <K>      - Set manual Kelvin for all segments (Manual mode only)
+ *   neo hcl disable      - Disable HCL for all segments
+ */
+bool NeoPixel::processHclCommand(const std::string& args)
+{
+    if (!_manager)
+    {
+        openknx.logger.log("[ERROR] NeoPixel manager not initialized!");
+        return false;
+    }
+
+    openknx.logger.begin();
+
+    // neo hcl (show all segments HCL status)
+    if (args.empty())
+    {
+        openknx.logger.log("");
+        printHelpSectionHeader("HCL (Human-Centric Lighting) - All Segments");
+
+        // Count active HCL segments
+        uint32_t segmentCount = _manager->getSegmentCount();
+        uint32_t hclActiveCount = 0;
+
+        // Get global HCL manager from OAM layer via virtual method
+        // Returns nullptr if Global HCL is disabled or not implemented
+        HclManager* globalHcl = getGlobalHclManager();
+
+        // Count how many segments have HCL active
+        for (uint32_t i = 0; i < segmentCount; i++)
+        {
+            Segment* seg = _manager->getSegment(i);
+            if (seg && seg->hasHcl())
+            {
+                hclActiveCount++;
+            }
+        }
+
+        openknx.logger.logWithValues("Total Segments:   %u", segmentCount);
+        openknx.logger.logWithValues("HCL Active:       %u", hclActiveCount);
+
+        // Show global HCL configuration if it exists and is active
+        if (globalHcl && globalHcl->isActive())
+        {
+            openknx.logger.log("");
+
+            // Count how many segments use global HCL
+            uint32_t globalUserCount = 0;
+            for (uint32_t i = 0; i < segmentCount; i++)
+            {
+                Segment* s = _manager->getSegment(i);
+                if (s && s->getHclManager() == globalHcl)
+                    globalUserCount++;
+            }
+
+            openknx.logger.logWithValues("GLOBAL HCL Configuration (used by %u segment%s):",
+                                         globalUserCount, globalUserCount == 1 ? "" : "s");
+
+            const HclConfig& cfg = globalHcl->getConfig();
+
+            // Curve type
+            const char* curveTypeStr = "Unknown";
+            if (cfg.curveType == HclCurveType::FixedTime) curveTypeStr = "FixedTime (Zeit)";
+            else if (cfg.curveType == HclCurveType::SunPosition)
+                curveTypeStr = "SunPosition (Sonne)";
+            else if (cfg.curveType == HclCurveType::Manual)
+                curveTypeStr = "Manual";
+
+            openknx.logger.logWithValues("  Curve Type:       %s", curveTypeStr);
+
+            // Time/Sun settings
+            if (cfg.curveType == HclCurveType::FixedTime)
+            {
+                openknx.logger.logWithValues("  Time Range:       %02u:%02u - %02u:%02u",
+                                             cfg.startHour, cfg.startMinute, cfg.endHour, cfg.endMinute);
+            }
+            else if (cfg.curveType == HclCurveType::SunPosition)
+            {
+                openknx.logger.logWithValues("  Sunrise Offset:   %+d min", cfg.sunriseOffsetMin);
+                openknx.logger.logWithValues("  Sunset Offset:    %+d min", cfg.sunsetOffsetMin);
+
+                // Show calculated sunrise/sunset times (if available from Timer module)
+                if (globalHcl->areSunTimesValid())
+                {
+                    uint16_t sunriseMin = globalHcl->getSunriseMin();
+                    uint16_t sunsetMin = globalHcl->getSunsetMin();
+                    openknx.logger.logWithValues("  Calculated Times: Sunrise %02u:%02u  Sunset %02u:%02u",
+                                                 sunriseMin / 60, sunriseMin % 60,
+                                                 sunsetMin / 60, sunsetMin % 60);
+                }
+                else
+                {
+                    openknx.logger.log("  Calculated Times: NOT SET (waiting for time sync)");
+                }
+            }
+
+            openknx.logger.logWithValues("  Kelvin Range:     %u K - %u K", cfg.minKelvin, cfg.maxKelvin);
+            openknx.logger.logWithValues("  Strength:         %u%%", cfg.strength);
+            openknx.logger.logWithValues("  Slew Rate:        %u K/min", cfg.slewRate);
+
+            // Apply mode
+            const char* applyModeStr = "Unknown";
+            if (cfg.applyMode == HclApplyMode::AllColors) applyModeStr = "AllColors";
+            else if (cfg.applyMode == HclApplyMode::WhiteOnly)
+                applyModeStr = "WhiteOnly";
+            else if (cfg.applyMode == HclApplyMode::HighSaturation)
+                applyModeStr = "HighSaturation";
+            openknx.logger.logWithValues("  Apply Mode:       %s", applyModeStr);
+            openknx.logger.logWithValues("  Sat. Threshold:   %u", cfg.saturationThreshold);
+            openknx.logger.logWithValues("  Brightness Comp:  %u%%", cfg.brightnessCompensation);
+            openknx.logger.logWithValues("  White Mix:        %u%%", cfg.whiteMix);
+
+            const char* preserveStr = "Linear";
+            if (cfg.preserveCurve == 1) preserveStr = "Smooth";
+            else if (cfg.preserveCurve == 2)
+                preserveStr = "Gamma";
+            openknx.logger.logWithValues("  Preserve Curve:   %s", preserveStr);
+
+            openknx.logger.logWithValues("  Current Kelvin:   %u K (calculated)", globalHcl->getCurrentKelvin());
+            openknx.logger.logWithValues("  Applied Kelvin:   %u K (after slew)", globalHcl->getAppliedKelvin());
+
+            // List segments using global HCL
+            if (globalUserCount > 0)
+            {
+                openknx.logger.log("  Segments using Global:");
+                for (uint32_t i = 0; i < segmentCount; i++)
+                {
+                    Segment* s = _manager->getSegment(i);
+                    if (s && s->getHclManager() == globalHcl)
+                    {
+                        openknx.logger.logWithValues("    - Segment %u", i);
+                    }
+                }
+            }
+        }
+
+        printSectionSeparator();
+
+        // Show each segment
+        if (segmentCount > 0)
+        {
+            openknx.logger.log("");
+            for (uint32_t i = 0; i < segmentCount; i++)
+            {
+                Segment* seg = _manager->getSegment(i);
+                if (!seg) continue;
+
+                HclManager* hcl = seg->getHclManager();
+
+                if (!hcl || !hcl->isActive())
+                {
+                    openknx.logger.logWithValues("Segment %u: HCL DISABLED", i);
+                }
+                else
+                {
+                    // Check if using global or custom HCL (simple pointer comparison)
+                    bool isGlobal = (hcl == globalHcl) && (globalHcl != nullptr);
+
+                    if (isGlobal)
+                    {
+                        uint16_t appliedK = hcl->getAppliedKelvin();
+                        openknx.logger.logWithValues("Segment %u: Using GLOBAL HCL, Applied=%u K [Ptr:0x%p==0x%p]",
+                                                     i, appliedK, hcl, globalHcl);
+                    }
+                    else
+                    {
+                        // Custom HCL - show full configuration
+                        const HclConfig& cfg = hcl->getConfig();
+
+                        const char* curveTypeStr = "Unknown";
+                        if (cfg.curveType == HclCurveType::FixedTime) curveTypeStr = "FixedTime (Zeit)";
+                        else if (cfg.curveType == HclCurveType::SunPosition)
+                            curveTypeStr = "SunPosition (Sonne)";
+                        else if (cfg.curveType == HclCurveType::Manual)
+                            curveTypeStr = "Manual";
+
+                        openknx.logger.logWithValues("Segment %u: CUSTOM HCL Configuration", i);
+                        openknx.logger.logWithValues("  Curve Type:       %s", curveTypeStr);
+
+                        // Time/Sun settings
+                        if (cfg.curveType == HclCurveType::FixedTime)
+                        {
+                            openknx.logger.logWithValues("  Time Range:       %02u:%02u - %02u:%02u",
+                                                         cfg.startHour, cfg.startMinute, cfg.endHour, cfg.endMinute);
+                        }
+                        else if (cfg.curveType == HclCurveType::SunPosition)
+                        {
+                            openknx.logger.logWithValues("  Sunrise Offset:   %+d min", cfg.sunriseOffsetMin);
+                            openknx.logger.logWithValues("  Sunset Offset:    %+d min", cfg.sunsetOffsetMin);
+
+                            // Show calculated sunrise/sunset times (if available from Timer module)
+                            if (hcl->areSunTimesValid())
+                            {
+                                uint16_t sunriseMin = hcl->getSunriseMin();
+                                uint16_t sunsetMin = hcl->getSunsetMin();
+                                openknx.logger.logWithValues("  Calculated Times: Sunrise %02u:%02u  Sunset %02u:%02u",
+                                                             sunriseMin / 60, sunriseMin % 60,
+                                                             sunsetMin / 60, sunsetMin % 60);
+                            }
+                            else
+                            {
+                                openknx.logger.log("  Calculated Times: NOT SET (waiting for time sync)");
+                            }
+                        }
+
+                        openknx.logger.logWithValues("  Kelvin Range:     %u K - %u K", cfg.minKelvin, cfg.maxKelvin);
+                        openknx.logger.logWithValues("  Strength:         %u%%", cfg.strength);
+                        openknx.logger.logWithValues("  Slew Rate:        %u K/min", cfg.slewRate);
+
+                        // Apply mode
+                        const char* applyModeStr = "Unknown";
+                        if (cfg.applyMode == HclApplyMode::AllColors) applyModeStr = "AllColors";
+                        else if (cfg.applyMode == HclApplyMode::WhiteOnly)
+                            applyModeStr = "WhiteOnly";
+                        else if (cfg.applyMode == HclApplyMode::HighSaturation)
+                            applyModeStr = "HighSaturation";
+                        openknx.logger.logWithValues("  Apply Mode:       %s", applyModeStr);
+                        openknx.logger.logWithValues("  Sat. Threshold:   %u", cfg.saturationThreshold);
+                        openknx.logger.logWithValues("  Brightness Comp:  %u%%", cfg.brightnessCompensation);
+                        openknx.logger.logWithValues("  White Mix:        %u%%", cfg.whiteMix);
+
+                        const char* preserveStr = "Linear";
+                        if (cfg.preserveCurve == 1) preserveStr = "Smooth";
+                        else if (cfg.preserveCurve == 2)
+                            preserveStr = "Gamma";
+                        openknx.logger.logWithValues("  Preserve Curve:   %s", preserveStr);
+
+                        openknx.logger.logWithValues("  Current Kelvin:   %u K (calculated)", hcl->getCurrentKelvin());
+                        openknx.logger.logWithValues("  Applied Kelvin:   %u K (after slew)", hcl->getAppliedKelvin());
+                    }
+                }
+            }
+        }
+
+        printSectionSeparator();
+        openknx.logger.log("");
+        openknx.logger.end();
+        return true;
+    }
+
+    // neo hcl set <kelvin> - set manual Kelvin for all segments
+    if (args.compare(0, 4, "set ") == 0)
+    {
+        uint16_t kelvin = atoi(args.substr(4).c_str());
+
+        if (kelvin < 2000 || kelvin > 6500)
+        {
+            openknx.logger.log("[ERROR] Kelvin value must be between 2000-6500 K");
+            openknx.logger.log("  2000K = Very warm (candlelight)");
+            openknx.logger.log("  2700K = Warm white");
+            openknx.logger.log("  4000K = Neutral");
+            openknx.logger.log("  6500K = Cool daylight");
+            openknx.logger.end();
+            return false;
+        }
+
+        // Apply to all segments with HCL enabled
+        uint32_t updated = 0;
+        uint32_t segmentCount = _manager->getSegmentCount();
+
+        for (uint32_t i = 0; i < segmentCount; i++)
+        {
+            Segment* seg = _manager->getSegment(i);
+            if (!seg) continue;
+
+            HclManager* hcl = seg->getHclManager();
+            if (hcl && hcl->isActive())
+            {
+                hcl->setManualKelvin(kelvin);
+                updated++;
+            }
+        }
+
+        openknx.logger.logWithValues("Set manual Kelvin to %u K for %u segments", kelvin, updated);
+        openknx.logger.end();
+        return true;
+    }
+
+    // neo hcl disable - disable HCL for all segments
+    if (args == "disable" || args == "off")
+    {
+        openknx.logger.log("Note: Cannot disable HCL from console (use ETS HCLMode parameter)");
+        openknx.logger.end();
+        return true;
+    }
+
+    // neo hcl <n> - show specific segment HCL status with details
+    if (!args.empty() && isdigit(args[0]))
+    {
+        uint32_t segmentIndex = atoi(args.c_str());
+        Segment* seg = _manager->getSegment(segmentIndex);
+
+        if (!seg)
+        {
+            openknx.logger.logWithValues("[ERROR] Segment %u not found!", segmentIndex);
+            openknx.logger.end();
+            return false;
+        }
+
+        openknx.logger.log("");
+        openknx.logger.logWithValues("Segment %u HCL Configuration", segmentIndex);
+        printSectionSeparator();
+
+        // Segment info
+        uint16_t start = seg->getStartLed();
+        uint16_t length = seg->getLength();
+        openknx.logger.logWithValues("LED Range:        %u - %u (Length: %u)", start, start + length - 1, length);
+
+        // HCL status
+        HclManager* hcl = seg->getHclManager();
+
+        if (!hcl || !hcl->isActive())
+        {
+            openknx.logger.log("HCL Mode:         DISABLED");
+        }
+        else
+        {
+            openknx.logger.log("HCL Mode:         ACTIVE");
+
+            // Get configuration
+            const HclConfig& cfg = hcl->getConfig();
+
+            // Show curve type
+            const char* curveTypeStr = "Unknown";
+            if (cfg.curveType == HclCurveType::FixedTime) curveTypeStr = "FixedTime (Zeit)";
+            else if (cfg.curveType == HclCurveType::SunPosition)
+                curveTypeStr = "SunPosition (Sonne)";
+            else if (cfg.curveType == HclCurveType::Manual)
+                curveTypeStr = "Manual";
+
+            openknx.logger.logWithValues("Curve Type:       %s", curveTypeStr);
+
+            // Show time settings (for FixedTime)
+            if (cfg.curveType == HclCurveType::FixedTime)
+            {
+                openknx.logger.logWithValues("Time Range:       %02u:%02u - %02u:%02u",
+                                             cfg.startHour, cfg.startMinute, cfg.endHour, cfg.endMinute);
+            }
+
+            // Show sun settings (for SunPosition)
+            if (cfg.curveType == HclCurveType::SunPosition)
+            {
+                openknx.logger.logWithValues("Sunrise Offset:   %+d min", cfg.sunriseOffsetMin);
+                openknx.logger.logWithValues("Sunset Offset:    %+d min", cfg.sunsetOffsetMin);
+
+                // Show calculated sun times (if valid)
+                if (hcl->areSunTimesValid())
+                {
+                    uint16_t sunriseMin = hcl->getSunriseMin();
+                    uint16_t sunsetMin = hcl->getSunsetMin();
+                    openknx.logger.logWithValues("Calculated Times: Sunrise %02u:%02u  Sunset %02u:%02u",
+                                                 sunriseMin / 60, sunriseMin % 60,
+                                                 sunsetMin / 60, sunsetMin % 60);
+                }
+                else
+                {
+                    openknx.logger.log("Calculated Times: NOT SET (waiting for time sync)");
+                }
+            }
+
+            // Show Kelvin range
+            openknx.logger.logWithValues("Kelvin Range:     %u K - %u K (min-max)", cfg.minKelvin, cfg.maxKelvin);
+
+            // Show calculated values
+            openknx.logger.log("");
+            openknx.logger.logWithValues("Current Kelvin:   %u K (calculated)", hcl->getCurrentKelvin());
+            openknx.logger.logWithValues("Applied Kelvin:   %u K (after slew rate)", hcl->getAppliedKelvin());
+
+            // Show advanced parameters
+            openknx.logger.log("");
+            openknx.logger.logWithValues("Strength:         %u%%", cfg.strength);
+            openknx.logger.logWithValues("Slew Rate:        %u K/min", cfg.slewRate);
+
+            // Apply mode
+            const char* applyModeStr = "Unknown";
+            if (cfg.applyMode == HclApplyMode::AllColors) applyModeStr = "AllColors";
+            else if (cfg.applyMode == HclApplyMode::WhiteOnly)
+                applyModeStr = "WhiteOnly";
+            else if (cfg.applyMode == HclApplyMode::HighSaturation)
+                applyModeStr = "HighSaturation";
+            openknx.logger.logWithValues("Apply Mode:       %s", applyModeStr);
+        }
+
+        printSectionSeparator();
+        openknx.logger.log("");
+        openknx.logger.end();
+        return true;
+    }
+
+    // Unknown command
+    openknx.logger.log("[ERROR] Unknown HCL command. Available commands:");
+    openknx.logger.log("  neo hcl              - Show all segments HCL status");
+    openknx.logger.log("  neo hcl <n>          - Show HCL status for segment <n>");
+    openknx.logger.log("  neo hcl set <K>      - Set manual Kelvin (2000-6500)");
+    openknx.logger.end();
+    return false;
 }
 
 /**
@@ -3020,7 +3483,7 @@ bool NeoPixel::processPowerCommand(const std::string& args)
 {
     openknx.logger.begin();
 
-    // neo power (show status)
+    // neo power (show global + all phys status)
     if (args.empty() || args == "status")
     {
         PowerManager* pm = _manager->getPowerManager();
@@ -3032,11 +3495,42 @@ bool NeoPixel::processPowerCommand(const std::string& args)
         }
 
         openknx.logger.log("");
-        printHelpSectionHeader("Power Management Status");
+        printHelpSectionHeader("Power Management - Global Status");
 
         // Current limiting status
         openknx.logger.logWithValues("Status:           %s", pm->isEnabled() ? "ENABLED" : "DISABLED");
-        openknx.logger.logWithValues("Max Current:      %u mA (%.2f A)", pm->getMaxCurrent(), pm->getMaxCurrent() / 1000.0f);
+
+        // Show active power mode (GLOBAL, PER_CHANNEL, PER_LED)
+        const char* modeNames[] = {"GLOBAL", "PER_CHANNEL", "PER_LED"};
+        PowerLimitMode mode = pm->getPowerLimitMode();
+        openknx.logger.logWithValues("Power Mode:       %s", modeNames[(int)mode]);
+
+        // Show mode-specific configuration
+        switch (mode)
+        {
+            case PowerLimitMode::GLOBAL:
+                openknx.logger.logWithValues("  Configured:     %u mA global limit", pm->getMaxCurrent());
+                break;
+            case PowerLimitMode::PER_CHANNEL:
+                openknx.logger.logWithValues("  Configured:     %u mA per channel", pm->getMaxCurrentPerChannel());
+                break;
+            case PowerLimitMode::PER_LED:
+                openknx.logger.logWithValues("  Configured:     %u mA per LED", pm->getMaxCurrentPerLed());
+                break;
+        }
+
+        // ABL configuration
+        openknx.logger.logWithValues("ABL Threshold:    %u%% (dimming starts here)", pm->getThresholdPercent());
+        openknx.logger.logWithValues("ABL Min Bright:   %u%% (minimum at limit)", pm->getMaxBrightnessPercent());
+
+        // Get cached global power statistics (updated by applyPowerLimit())
+        uint32_t globalCurrentMa, globalLimitMa;
+        uint8_t globalLoadPercent;
+        _manager->getGlobalPowerStats(globalCurrentMa, globalLimitMa, globalLoadPercent);
+
+        openknx.logger.logWithValues("Global Limit:     %u mA (%.2f A)", globalLimitMa, globalLimitMa / 1000.0f);
+        openknx.logger.logWithValues("Global Current:   %u mA (%.2f A)", globalCurrentMa, globalCurrentMa / 1000.0f);
+        openknx.logger.logWithValues("Global Load:      %u%%", globalLoadPercent);
 
         // LED profile
         const char* profileName = "CUSTOM";
@@ -3053,34 +3547,312 @@ bool NeoPixel::processPowerCommand(const std::string& args)
                                      profileName, profile.redMA, profile.greenMA,
                                      profile.blueMA, profile.warmWhiteMA, profile.coolWhiteMA);
 
-        // Current consumption - REQUESTED (before limiting)
-        float totalPower = _manager->getTotalPowerWatts();
-        uint32_t requestedCurrent = pm->getLastCalculatedCurrent();
-        openknx.logger.logWithValues("Requested Power:  %.2f W @ 5V", totalPower);
-        openknx.logger.logWithValues("Requested Current:%u mA", requestedCurrent);
-
-        // Actual consumption - AFTER limiting
-        float actualPower = pm->getActualPowerWatts();
-        uint32_t actualCurrent = pm->getActualCurrent();
-        openknx.logger.logWithValues("Actual Power:     %.2f W @ 5V", actualPower);
-        openknx.logger.logWithValues("Actual Current:   %u mA", actualCurrent);
+        // Calculate total power from cached current values
+        float totalPowerWatts = _manager->getTotalPowerWatts();
+        openknx.logger.logWithValues("Total Power:      %.2f W (all strips)", totalPowerWatts);
 
         // Show if limiting is active
-        if (pm->isEnabled() && requestedCurrent > pm->getMaxCurrent())
+        if (pm->isEnabled() && globalCurrentMa > globalLimitMa * 0.95f)
         {
-            float scale = (float)actualCurrent / requestedCurrent;
             openknx.logger.log("");
             openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-            openknx.logger.logWithValues("WARNING: CURRENT LIMITING ACTIVE - Brightness scaled to %.1f%%", scale * 100.0f);
+            openknx.logger.logWithValues("WARNING: APPROACHING/AT LIMIT - Current Load: %u%%", globalLoadPercent);
             openknx.logger.color(0);
         }
 
         printSectionSeparator();
+
+        // Show all physical strips
+        uint32_t stripCount = _manager->getStripCount();
+        if (stripCount > 0)
+        {
+            openknx.logger.log("");
+            printHelpSectionHeader("Physical Strips Power Status");
+
+            for (uint32_t i = 0; i < stripCount; i++)
+            {
+                PhysicalStrip* phys = _manager->getStrip(i);
+                if (!phys) continue;
+
+                PhysicalStripConfig* cfg = phys->getConfig();
+                if (!cfg) continue;
+
+                // Get cached power stats (updated by applyPowerLimit())
+                uint32_t stripCurrentMa, stripLimitMa;
+                uint8_t stripLoadPercent;
+                bool hasStats = _manager->getStripPowerStats(phys, stripCurrentMa, stripLimitMa, stripLoadPercent);
+
+                // Fallback: Calculate if not cached (e.g., strip with mode=Disabled)
+                if (!hasStats)
+                {
+                    stripCurrentMa = pm->calculateStripCurrent(
+                        phys->getBuffer(),
+                        phys->getLedCount(),
+                        phys->getProtocol(),
+                        phys->getColorOrder(),
+                        true); // hasDummyLed = true for APA102
+                    stripLimitMa = cfg->getMaxCurrentMa();
+                    stripLoadPercent = stripLimitMa > 0 ? (uint8_t)((stripCurrentMa * 100) / stripLimitMa) : 0;
+                }
+
+                // Get power mode name
+                const char* modeName = "Unknown";
+                uint8_t mode = cfg->getPowerLimitMode();
+                switch (mode)
+                {
+                    case 0: modeName = "Disabled"; break;
+                    case 1: modeName = "UseGlobal"; break;
+                    case 2: modeName = "FixedValue"; break;
+                    case 3: modeName = "PerLED"; break;
+                }
+
+                // Calculate power in watts
+                uint8_t voltage = phys->getVoltage();
+                float powerWatts = phys->getPowerWatts(stripCurrentMa);
+
+                // Get protocol name
+                LedProtocol protocol = phys->getProtocol();
+                const char* protocolName = "Unknown";
+                switch (protocol)
+                {
+                    case LedProtocol::WS2812:
+                    case LedProtocol::WS2812B: protocolName = "WS2812B"; break;
+                    case LedProtocol::WS2813: protocolName = "WS2813"; break;
+                    case LedProtocol::SK6812: protocolName = "SK6812"; break;
+                    case LedProtocol::APA102: protocolName = "APA102"; break;
+                    case LedProtocol::APA102_CLONE: protocolName = "APA102_CLONE"; break;
+                    case LedProtocol::SK9822: protocolName = "SK9822"; break;
+                    case LedProtocol::WS2801: protocolName = "WS2801"; break;
+                    case LedProtocol::LPD8806: protocolName = "LPD8806"; break;
+                    default: break;
+                }
+
+                openknx.logger.logWithValues("Strip %u: Protocol=%-12s Pin=%2u LEDs=%3u %2uV Mode=%-10s Limit=%4u mA Current=%4u mA Load=%3u%% (%5.2f W)",
+                                             i, protocolName, phys->getDataPin(), phys->getLedCount(), voltage, modeName,
+                                             stripLimitMa, stripCurrentMa, stripLoadPercent, powerWatts);
+            }
+
+            printSectionSeparator();
+        }
+
         openknx.logger.log("");
         openknx.logger.end();
         return true;
     }
 
+    // neo power <n> (show specific strip status or set strip params)
+    // Check if args starts with a digit (strip index)
+    if (!args.empty() && isdigit(args[0]))
+    {
+        // Extract strip index
+        size_t spacePos = args.find(' ');
+        std::string indexStr = (spacePos == std::string::npos)
+                                   ? args
+                                   : args.substr(0, spacePos);
+
+        uint32_t stripIndex = atoi(indexStr.c_str());
+        PhysicalStrip* phys = _manager->getStrip(stripIndex);
+
+        if (!phys)
+        {
+            openknx.logger.logWithValues("[ERROR] Physical strip %u not found!", stripIndex);
+            openknx.logger.end();
+            return false;
+        }
+
+        // Check for subcommands
+        std::string subCmd = (spacePos == std::string::npos)
+                                 ? ""
+                                 : args.substr(spacePos + 1);
+
+        // neo power phys_<n> limit <mA>
+        if (subCmd.compare(0, 6, "limit ") == 0)
+        {
+            uint32_t limit = atoi(subCmd.substr(6).c_str());
+            if (limit < 100 || limit > 100000)
+            {
+                openknx.logger.log("[ERROR] Invalid current limit (100-100000 mA)");
+                openknx.logger.end();
+                return false;
+            }
+
+            PhysicalStripConfig* cfg = phys->getConfig();
+            if (cfg)
+            {
+                cfg->setMaxCurrentMa(limit);
+                openknx.logger.logWithValues("Strip %u: Power limit set to %u mA", stripIndex, limit);
+            }
+            openknx.logger.end();
+            return true;
+        }
+
+        // neo power phys_<n> mode <0|1|2|3>
+        if (subCmd.compare(0, 5, "mode ") == 0)
+        {
+            uint8_t mode = atoi(subCmd.substr(5).c_str());
+            if (mode > 3)
+            {
+                openknx.logger.log("[ERROR] Invalid mode (0=Disabled, 1=UseGlobal, 2=FixedValue, 3=PerLED)");
+                openknx.logger.end();
+                return false;
+            }
+
+            PhysicalStripConfig* cfg = phys->getConfig();
+            if (cfg)
+            {
+                cfg->setPowerLimitMode(mode);
+                const char* modeName[] = {"Disabled", "UseGlobal", "FixedValue", "PerLED"};
+                openknx.logger.logWithValues("Strip %u: Power mode set to %s", stripIndex, modeName[mode]);
+            }
+            openknx.logger.end();
+            return true;
+        }
+
+        // neo power phys_<n> (show strip status)
+        if (subCmd.empty())
+        {
+            PowerManager* pm = _manager->getPowerManager();
+            if (!pm)
+            {
+                openknx.logger.log("[ERROR] PowerManager not initialized!");
+                openknx.logger.end();
+                return false;
+            }
+
+            PhysicalStripConfig* cfg = phys->getConfig();
+            if (!cfg)
+            {
+                openknx.logger.log("[ERROR] Strip configuration not found!");
+                openknx.logger.end();
+                return false;
+            }
+
+            openknx.logger.log("");
+            openknx.logger.logWithValues("Physical Strip %u Status", stripIndex);
+            printSectionSeparator();
+
+            openknx.logger.logWithValues("Pin:              %u", phys->getDataPin());
+            openknx.logger.logWithValues("LED Count:        %u", phys->getLedCount());
+
+            const char* modeName = "Unknown";
+            uint8_t mode = cfg->getPowerLimitMode();
+            switch (mode)
+            {
+                case 0: modeName = "Disabled"; break;
+                case 1: modeName = "UseGlobal"; break;
+                case 2: modeName = "FixedValue"; break;
+                case 3: modeName = "PerLED"; break;
+            }
+            openknx.logger.logWithValues("Power Mode:       %s (%u)", modeName, mode);
+            openknx.logger.logWithValues("Max Current:      %u mA", cfg->getMaxCurrentMa());
+
+            // Calculate current for this strip (universal function handles all protocols)
+            uint32_t stripCurrent = pm->calculateStripCurrent(
+                phys->getBuffer(),
+                phys->getLedCount(),
+                phys->getProtocol(),
+                phys->getColorOrder(),
+                true); // hasDummyLed for APA102
+
+            openknx.logger.logWithValues("Current Draw:     %u mA (%.2f W @ 5V)",
+                                         stripCurrent, stripCurrent * 5.0f / 1000.0f);
+
+            printSectionSeparator();
+            openknx.logger.log("");
+            openknx.logger.end();
+            return true;
+        }
+    }
+
+    // neo power g|global <subcommand>
+    if (args.compare(0, 7, "global ") == 0 || args.compare(0, 2, "g ") == 0)
+    {
+        std::string globalCmd = (args[0] == 'g' && args[1] == ' ') ? args.substr(2) : args.substr(7);
+
+        // neo power global limit <mA>
+        if (globalCmd.compare(0, 6, "limit ") == 0)
+        {
+            uint32_t limit = atoi(globalCmd.substr(6).c_str());
+            if (limit < 100 || limit > 100000)
+            {
+                openknx.logger.log("[ERROR] Invalid current limit (100-100000 mA)");
+                openknx.logger.end();
+                return false;
+            }
+
+            _manager->setMaxCurrent(limit);
+            openknx.logger.logWithValues("Global power limit set to %u mA (%.2f A)", limit, limit / 1000.0f);
+            openknx.logger.end();
+            return true;
+        }
+
+        // neo power global profile <type>
+        if (globalCmd.compare(0, 8, "profile ") == 0)
+        {
+            std::string profileStr = globalCmd.substr(8);
+            PowerManager* pm = _manager->getPowerManager();
+            if (!pm)
+            {
+                openknx.logger.log("[ERROR] PowerManager not initialized!");
+                openknx.logger.end();
+                return false;
+            }
+
+            LedCurrentProfile profile;
+            bool found = false;
+
+            if (profileStr == "ws2812b")
+            {
+                profile = LedProfiles::WS2812B;
+                found = true;
+            }
+            else if (profileStr == "sk6812" || profileStr == "sk6812_rgbw")
+            {
+                profile = LedProfiles::SK6812_RGBW;
+                found = true;
+            }
+            else if (profileStr == "apa102")
+            {
+                profile = LedProfiles::APA102;
+                found = true;
+            }
+            else if (profileStr == "conservative")
+            {
+                profile = LedProfiles::CONSERVATIVE;
+                found = true;
+            }
+
+            if (!found)
+            {
+                openknx.logger.log("[ERROR] Unknown profile. Use: ws2812b|sk6812|apa102|conservative");
+                openknx.logger.end();
+                return false;
+            }
+
+            pm->setLedProfile(profile);
+            openknx.logger.logWithValues("Global LED profile set to %s", profileStr.c_str());
+            openknx.logger.end();
+            return true;
+        }
+
+        // neo power global on/off
+        if (globalCmd == "on")
+        {
+            _manager->setPowerManagementEnabled(true);
+            openknx.logger.log("Global power management ENABLED");
+            openknx.logger.end();
+            return true;
+        }
+        if (globalCmd == "off")
+        {
+            _manager->setPowerManagementEnabled(false);
+            openknx.logger.log("Global power management DISABLED");
+            openknx.logger.end();
+            return true;
+        }
+    }
+
+    // Legacy compatibility: neo power limit/profile/on/off (maps to global)
     // neo power limit <mA>
     else if (args.compare(0, 6, "limit ") == 0)
     {
@@ -3164,7 +3936,7 @@ bool NeoPixel::processPowerCommand(const std::string& args)
     }
 
     // Unknown command
-    openknx.logger.log("[ERROR] Unknown power command. Use: neo power status|limit|profile|on|off");
+    openknx.logger.log("[ERROR] Unknown power command. Use 'neo power ?' for help");
     openknx.logger.end();
     return false;
 }

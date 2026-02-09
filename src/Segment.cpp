@@ -23,7 +23,8 @@ Segment::Segment(VirtualStrip* virtualStrip, uint16_t startLed, uint16_t endLed)
       _effect(nullptr),
       _dirty(false),
       _paused(false),
-      _ledState(LedState::IDLE)
+      _ledState(LedState::IDLE),
+      _hclManager(nullptr)
 {
 
     if (!virtualStrip)
@@ -59,6 +60,13 @@ Segment::~Segment()
 {
     // Effect is NOT deleted - user is responsible for cleanup!
     _effect = nullptr;
+
+    // Delete HCL manager if exists
+    if (_hclManager)
+    {
+        delete _hclManager;
+        _hclManager = nullptr;
+    }
 }
 
 /**
@@ -91,6 +99,9 @@ bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
     {
         return false;
     }
+
+    // NOTE: HCL is now applied via VirtualStrip::PixelTransformCallback during syncToPhysical()
+    // This ensures 1× Kelvin calculation per frame instead of per-pixel
 
     // Apply segment brightness (gamma correction happens later in PhysicalStrip)
     if (_config.brightness < 255)
@@ -155,6 +166,9 @@ bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t 
         return false;
     }
 
+    // NOTE: HCL is now applied via VirtualStrip::PixelTransformCallback during syncToPhysical()
+    // This ensures 1× Kelvin calculation per frame instead of per-pixel
+
     // Apply segment brightness (gamma correction happens later in PhysicalStrip)
     if (_config.brightness < 255)
     {
@@ -217,6 +231,9 @@ bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t 
     {
         return false;
     }
+
+    // NOTE: HCL is now applied via VirtualStrip::PixelTransformCallback during syncToPhysical()
+    // This ensures 1× Kelvin calculation per frame instead of per-pixel
 
     // Apply segment brightness (gamma correction happens later in PhysicalStrip)
     if (_config.brightness < 255)
@@ -524,4 +541,30 @@ uint16_t Segment::mapVirtualToPhysical(uint16_t virtualIndex) const
     }
 
     return physicalIndex;
+}
+
+// ====================================================================
+// HCL (Human Centric Lighting) Management
+// ====================================================================
+
+/**
+ * @brief Set HCL manager for this segment
+ * @param manager HCL manager instance (ownership transferred to Segment)
+ *
+ * NOTE: HCL pixel transformation is handled centrally by NeoPixelBusModule::updateHclTransformContext()
+ * which registers HclPixelTransform::Callback with VirtualStrip. This method only stores the HclManager.
+ */
+void Segment::setHclManager(HclManager* manager)
+{
+    // Delete old manager if exists
+    if (_hclManager)
+    {
+        delete _hclManager;
+        _hclManager = nullptr;
+    }
+
+    _hclManager = manager;
+
+    // NOTE: Callback registration happens centrally in NeoPixelBusModule::updateHclTransformContext()
+    // Do NOT register per-segment callbacks here - that would override the global callback!
 }

@@ -3,7 +3,8 @@
   "version": "0.0.1",
   "dependencies": {
   },
-  "description": "OFM-NeoPixel is a library for the OpenKNX Framework to control NeoPixel LED strips.",
+  "description": "OFM-NeoPixel is a library for the OpenKNX Framework to control LED strips. It is a high-performance LED control library for addressable RGB/RGBW/RGBCCT strips with per-strip power management and Human Centric Lighting (HCL) support.",
+  "keywords": "LED, NeoPixel, WS2812, SK6812, APA102, RGBCCT, Power Management, HCL, Human Centric Lighting, RP2040, RP2350, ESP32",
   "homepage": "https://openknx.de",
   "authors": {
     "name": "Erkan Çolak",

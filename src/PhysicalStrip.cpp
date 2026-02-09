@@ -30,7 +30,8 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _colorOrder(ColorOrder::NONE),
       _hasColorOrder(false),
       _config(nullptr),
-      _timingMode(timingMode)
+      _timingMode(timingMode),
+      _voltage(5)
 {
     createDriver(driverType);
 }
@@ -54,7 +55,8 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _colorOrder(ColorOrder::NONE),
       _hasColorOrder(false),
       _config(nullptr),
-      _timingMode(timingMode)
+      _timingMode(timingMode),
+      _voltage(5)
 {
     createDriver(driverType);
 }
@@ -79,7 +81,8 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _colorOrder(ColorOrder::NONE),
       _hasColorOrder(false),
       _config(nullptr),
-      _timingMode(TimingMode::AUTO)
+      _timingMode(TimingMode::AUTO),
+      _voltage(5)
 {
 #ifdef ARDUINO_ARCH_RP2040
     // Set default ColorOrder based on protocol (if not already set)

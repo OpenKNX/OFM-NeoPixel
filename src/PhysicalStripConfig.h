@@ -259,6 +259,85 @@ struct PhysicalStripConfig
         b = (uint8_t)(((uint16_t)b * _whiteBalanceBlue) / 255);
     }
 
+    // ===== Power Limiting =====
+
+    /**
+     * @brief Set power limit mode for this strip
+     * @param mode 0=Disabled, 1=UseGlobal, 2=FixedValue, 3=PerLED
+     */
+    void setPowerLimitMode(uint8_t mode) { _powerLimitMode = mode; }
+
+    /**
+     * @brief Get power limit mode
+     * @return 0=Disabled, 1=UseGlobal, 2=FixedValue, 3=PerLED
+     */
+    uint8_t getPowerLimitMode() const { return _powerLimitMode; }
+
+    /**
+     * @brief Set maximum current in mA (for mode=2 FixedValue)
+     * @param mA Maximum current in milliamperes
+     */
+    void setMaxCurrentMa(uint16_t mA) { _maxCurrentMa = mA; }
+
+    /**
+     * @brief Get maximum current in mA
+     * @return Maximum current in milliamperes
+     */
+    uint16_t getMaxCurrentMa() const { return _maxCurrentMa; }
+
+    /**
+     * @brief Set current per LED in mA (for mode=3 PerLED)
+     * @param mA Current per LED in milliamperes (typical: 60)
+     */
+    void setCurrentPerLedMa(uint8_t mA) { _currentPerLedMa = mA; }
+
+    /**
+     * @brief Get current per LED in mA
+     * @return Current per LED in milliamperes
+     */
+    uint8_t getCurrentPerLedMa() const { return _currentPerLedMa; }
+
+    // ===== ABL (Automatic Brightness Limiting) =====
+
+    /**
+     * @brief Set auto brightness limit cap (%)
+     * @param percent Maximum brightness percentage (0-100, default: 100)
+     * @note Only used when power limiting mode > 1 (own settings)
+     */
+    void setAutoBrightnessLimit(uint8_t percent) { _autoBrightnessLimit = percent; }
+
+    /**
+     * @brief Get auto brightness limit cap
+     * @return Maximum brightness percentage (0-100)
+     */
+    uint8_t getAutoBrightnessLimit() const { return _autoBrightnessLimit; }
+
+    /**
+     * @brief Set power limit threshold for ABL activation (%)
+     * @param percent Threshold percentage (0-100, default: 80)
+     * @note ABL starts dimming when current exceeds this threshold
+     */
+    void setPowerLimitThreshold(uint8_t percent) { _powerLimitThreshold = percent; }
+
+    /**
+     * @brief Get power limit threshold
+     * @return Threshold percentage (0-100)
+     */
+    uint8_t getPowerLimitThreshold() const { return _powerLimitThreshold; }
+
+    /**
+     * @brief Set ABL slew rate for smooth dimming (%)
+     * @param percent Slew rate percentage (0-100, default: 20)
+     * @note Higher = faster dimming response
+     */
+    void setAblSlewRate(uint8_t percent) { _ablSlewRate = percent; }
+
+    /**
+     * @brief Get ABL slew rate
+     * @return Slew rate percentage (0-100)
+     */
+    uint8_t getAblSlewRate() const { return _ablSlewRate; }
+
   protected:
     /**
      * @brief Calculate gamma lookup table using the formula: output = (input/255)^gamma * 255
@@ -305,6 +384,14 @@ struct PhysicalStripConfig
     uint8_t _whiteBalanceRed = 255;    // Default: no change
     uint8_t _whiteBalanceGreen = 255;  // Default: no change
     uint8_t _whiteBalanceBlue = 255;   // Default: no change
+    // Power limiting
+    uint8_t _powerLimitMode = 1;   // Default: 1 (use global settings), 0=disabled, 2=fixed mA, 3=per LED
+    uint16_t _maxCurrentMa = 0;    // Default: 0 (not used when mode=1)
+    uint8_t _currentPerLedMa = 60; // Default: 60 mA per LED (only used when mode=3)
+    // ABL (Automatic Brightness Limiting) - per strip
+    uint8_t _autoBrightnessLimit = 100; // Default: 100% (no limiting)
+    uint8_t _powerLimitThreshold = 80;  // Default: 80% (start ABL at 80% of limit)
+    uint8_t _ablSlewRate = 20;          // Default: 20% (slew rate for ABL dimming)
 };
 
 /**

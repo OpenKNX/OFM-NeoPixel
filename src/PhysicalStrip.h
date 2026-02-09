@@ -107,6 +107,32 @@ class PhysicalStrip
     }
 
     // ====================================================================
+    // Voltage Configuration (for Power Calculation)
+    // ====================================================================
+    /**
+     * @brief Set operating voltage for this strip (5V, 12V, 24V)
+     * @param voltage Supply voltage (default: 5V)
+     * @note Used for power calculation: Power[W] = Current[mA] * Voltage / 1000
+     */
+    void setVoltage(uint8_t voltage) { _voltage = voltage; }
+
+    /**
+     * @brief Get operating voltage for this strip
+     * @return Supply voltage in volts (5, 12, or 24)
+     */
+    uint8_t getVoltage() const { return _voltage; }
+
+    /**
+     * @brief Calculate power consumption in watts
+     * @param currentMa Current consumption in milliamps
+     * @return Power in watts
+     */
+    float getPowerWatts(uint32_t currentMa) const
+    {
+        return (currentMa * _voltage) / 1000.0f;
+    }
+
+    // ====================================================================
     // Hardware Configuration (NEW API)
     // ====================================================================
     /**
@@ -173,6 +199,7 @@ class PhysicalStrip
     bool _hasColorOrder;          // Whether ColorOrder was explicitly set
     PhysicalStripConfig* _config; // Hardware configuration (SpiStripConfig or SerialStripConfig)
     TimingMode _timingMode;       // Timing mode for clock divider calculation
+    uint8_t _voltage;             // Operating voltage (5V, 12V, 24V) - default: 5V
 
     bool createDriver(DriverType driverType); // Create appropriate driver
 };

@@ -33,6 +33,7 @@
 #include "TimingMode.h"
 #include "VirtualStrip.h"
 
+#include <map>
 #include <stdint.h>
 #include <string>
 #include <vector>
@@ -226,6 +227,56 @@ class NeoPixelManager
      */
     float getTotalPowerWatts() const;
 
+    /**
+     * @brief Get global power statistics (all strips combined)
+     * @param currentMa Output: Total current in mA
+     * @param limitMa Output: Configured limit in mA
+     * @param loadPercent Output: Load percentage (0-100)
+     */
+    void getGlobalPowerStats(uint32_t& currentMa, uint32_t& limitMa, uint8_t& loadPercent) const
+    {
+        currentMa = _globalCurrentMa;
+        limitMa = _globalLimitMa;
+        loadPercent = _globalLoadPercent;
+    }
+
+    // ====================================================================
+    // Global HCL Management
+    // ====================================================================
+
+    /**
+     * @brief Set global HCL manager (used by segments with HclMode::Global)
+     * @param manager HCL manager instance (ownership transferred)
+     */
+    void setGlobalHclManager(HclManager* manager);
+
+    /**
+     * @brief Get global HCL manager
+     * @return Pointer to global HCL manager (nullptr if not set)
+     */
+    HclManager* getGlobalHclManager() { return _globalHclManager; }
+
+    /**
+     * @brief Get power statistics for a specific PhysicalStrip
+     * @param strip Physical strip pointer
+     * @param currentMa Output: Current in mA
+     * @param limitMa Output: Configured limit in mA
+     * @param loadPercent Output: Load percentage (0-100)
+     * @return true if strip found in cache, false otherwise
+     */
+    bool getStripPowerStats(PhysicalStrip* strip, uint32_t& currentMa, uint32_t& limitMa, uint8_t& loadPercent) const
+    {
+        auto it = _stripPowerCache.find(strip);
+        if (it != _stripPowerCache.end())
+        {
+            currentMa = it->second.currentMa;
+            limitMa = it->second.limitMa;
+            loadPercent = it->second.loadPercent;
+            return true;
+        }
+        return false;
+    }
+
   private:
     std::vector<PhysicalStrip*> _strips;       // Physical strips
     std::vector<VirtualStrip*> _virtualStrips; // Virtual strips
@@ -235,8 +286,30 @@ class NeoPixelManager
     uint32_t _updateCount;                     // Number of updates since start
     uint32_t _errorCount;                      // Error counter
     PowerManager _powerManager;                // Power/Current management
+    HclManager* _globalHclManager;             // Global HCL manager (nullptr if not used)
+
+    // Power monitoring cache (per-strip values for PER_CHANNEL mode)
+    struct StripPowerStats
+    {
+        uint32_t currentMa;  // Current consumption in mA
+        uint32_t limitMa;    // Configured limit in mA
+        uint8_t loadPercent; // Load percentage (0-100)
+    };
+    mutable std::map<PhysicalStrip*, StripPowerStats> _stripPowerCache; // Cache per PhysicalStrip
+    mutable uint32_t _globalCurrentMa;                                  // Global total current (all strips)
+    mutable uint32_t _globalLimitMa;                                    // Global limit
+    mutable uint8_t _globalLoadPercent;                                 // Global load percentage
+
+    // Performance optimization: Physical→Virtual mapping lookup table
+    // Pre-computed to avoid O(n²) nested loops in power limiting
+    std::map<PhysicalStrip*, std::vector<VirtualStrip*>> _physToVirtualMap;
+    bool _mappingDirty; // Flag: mapping needs rebuild
 
     // Private helper methods
     bool checkResourcesAvailable(LedProtocol protocol);                               // Check if resources are available for new strip
     void countResourceUsage(uint32_t& pioUsed, uint32_t& spiUsed, uint32_t& rmtUsed); // Count current resource usage
+    void applyScaleToBuffer(VirtualStrip* vstrip, float scale);                       // Apply brightness scale to VirtualStrip buffer
+    void rebuildPhysToVirtualMapping();                                               // Rebuild Physical→Virtual mapping table
+    void applyPowerLimitToStrip(PhysicalStrip* phys, uint32_t stripLimit);            // Apply power limit to a specific PhysicalStrip
+    void applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scale);                // Apply brightness scale to PhysicalStrip buffer
 };

@@ -419,6 +419,104 @@ class PowerManager
     }
 
     /**
+     * @brief Calculate total current consumption for any LED protocol (universal function)
+     * @param buffer Pointer to LED buffer (format depends on protocol)
+     * @param numPixels Number of actual LEDs
+     * @param protocol LED protocol (WS2812B, APA102, SK6812, etc.)
+     * @param order Color order (for determining bytes per pixel)
+     * @param hasDummyLed True if first LED frame should be skipped (APA102 dummy LED mode)
+     * @return Total current in mA
+     *
+     * This function automatically handles different buffer formats:
+     * - APA102/SK9822: Special format with start frame, brightness byte, BGR order
+     * - WS2812B/SK6812/etc.: Standard RGB/RGBW/RGBCCT format
+     */
+    uint32_t calculateStripCurrent(const uint8_t* buffer, uint16_t numPixels, LedProtocol protocol,
+                                   ColorOrder order, bool hasDummyLed = false) const
+    {
+        if (!buffer || numPixels == 0)
+            return 0;
+
+        // APA102/SK9822: Special buffer format
+        if (protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE || protocol == LedProtocol::SK9822)
+        {
+            return calculateAPA102Current(buffer, numPixels, hasDummyLed);
+        }
+
+        // All other protocols: Standard RGB/RGBW/RGBCCT format
+        // Determine bytes per pixel from ColorOrder
+        uint8_t bytesPerPixel = 3; // Default RGB
+        if (order == ColorOrder::RGBCCT || order == ColorOrder::GRBCCT ||
+            order == ColorOrder::RGBCTW || order == ColorOrder::GRBCTW)
+        {
+            bytesPerPixel = 5; // 5-channel
+        }
+        else if (order == ColorOrder::RGBW || order == ColorOrder::GRBW)
+        {
+            bytesPerPixel = 4; // 4-channel
+        }
+
+        return calculateTotalCurrent(buffer, numPixels, bytesPerPixel, 255);
+    }
+
+    /**
+     * @brief Calculate total current consumption for APA102/SK9822 strips
+     * @param buffer Pointer to APA102 buffer (includes start frame, LED frames with brightness byte, end frame)
+     * @param numPixels Number of actual LEDs (excludes dummy LED)
+     * @param hasDummyLed True if first LED frame is dummy (skip it)
+     * @return Total current in mA
+     *
+     * APA102/SK9822 Buffer Format:
+     * - Start Frame: 4 bytes (0x00 0x00 0x00 0x00)
+     * - LED Frames: Each LED = 4 bytes [0xE0|brightness, Blue, Green, Red]
+     *   - Byte 0: 0xE0 + 5-bit brightness (0-31)
+     *   - Byte 1: Blue
+     *   - Byte 2: Green
+     *   - Byte 3: Red
+     * - End Frame: 4+ bytes
+     */
+    uint32_t calculateAPA102Current(const uint8_t* buffer, uint16_t numPixels, bool hasDummyLed = true) const
+    {
+        if (!buffer || numPixels == 0)
+            return 0;
+
+        uint32_t totalCurrent = 0;
+
+        // Skip start frame (4 bytes)
+        size_t offset = 4;
+
+        // Skip dummy LED if present (sacrifice LED #0)
+        if (hasDummyLed)
+        {
+            offset += 4;
+        }
+
+        // Process each LED frame
+        for (uint16_t i = 0; i < numPixels; i++)
+        {
+            // APA102 frame: [0xE0|brightness, B, G, R]
+            uint8_t brightnessByte = buffer[offset];
+            uint8_t b = buffer[offset + 1];
+            uint8_t g = buffer[offset + 2];
+            uint8_t r = buffer[offset + 3];
+
+            // Extract 5-bit brightness (0-31) from brightness byte
+            uint8_t brightness5bit = brightnessByte & 0x1F; // Mask lower 5 bits
+
+            // Scale to 0-255 for calculatePixelCurrent
+            // brightness5bit ranges 0-31, we scale to 0-255
+            uint8_t hardwareBrightness = (brightness5bit * 255) / 31;
+
+            // Calculate current for this pixel (APA102 is RGB, no white channels)
+            totalCurrent += calculatePixelCurrent(r, g, b, 0, 0, hardwareBrightness);
+
+            offset += 4; // Move to next LED frame
+        }
+
+        return totalCurrent;
+    }
+
+    /**
      * @brief Calculate total current consumption
      * @param pixels Pointer to pixel buffer (RGB, RGBW, or RGBCCT)
      * @param numPixels Number of pixels

@@ -5,7 +5,7 @@
 **License:** GNU GPL v3.0  
 **Author:** Erkan Çolak
 
-A high-performance, hardware-optimized LED control library for addressable RGB/RGBW/RGBCCT strips on OpenKNX devices with **self-describing effects** and **stateless architecture**.
+A high-performance, hardware-optimized LED control library for addressable RGB/RGBW/RGBCCT strips on OpenKNX devices with **self-describing effects**, **stateless architecture**, **per-strip power management**, and **Human Centric Lighting (HCL)**.
 
 ---
 
@@ -43,8 +43,15 @@ A high-performance, hardware-optimized LED control library for addressable RGB/R
   - [LED Current Profiles](#led-current-profiles)
   - [Configuration](#configuration)
   - [Advanced Power Management Features](#advanced-power-management-features)
+  - [Per-Strip Power Limit Override](#per-strip-power-limit-override)
   - [Power Monitoring](#power-monitoring)
   - [Practical Examples](#practical-examples)
+- [Human Centric Lighting (HCL)](#human-centric-lighting-hcl)
+  - [Overview](#hcl-overview)
+  - [HCL Modes](#hcl-modes)
+  - [Configuration](#hcl-configuration)
+  - [Curve Types](#hcl-curve-types)
+  - [API Usage](#hcl-api-usage)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [License](#license)
@@ -122,13 +129,30 @@ This design enables complex LED configurations with minimal CPU overhead through
 
 ### Power Management (Enhanced)
 
-- **Three Power Modes**: GLOBAL (total budget), PER_CHANNEL (per output), PER_LED (per individual LED)
-- **Soft-Limiting**: Threshold-based gradual dimming instead of hard cutoff
+- **Global Power Management**: GLOBAL (total budget), PER_CHANNEL (per output), PER_LED (per individual LED)
+- **Per-Strip Power Limit Override**: Each physical strip can override global settings with 4 modes:
+  - Mode 0: **Disabled** - No power limiting for this strip
+  - Mode 1: **Use Global** - Inherit global power management settings (default)
+  - Mode 2: **Custom (Fixed Value)** - Strip-specific fixed mA limit
+  - Mode 3: **Custom (Per LED)** - Strip-specific mA/LED with automatic calculation
+- **Soft-Limiting (ABL)**: Threshold-based gradual dimming instead of hard cutoff
 - **Auto Brightness Cap**: Maximum brightness limit independent of power consumption
 - **Slew Rate Control**: Smooth brightness transitions during power limiting
 - **5-Channel RGBCCT Profiles**: WS2805, SK6812_RGBCCT, WS2814_RGBCCT current profiles
 - **Requested vs. Actual Power**: Track both before and after limiting
 - **Real-Time Monitoring**: Current consumption tracking via console or API
+
+### Human Centric Lighting (HCL)
+
+- **Dynamic Color Temperature**: Automatically adjusts warm/cool white balance throughout the day
+- **Multiple HCL Modes**: Global, Per-Segment, or Disabled - flexible configuration
+- **Two Curve Types**:
+  - **Fixed Time**: Define start/end times with color temperature range (2700K-6500K)
+  - **Sun Position**: Follows sunrise/sunset with configurable offsets
+- **Smooth Transitions**: Slew rate control prevents abrupt color changes
+- **RGBCCT Support**: Works with 5-channel LEDs (RGB + Warm White + Cool White)
+- **Segment-Level Control**: Each segment can have independent HCL settings or share global
+- **Real-Time Kelvin Control**: Manual override via KO (Communication Object)
 
 ### Effect System
 
@@ -2435,6 +2459,108 @@ void loop() {
 }
 ```
 
+### Per-Strip Power Limit Override
+
+Each physical strip can override the global power management settings independently. This allows mixed configurations where some strips use global limits while others have custom settings.
+
+#### Four Override Modes
+
+```cpp
+PhysicalStripConfig* cfg = strip->getConfig();
+
+// Mode 0: Disabled - No power limiting for this strip
+cfg->setPowerLimitMode(0);
+
+// Mode 1: Use Global (default) - Inherit global power management
+cfg->setPowerLimitMode(1);  // Uses manager's global settings
+
+// Mode 2: Custom (Fixed Value) - Strip-specific fixed mA limit
+cfg->setPowerLimitMode(2);
+cfg->setMaxCurrentMa(3000);  // 3A limit for THIS strip only
+
+// Mode 3: Custom (Per LED) - Strip-specific mA/LED calculation
+cfg->setPowerLimitMode(3);
+cfg->setCurrentPerLedMa(60);  // 60mA per LED
+// Automatically calculated: Total = LED count × 60mA
+```
+
+#### Mode Comparison
+
+| Mode | Description | Use Case | Configuration Required |
+|------|-------------|----------|----------------------|
+| **0 - Disabled** | No power limiting | Test environments, oversized PSU | None |
+| **1 - Use Global** | Inherit global settings | Multiple strips, shared PSU | Global power management enabled |
+| **2 - Fixed Value** | Strip-specific mA limit | Dedicated PSU per strip | `setMaxCurrentMa()` |
+| **3 - Per LED** | Auto-calculated from mA/LED | Different LED types per strip | `setCurrentPerLedMa()` |
+
+#### Runtime Example
+
+```cpp
+void setup() {
+    NeoPixelManager* mgr = neoPixelModule.getManager();
+    
+    // Global power management: 10A total
+    mgr->setMaxCurrent(10000);
+    mgr->setPowerManagementEnabled(true);
+    
+    // Strip 0: Use global (default) - shares 10A budget
+    auto strip0 = mgr->addStrip(22, 100, LedProtocol::WS2812B, ColorOrder::GRB);
+    // strip0->getConfig()->setPowerLimitMode(1);  // Already default
+    
+    // Strip 1: Custom 3A limit - has own 5V/3A PSU
+    auto strip1 = mgr->addStrip(23, 50, LedProtocol::SK6812_RGBW, ColorOrder::GRBW);
+    strip1->getConfig()->setPowerLimitMode(2);
+    strip1->getConfig()->setMaxCurrentMa(3000);
+    
+    // Strip 2: Per-LED calculation - 80mA per LED SK6812 RGBW
+    auto strip2 = mgr->addStrip(24, 30, LedProtocol::SK6812_RGBW, ColorOrder::GRBW);
+    strip2->getConfig()->setPowerLimitMode(3);
+    strip2->getConfig()->setCurrentPerLedMa(80);  // 30 LEDs × 80mA = 2400mA total
+    
+    // Strip 3: Disabled - test environment with oversized PSU
+    auto strip3 = mgr->addStrip(25, 20, LedProtocol::WS2812B, ColorOrder::GRB);
+    strip3->getConfig()->setPowerLimitMode(0);
+}
+```
+
+#### ABL (Automatic Brightness Limiting) Per Strip
+
+Each strip with custom power limiting (Mode 2/3) can have independent ABL settings:
+
+```cpp
+PhysicalStripConfig* cfg = strip->getConfig();
+
+// Configure ABL for this strip
+cfg->setPowerLimitMode(2);               // Custom mode required
+cfg->setMaxCurrentMa(2500);              // 2.5A limit
+cfg->setPowerLimitThreshold(80);         // Start ABL at 80% (2A)
+cfg->setAblSlewRate(20);                 // 20% brightness change per second
+
+// Strip will gradually dim when exceeding 2A, hard-limit at 2.5A
+```
+
+**ABL Parameters:**
+- **Threshold (%)**: When to start gradual dimming (default: 80%)
+- **Slew Rate (%)**: How fast to dim (default: 20% per second)
+- **Brightness Cap (%)**: Maximum brightness limit (default: 100%)
+
+#### Console Commands
+
+```bash
+# View strip power configuration
+neo phys config 0
+
+# Change power limit mode
+neo phys config 0 powermode 2        # Set to Custom (Fixed Value)
+neo phys config 0 maxcurrent 3000    # Set 3A limit
+neo phys config 0 threshold 85       # ABL starts at 85%
+neo phys config 0 slew 30            # 30% brightness change/sec
+
+# Per-LED mode
+neo phys config 1 powermode 3        # Set to Custom (Per LED)
+neo phys config 1 currentperled 60   # 60mA per LED
+```
+
 ### Power Monitoring
 
 #### Requested vs. Actual Power
@@ -2457,19 +2583,6 @@ float currentBrightness = pm->getCurrentBrightnessPercent();
 
 Serial.printf("Requested: %umA (%.2fW), Actual: %umA (%.2fW), Brightness: %.1f%%\n",
               requestedMA, requestedWatts, actualMA, actualWatts, currentBrightness);
-```
-
-#### Per-Strip Manual Limiting (Advanced)
-
-For fine-grained control over individual strips:
-
-```cpp
-PowerManager pm(3000);  // 3A limit
-pm.setLedProfile(LedProfiles::SK6812_RGBW);
-
-// Before show()
-pm.applyCurrentLimit(strip->getBuffer(), strip->getLedCount(), 4); // 4 = RGBW
-strip->show();
 ```
 
 ### Monitoring Power Consumption
@@ -2612,6 +2725,333 @@ Current calculation overhead:
 - **500 LEDs:** ~0.25ms on RP2040 @ 133MHz
 
 **Recommendation:** Enable power management always - the safety benefit far outweighs the minimal performance cost.
+
+---
+
+## Human Centric Lighting (HCL)
+
+**Human Centric Lighting** dynamically adjusts the color temperature of RGBCCT LEDs throughout the day to support natural circadian rhythms.
+
+### HCL Overview
+
+HCL automatically transitions between warm (2700K - relaxing) and cool (6500K - activating) white tones based on time of day or sun position:
+
+- **Morning:** Cool white (5000-6500K) - energizing, focus
+- **Midday:** Neutral white (4000-5000K) - productive
+- **Evening:** Warm white (2700-3500K) - relaxing, wind-down
+
+**Benefits:**
+- Improved sleep quality (warm evening light supports melatonin production)
+- Better concentration (cool daytime light enhances alertness)
+- Natural circadian rhythm support
+- Reduces eye strain and headaches
+
+### HCL Modes
+
+Each segment can independently configure its HCL behavior:
+
+```cpp
+enum class HclMode : uint8_t {
+    Disabled = 0,   // HCL disabled for this segment
+    Global = 1,     // Use global HCL settings (shared manager)
+    Custom = 2      // Segment-specific HCL settings
+};
+```
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| **Disabled (0)** | No HCL processing | RGB-only LEDs, static installations |
+| **Global (1)** | Share global HCL manager | Multiple segments with same schedule |
+| **Custom (2)** | Independent HCL curve | Different rooms, different schedules |
+
+### HCL Configuration
+
+#### Global HCL (Recommended)
+
+All segments with `HclMode::Global` share one HCL manager:
+
+```cpp
+void setup() {
+    NeoPixelManager* mgr = neoPixelModule.getManager();
+    
+    // Configure global HCL
+    HclConfig globalConfig;
+    globalConfig.mode = HclMode::Global;
+    globalConfig.curveType = HclCurveType::FixedTime;
+    
+    // Time-based curve: 6am-10pm, 2700K-6500K
+    globalConfig.startHour = 6;
+    globalConfig.startMinute = 0;
+    globalConfig.endHour = 22;
+    globalConfig.endMinute = 0;
+    globalConfig.minKelvin = 2700;
+    globalConfig.maxKelvin = 6500;
+    globalConfig.slewRateKelvinPerHour = 200;  // Smooth 200K/hour transitions
+    
+    mgr->setGlobalHclConfig(globalConfig);
+    
+    // Segments use global HCL
+    auto seg1 = mgr->addVirtualStrip(...)->addSegment(0, 50);
+    seg1->setHclMode(HclMode::Global);  // Uses global settings
+    
+    auto seg2 = mgr->addVirtualStrip(...)->addSegment(0, 30);
+    seg2->setHclMode(HclMode::Global);  // Shares same HCL manager
+}
+```
+
+#### Per-Segment Custom HCL
+
+Each segment can have independent HCL settings:
+
+```cpp
+void setup() {
+    auto segment = mgr->addVirtualStrip(...)->addSegment(0, 100);
+    
+    // Custom HCL for THIS segment only
+    HclConfig customConfig;
+    customConfig.mode = HclMode::Custom;
+    customConfig.curveType = HclCurveType::SunPosition;
+    
+    // Sun-based curve with offsets
+    customConfig.sunriseOffsetMinutes = -30;  // Start 30min before sunrise
+    customConfig.sunsetOffsetMinutes = 30;    // End 30min after sunset
+    customConfig.minKelvin = 2700;
+    customConfig.maxKelvin = 6000;
+    customConfig.latitude = 52.52f;           // Berlin
+    customConfig.longitude = 13.40f;
+    
+    segment->setHclConfig(customConfig);
+}
+```
+
+### HCL Curve Types
+
+#### 1. Fixed Time Curve
+
+Uses configured start/end times with linear interpolation:
+
+```cpp
+HclConfig config;
+config.curveType = HclCurveType::FixedTime;
+config.startHour = 7;       // 07:00 - transition starts
+config.startMinute = 0;
+config.endHour = 21;        // 21:00 - transition ends
+config.endMinute = 0;
+config.minKelvin = 2700;    // Warm white (night)
+config.maxKelvin = 6500;    // Cool white (day)
+```
+
+**Timeline Example (07:00-21:00):**
+```
+Time    | 06:00 | 07:00 | 14:00 | 21:00 | 22:00
+Kelvin  | 2700  | 2700→ | 4600  | →6500 | 6500
+        | Night | Rise  | Noon  | Set   | Night
+```
+
+#### 2. Sun Position Curve
+
+Follows actual sunrise/sunset times with configurable offsets:
+
+```cpp
+HclConfig config;
+config.curveType = HclCurveType::SunPosition;
+config.latitude = 52.52f;                  // Your location
+config.longitude = 13.40f;
+config.sunriseOffsetMinutes = -30;         // Start 30min before sunrise
+config.sunsetOffsetMinutes = 30;           // End 30min after sunset
+config.minKelvin = 2700;
+config.maxKelvin = 6000;
+```
+
+**Automatic Adaptation:**
+- Adjusts daily based on actual sunrise/sunset times
+- Supports northern/southern hemispheres
+- Accounts for seasonal changes
+- Offsets allow customization (early birds, late sleepers)
+
+#### 3. Manual Control
+
+Override with fixed Kelvin value via KO (Communication Object):
+
+```cpp
+HclConfig config;
+config.curveType = HclCurveType::Manual;
+
+// Later: Set via KO or API
+segment->getHclManager()->setManualKelvin(4000);  // 4000K neutral white
+```
+
+### HCL API Usage
+
+#### Basic Setup
+
+```cpp
+// Example: Living room with sun-based HCL
+void setupLivingRoom() {
+    auto segment = mgr->addVirtualStrip(strip, 0, 100)->addSegment(0, 100);
+    
+    HclConfig config;
+    config.mode = HclMode::Custom;
+    config.curveType = HclCurveType::SunPosition;
+    config.latitude = 48.8566f;   // Paris
+    config.longitude = 2.3522f;
+    config.minKelvin = 2700;
+    config.maxKelvin = 6000;
+    config.slewRateKelvinPerHour = 150;  // 150K/hour smooth transitions
+    
+    segment->setHclConfig(config);
+}
+```
+
+#### Runtime Control
+
+```cpp
+// Get current HCL state
+HclManager* hcl = segment->getHclManager();
+if (hcl && hcl->isActive()) {
+    uint16_t currentKelvin = hcl->getCurrentKelvin();
+    Serial.printf("Current color temperature: %dK\n", currentKelvin);
+}
+
+// Change mode at runtime
+segment->setHclMode(HclMode::Disabled);  // Turn off HCL
+segment->setHclMode(HclMode::Global);    // Switch to global
+
+// Manual override
+hcl->setManualKelvin(3500);  // Override to 3500K
+```
+
+#### Advanced: Apply Mode
+
+Control which colors are affected by HCL:
+
+```cpp
+enum class HclApplyMode : uint8_t {
+    AllColors = 0,      // Apply to all effects/colors
+    WhiteOnly = 1,      // Only white channel (preserve RGB)
+    EffectsOnly = 2     // Only effect-generated colors
+};
+
+HclConfig config;
+config.applyMode = HclApplyMode::WhiteOnly;  // Only adjust W/WW/CW channels
+```
+
+### HCL Color Temperature Calculation
+
+The library automatically calculates RGB+WW+CW values from Kelvin temperature:
+
+**Kelvin → RGB Conversion (Approximation):**
+```
+2700K: RGB(255, 169, 87)  - Warm white (candlelight)
+3500K: RGB(255, 208, 153) - Soft white
+4000K: RGB(255, 229, 195) - Neutral white
+5000K: RGB(255, 244, 229) - Cool white (daylight)
+6500K: RGB(255, 254, 250) - Very cool (north sky)
+```
+
+**RGBCCT 5-Channel Mixing:**
+- RGB channels provide color
+- WW (Warm White) channel adds warmth
+- CW (Cool White) channel adds coolness
+- Intelligent mixing balances all 5 channels for target Kelvin
+
+### HCL Loop Integration
+
+**IMPORTANT:** Call `segment->updateHcl()` in your main loop:
+
+```cpp
+void loop() {
+    static uint32_t lastUpdate = 0;
+    uint32_t now = millis();
+    uint32_t deltaTime = now - lastUpdate;
+    lastUpdate = now;
+    
+    // Update all segments with HCL
+    for (auto segment : mgr->getAllSegments()) {
+        segment->updateHcl(deltaTime);  // Processes HCL curve + slew rate
+    }
+    
+    // Normal update
+    mgr->update(deltaTime);
+}
+```
+
+**Alternative:** If using `NeoPixelModule`, HCL is automatically updated in the module's `loop()`.
+
+### HCL Best Practices
+
+1. **Use Global HCL** for multiple segments in the same room (reduces memory)
+2. **Slew Rate 100-200 K/hour** prevents noticeable color shifts
+3. **Sun Position Mode** for automatic seasonal adjustment
+4. **Offsets -30/+30 min** allow personal preference tuning
+5. **Test with Manual Mode** first to find preferred Kelvin ranges
+6. **RGBCCT LEDs required** - HCL needs warm+cool white channels
+
+### HCL Example Scenarios
+
+#### Scenario 1: Office (Productivity Focus)
+
+```cpp
+HclConfig office;
+office.curveType = HclCurveType::FixedTime;
+office.startHour = 8;       // Work starts 08:00
+office.endHour = 18;        // Work ends 18:00
+office.minKelvin = 5000;    // Cool white all day
+office.maxKelvin = 6500;    // Very cool midday peak
+```
+
+#### Scenario 2: Bedroom (Sleep Support)
+
+```cpp
+HclConfig bedroom;
+bedroom.curveType = HclCurveType::SunPosition;
+bedroom.sunriseOffsetMinutes = 0;   // Natural wake-up
+bedroom.sunsetOffsetMinutes = 60;   // Warm up 1h after sunset
+bedroom.minKelvin = 2200;           // Very warm (candle-like)
+bedroom.maxKelvin = 4000;           // Neutral (not too bright)
+```
+
+#### Scenario 3: Living Room (Adaptive)
+
+```cpp
+HclConfig living;
+living.curveType = HclCurveType::SunPosition;
+living.latitude = 51.5074f;         // London
+living.longitude = -0.1278f;
+living.sunriseOffsetMinutes = -15;  // Gentle morning start
+living.sunsetOffsetMinutes = 30;    // Extend daylight feeling
+living.minKelvin = 2700;            // Warm evenings
+living.maxKelvin = 5500;            // Bright daytime
+living.slewRateKelvinPerHour = 120; // Smooth transitions
+```
+
+---
+
+---
+
+## TODO / Roadmap
+
+### Hardware-SPI Pin Configuration
+
+**Status:** Open
+**Priority:** Medium  
+**Files:** `lib/OFM-NeoPixel/src/hal/HW_NeoPixel_SPI.cpp` (Lines 80-104)
+
+Currently, Hardware-SPI pins are **hardcoded** platform defaults. This works for basic usage but should be integrated with **OpenKNX HardwareConfig** for production deployments.
+
+**Current Behavior:**
+- **RP2040/RP2350:** Uses SPI0 (GP2/GP3) or SPI1 (GP10/GP11) based on `selectSPI()`
+- **ESP32:** Uses VSPI (GPIO18/23) or HSPI (GPIO13/14) defaults
+- **OAM-NeoPixel:** Already uses PIO-SPI with explicit pins from ETS (not affected)
+
+
+**Implementation Plan:**
+1. Extend `OGM-HardwareConfig` with SPI pin definitions
+2. Modify `HW_NeoPixel_SPI` constructor to query HardwareConfig
+
+**Benefits:**
+- Hardware-agnostic firmware builds
+- Board-specific pin assignments in config
 
 ---
 

@@ -13,7 +13,8 @@ NeoPixelManager::NeoPixelManager()
       _lastUpdateTime(0),
       _updateCount(0),
       _errorCount(0),
-      _powerManager(5000) // Default 5A (5000mA)
+      _powerManager(5000), // Default 5A (5000mA)
+      _mappingDirty(true)  // Needs initial build
 {
     // Pre-allocate vectors based on configured limits to avoid reallocation overhead
     _strips.reserve(NEOPIXEL_MAX_PHYSICAL_STRIPS);
@@ -35,6 +36,13 @@ NeoPixelManager::NeoPixelManager()
  */
 NeoPixelManager::~NeoPixelManager()
 {
+    // Delete global HCL manager if owned
+    if (_globalHclManager)
+    {
+        delete _globalHclManager;
+        _globalHclManager = nullptr;
+    }
+
     // Lösche alle Strips
     for (auto strip : _strips)
     {
@@ -44,6 +52,22 @@ NeoPixelManager::~NeoPixelManager()
         }
     }
     _strips.clear();
+}
+
+/**
+ * @brief Set global HCL manager (takes ownership)
+ * @param manager HCL manager instance (will be deleted by NeoPixelManager)
+ */
+void NeoPixelManager::setGlobalHclManager(HclManager* manager)
+{
+    // Delete old manager if exists
+    if (_globalHclManager)
+    {
+        delete _globalHclManager;
+    }
+
+    _globalHclManager = manager;
+    logDebugP("NeoPixelManager: Global HCL manager %s", manager ? "set" : "cleared");
 }
 
 // =====================================================================
@@ -345,6 +369,7 @@ PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedPro
 
     strip->setColorOrder(colorOrder);
     _strips.push_back(strip);
+    _mappingDirty = true; // Mapping needs rebuild
     logDebugP("NeoPixelManager: Added strip at pin %d with %d LEDs (Driver: %d, ColorOrder: %d, TimingMode: %d)",
               pin, ledCount, (int)driverType, (int)colorOrder, (int)timingMode);
     return strip;
@@ -511,96 +536,632 @@ void NeoPixelManager::reset()
 }
 
 /**
- * Apply global power limiting to all VirtualStrip buffers
- * Phase 2: Must be called BEFORE syncAll()
+ * Apply global power limiting to all PhysicalStrip buffers
+ * Phase 3: Must be called AFTER syncAll() (works on PhysicalStrip buffers)
  * @public
  */
 void NeoPixelManager::applyPowerLimit()
 {
-    if (!_initialized || !_powerManager.isEnabled()) return;
-
-    // Step 1: Calculate total current across ALL VirtualStrips
-    uint32_t totalRequestedCurrent = 0;
-    for (auto vstrip : _virtualStrips)
+    // Rebuild mapping if needed (for LED count calculations)
+    if (_mappingDirty)
     {
-        if (vstrip && vstrip->getBuffer())
+        rebuildPhysToVirtualMapping();
+    }
+
+    PowerLimitMode mode = _powerManager.getPowerLimitMode();
+
+    if (mode == PowerLimitMode::GLOBAL)
+    {
+        // GLOBAL MODE: All strips using global power limit share one budget
+        // Calculate total requested current from ALL "UseGlobal" strips
+
+        uint32_t totalRequestedCurrent = 0;
+
+        // Step 1: Sum up requested current from all PhysicalStrips with "UseGlobal" mode
+        for (auto phys : _strips)
         {
-            uint16_t ledCount = vstrip->getLedCount();
-            uint8_t bytesPerPixel = vstrip->getBytesPerLed();
-            uint8_t hardwareBrightness = vstrip->getHardwareBrightness();
-            const uint8_t* buffer = vstrip->getBuffer();
+            if (!phys) continue;
+
+            auto* cfg = phys->getConfig();
+            if (!cfg) continue;
+
+            uint8_t stripPowerMode = cfg->getPowerLimitMode();
+            if (stripPowerMode != 1)
+            {
+                continue; // Skip if not using global
+            }
+
+            // Calculate current from PhysicalStrip buffer (after syncAll())
+            uint16_t ledCount = phys->getLedCount();
+            const uint8_t* buffer = phys->getBuffer();
+            if (!buffer) continue;
+
+            uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+            uint8_t hardwareBrightness = 255; // syncAll() already applied brightness
 
             uint32_t stripCurrent = _powerManager.calculateTotalCurrent(
                 buffer, ledCount, bytesPerPixel, hardwareBrightness);
             totalRequestedCurrent += stripCurrent;
         }
-    }
 
-    // Step 2: Check if limiting is needed
-    if (totalRequestedCurrent > _powerManager.getMaxCurrent())
-    {
-        // Calculate global scale factor
-        float globalScale = (float)_powerManager.getMaxCurrent() / (float)totalRequestedCurrent;
+        // Step 2: Check if limiting is needed
+        uint32_t effectiveLimit = _powerManager.getMaxCurrent();
 
-        // Step 3: Apply same scale to ALL VirtualStrip buffers
-        for (auto vstrip : _virtualStrips)
+        if (totalRequestedCurrent > effectiveLimit)
         {
-            if (vstrip && vstrip->getBuffer())
+            // Apply hysteresis: Target 95% of limit to prevent oscillation
+            uint32_t targetCurrent = (effectiveLimit * 95) / 100;
+
+            // Calculate global scale factor
+            float globalScale = (float)targetCurrent / (float)totalRequestedCurrent;
+
+            // Step 3: Apply same scale to ALL PhysicalStrip buffers with UseGlobal mode
+            for (auto phys : _strips)
             {
-                uint16_t ledCount = vstrip->getLedCount();
-                uint8_t bytesPerPixel = vstrip->getBytesPerLed();
-                uint8_t* buffer = vstrip->getBuffer();
+                if (!phys) continue;
+                auto* cfg = phys->getConfig();
+                if (!cfg) continue;
 
-                // Scale all pixels in this VirtualStrip
-                for (uint16_t i = 0; i < ledCount; i++)
+                uint8_t stripPowerMode = cfg->getPowerLimitMode();
+                if (stripPowerMode == 1 && phys->getBuffer())
                 {
-                    // CRITICAL: Cast to size_t to prevent overflow (i * bytesPerPixel can exceed uint16_t)
-                    size_t offset = (size_t)i * bytesPerPixel;
-
-                    // CRITICAL: Bounds check to prevent buffer overflow
-                    size_t bufferSize = vstrip->getBufferSize();
-                    if (offset + bytesPerPixel > bufferSize)
-                    {
-                        logErrorP("NeoPixelManager: Power limiting buffer overflow! LED %u, offset %u, bufferSize %u",
-                                  i, (uint32_t)offset, (uint32_t)bufferSize);
-                        break; // Skip remaining LEDs for this strip
-                    }
-
-                    buffer[offset] = (uint8_t)(buffer[offset] * globalScale);         // R
-                    buffer[offset + 1] = (uint8_t)(buffer[offset + 1] * globalScale); // G
-                    buffer[offset + 2] = (uint8_t)(buffer[offset + 2] * globalScale); // B
-                    if (bytesPerPixel == 4)
-                    {
-                        buffer[offset + 3] = (uint8_t)(buffer[offset + 3] * globalScale); // W
-                    }
+                    applyScaleToPhysicalBuffer(phys, globalScale);
                 }
+            }
+
+            _powerManager.setCachedCurrentValues(totalRequestedCurrent, targetCurrent);
+
+            // Cache global stats
+            _globalCurrentMa = targetCurrent;
+            _globalLimitMa = effectiveLimit;
+            _globalLoadPercent = (uint8_t)((targetCurrent * 100) / effectiveLimit);
+        }
+        else
+        {
+            // No limiting needed
+            _powerManager.setCachedCurrentValues(totalRequestedCurrent, totalRequestedCurrent);
+
+            _globalCurrentMa = totalRequestedCurrent;
+            _globalLimitMa = effectiveLimit;
+            _globalLoadPercent = effectiveLimit > 0 ? (uint8_t)((totalRequestedCurrent * 100) / effectiveLimit) : 0;
+        }
+
+        // Cache per-strip stats for ALL strips (for monitoring)
+        _stripPowerCache.clear();
+
+        for (auto phys : _strips)
+        {
+            if (!phys) continue;
+            auto* cfg = phys->getConfig();
+            if (!cfg) continue;
+
+            uint8_t stripPowerMode = cfg->getPowerLimitMode();
+
+            // Calculate current from PhysicalStrip buffer
+            uint16_t ledCount = phys->getLedCount();
+            const uint8_t* buffer = phys->getBuffer();
+            uint32_t stripCurrent = 0;
+
+            if (buffer)
+            {
+                uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+                stripCurrent = _powerManager.calculateTotalCurrent(
+                    buffer, ledCount, bytesPerPixel, 255);
+            }
+
+            // Determine effective limit based on mode
+            uint32_t stripLimit = 0;
+
+            if (stripPowerMode == 0)
+            {
+                stripLimit = 0; // Disabled
+            }
+            else if (stripPowerMode == 1)
+            {
+                stripLimit = effectiveLimit; // UseGlobal
+            }
+            else if (stripPowerMode == 2)
+            {
+                stripLimit = cfg->getMaxCurrentMa(); // FixedValue
+            }
+            else if (stripPowerMode == 3)
+            {
+                // PerLED: Use physical LED count (not VirtualStrip sum)
+                stripLimit = ledCount * cfg->getCurrentPerLedMa();
+            }
+
+            StripPowerStats stats;
+            stats.currentMa = stripCurrent;
+            stats.limitMa = stripLimit;
+            stats.loadPercent = stripLimit > 0 ? (uint8_t)((stripCurrent * 100) / stripLimit) : 0;
+            _stripPowerCache[phys] = stats;
+        }
+
+        // IMPORTANT: Apply individual limits to strips that don't use global
+        // Even in GLOBAL mode, strips with Individual limits should be respected
+        for (auto phys : _strips)
+        {
+            if (!phys) continue;
+
+            auto* cfg = phys->getConfig();
+            if (!cfg) continue;
+
+            uint8_t stripPowerMode = cfg->getPowerLimitMode();
+
+            // Only process strips with individual limits
+            if (stripPowerMode == 0 || stripPowerMode == 1) continue;
+
+            uint32_t stripLimit = 0;
+
+            if (stripPowerMode == 2)
+            {
+                stripLimit = cfg->getMaxCurrentMa();
+            }
+            else if (stripPowerMode == 3)
+            {
+                // PerLED: Use physical LED count (not VirtualStrip sum)
+                stripLimit = phys->getLedCount() * cfg->getCurrentPerLedMa();
+            }
+
+            if (stripLimit == 0) continue;
+
+            // Calculate current from PhysicalStrip buffer
+            uint16_t ledCount = phys->getLedCount();
+            const uint8_t* buffer = phys->getBuffer();
+            if (!buffer) continue;
+
+            uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+            uint32_t stripRequestedCurrent = _powerManager.calculateTotalCurrent(
+                buffer, ledCount, bytesPerPixel, 255);
+
+            // Get ABL parameters
+            uint8_t autoBrLimit = cfg->getAutoBrightnessLimit();
+            uint8_t threshold = cfg->getPowerLimitThreshold();
+            uint32_t thresholdCurrent = (stripLimit * threshold) / 100;
+
+            // Apply ABL if needed
+            uint32_t actualCurrent = stripRequestedCurrent;
+            if (stripRequestedCurrent > thresholdCurrent)
+            {
+                float stripScale = 1.0f;
+
+                if (stripRequestedCurrent > stripLimit)
+                {
+                    uint32_t targetCurrent = (stripLimit * 95) / 100;
+                    stripScale = (float)targetCurrent / (float)stripRequestedCurrent;
+                    actualCurrent = targetCurrent;
+                }
+                else if (stripLimit > thresholdCurrent)
+                {
+                    float exceedRatio = (float)(stripRequestedCurrent - thresholdCurrent) /
+                                        (float)(stripLimit - thresholdCurrent);
+                    float targetBrightness = 100.0f - (exceedRatio * (100.0f - autoBrLimit));
+                    stripScale = targetBrightness / 100.0f;
+                    actualCurrent = (uint32_t)(stripRequestedCurrent * stripScale);
+                }
+                else
+                {
+                    stripScale = (float)stripLimit / (float)stripRequestedCurrent;
+                    actualCurrent = stripLimit;
+                }
+
+                applyScaleToPhysicalBuffer(phys, stripScale);
+            }
+
+            // Update cache
+            StripPowerStats stats;
+            stats.currentMa = actualCurrent;
+            stats.limitMa = stripLimit;
+            stats.loadPercent = stripLimit > 0 ? (uint8_t)((actualCurrent * 100) / stripLimit) : 0;
+            _stripPowerCache[phys] = stats;
+        }
+    }
+    else if (mode == PowerLimitMode::PER_CHANNEL)
+    {
+        // PER_CHANNEL MODE: Each PhysicalStrip gets its own limit
+
+        _stripPowerCache.clear();
+
+        // FIRST PASS: Calculate and cache current consumption for ALL strips
+        for (auto phys : _strips)
+        {
+            if (!phys) continue;
+            auto* cfg = phys->getConfig();
+            if (!cfg) continue;
+
+            uint8_t stripPowerMode = cfg->getPowerLimitMode();
+
+            // Calculate current from PhysicalStrip buffer
+            uint16_t ledCount = phys->getLedCount();
+            const uint8_t* buffer = phys->getBuffer();
+            uint32_t stripRequestedCurrent = 0;
+
+            if (buffer)
+            {
+                uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+                stripRequestedCurrent = _powerManager.calculateTotalCurrent(
+                    buffer, ledCount, bytesPerPixel, 255);
+            }
+
+            // Determine strip limit
+            uint32_t stripLimit = 0;
+
+            if (stripPowerMode == 0)
+            {
+                stripLimit = 0; // Disabled
+            }
+            else if (stripPowerMode == 1)
+            {
+                stripLimit = _powerManager.getMaxCurrent(); // Use global
+            }
+            else if (stripPowerMode == 2)
+            {
+                stripLimit = cfg->getMaxCurrentMa(); // Fixed
+            }
+            else if (stripPowerMode == 3)
+            {
+                // PerLED: Use physical LED count (not VirtualStrip sum)
+                stripLimit = ledCount * cfg->getCurrentPerLedMa();
+            }
+
+            // Cache stats
+            StripPowerStats stats;
+            stats.currentMa = stripRequestedCurrent;
+            stats.limitMa = stripLimit;
+            stats.loadPercent = stripLimit > 0 ? (uint8_t)((stripRequestedCurrent * 100) / stripLimit) : 0;
+            _stripPowerCache[phys] = stats;
+        }
+
+        // SECOND PASS: Apply power limiting to active strips
+        for (auto phys : _strips)
+        {
+            if (!phys) continue;
+
+            auto* cfg = phys->getConfig();
+            if (!cfg) continue;
+
+            uint8_t stripPowerMode = cfg->getPowerLimitMode();
+
+            // 0=Disabled - skip limiting (already cached above)
+            if (stripPowerMode == 0) continue;
+
+            // Get cached values
+            auto cacheIt = _stripPowerCache.find(phys);
+            if (cacheIt == _stripPowerCache.end()) continue;
+
+            uint32_t stripRequestedCurrent = cacheIt->second.currentMa;
+            uint32_t stripLimit = cacheIt->second.limitMa;
+
+            if (stripLimit == 0) continue; // No limit set
+
+            // Get ABL parameters for this strip
+            uint8_t autoBrLimit = 100;
+            uint8_t threshold = 80;
+
+            if (stripPowerMode == 1)
+            {
+                // Use global ABL settings
+                autoBrLimit = _powerManager.getMaxBrightnessPercent();
+                threshold = _powerManager.getThresholdPercent();
+            }
+            else if (stripPowerMode > 1)
+            {
+                // Use per-strip ABL settings
+                autoBrLimit = cfg->getAutoBrightnessLimit();
+                threshold = cfg->getPowerLimitThreshold();
+            }
+
+            // Calculate threshold current (when ABL starts dimming)
+            uint32_t thresholdCurrent = (stripLimit * threshold) / 100;
+
+            // Apply ABL-based limiting if needed
+            uint32_t actualCurrent = stripRequestedCurrent;
+            if (stripRequestedCurrent > thresholdCurrent)
+            {
+                float stripScale = 1.0f;
+
+                if (stripRequestedCurrent > stripLimit)
+                {
+                    uint32_t targetCurrent = (stripLimit * 95) / 100;
+                    stripScale = (float)targetCurrent / (float)stripRequestedCurrent;
+                }
+                else if (stripLimit > thresholdCurrent)
+                {
+                    float exceedRatio = (float)(stripRequestedCurrent - thresholdCurrent) /
+                                        (float)(stripLimit - thresholdCurrent);
+                    float targetBrightness = 100.0f - (exceedRatio * (100.0f - autoBrLimit));
+                    stripScale = targetBrightness / 100.0f;
+                }
+                else
+                {
+                    stripScale = (float)stripLimit / (float)stripRequestedCurrent;
+                }
+
+                applyScaleToPhysicalBuffer(phys, stripScale);
+
+                actualCurrent = (uint32_t)(stripRequestedCurrent * stripScale);
+                if (actualCurrent > stripLimit) actualCurrent = stripLimit;
+
+                cacheIt->second.currentMa = actualCurrent;
+                cacheIt->second.loadPercent = stripLimit > 0 ? (uint8_t)((actualCurrent * 100) / stripLimit) : 0;
             }
         }
 
-        // Update PowerManager statistics for correct reporting
-        _powerManager.setCachedCurrentValues(
-            totalRequestedCurrent,        // What was requested
-            _powerManager.getMaxCurrent() // What is actually flowing (capped at limit)
-        );
+        // Calculate global totals
+        _globalCurrentMa = 0;
+        _globalLimitMa = 0;
+        for (const auto& entry : _stripPowerCache)
+        {
+            _globalCurrentMa += entry.second.currentMa;
+            _globalLimitMa += entry.second.limitMa;
+        }
+        _globalLoadPercent = _globalLimitMa > 0 ? (uint8_t)((_globalCurrentMa * 100) / _globalLimitMa) : 0;
     }
-    else
+    else if (mode == PowerLimitMode::PER_LED)
     {
-        // No limiting needed - actual = requested
-        _powerManager.setCachedCurrentValues(totalRequestedCurrent, totalRequestedCurrent);
+        // PER_LED MODE: Limit calculated from LED count * mA per LED
+
+        uint8_t globalCurrentPerLed = _powerManager.getMaxCurrentPerLed();
+
+        _stripPowerCache.clear();
+
+        // FIRST PASS: Calculate and cache current consumption
+        for (auto phys : _strips)
+        {
+            if (!phys) continue;
+            auto* cfg = phys->getConfig();
+            if (!cfg) continue;
+
+            uint8_t stripPowerMode = cfg->getPowerLimitMode();
+
+            // Calculate current from PhysicalStrip buffer
+            uint16_t ledCount = phys->getLedCount();
+            const uint8_t* buffer = phys->getBuffer();
+            uint32_t stripRequestedCurrent = 0;
+
+            if (buffer)
+            {
+                uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+                stripRequestedCurrent = _powerManager.calculateTotalCurrent(
+                    buffer, ledCount, bytesPerPixel, 255);
+            }
+
+            // Determine strip limit
+            uint32_t stripLimit = 0;
+
+            if (stripPowerMode == 0)
+            {
+                stripLimit = 0; // Disabled
+            }
+            else if (stripPowerMode == 1)
+            {
+                // UseGlobal: Use physical LED count (not VirtualStrip sum)
+                stripLimit = ledCount * globalCurrentPerLed;
+            }
+            else if (stripPowerMode == 2)
+            {
+                stripLimit = cfg->getMaxCurrentMa(); // Fixed
+            }
+            else if (stripPowerMode == 3)
+            {
+                // PerLED: Use physical LED count (not VirtualStrip sum)
+                stripLimit = ledCount * cfg->getCurrentPerLedMa();
+            }
+
+            // Cache stats
+            StripPowerStats stats;
+            stats.currentMa = stripRequestedCurrent;
+            stats.limitMa = stripLimit;
+            stats.loadPercent = stripLimit > 0 ? (uint8_t)((stripRequestedCurrent * 100) / stripLimit) : 0;
+            _stripPowerCache[phys] = stats;
+        }
+
+        // SECOND PASS: Apply power limiting
+        for (auto phys : _strips)
+        {
+            if (!phys) continue;
+            auto* cfg = phys->getConfig();
+            if (!cfg) continue;
+
+            uint8_t stripPowerMode = cfg->getPowerLimitMode();
+            if (stripPowerMode == 0) continue; // Skip disabled
+
+            auto cacheIt = _stripPowerCache.find(phys);
+            if (cacheIt == _stripPowerCache.end()) continue;
+
+            uint32_t stripRequestedCurrent = cacheIt->second.currentMa;
+            uint32_t stripLimit = cacheIt->second.limitMa;
+
+            if (stripLimit == 0) continue;
+
+            // Get ABL parameters
+            uint8_t autoBrLimit = 100;
+            uint8_t threshold = 80;
+
+            if (stripPowerMode == 1)
+            {
+                autoBrLimit = _powerManager.getMaxBrightnessPercent();
+                threshold = _powerManager.getThresholdPercent();
+            }
+            else if (stripPowerMode > 1)
+            {
+                autoBrLimit = cfg->getAutoBrightnessLimit();
+                threshold = cfg->getPowerLimitThreshold();
+            }
+
+            uint32_t thresholdCurrent = (stripLimit * threshold) / 100;
+
+            // Apply ABL if needed
+            uint32_t actualCurrent = stripRequestedCurrent;
+            if (stripRequestedCurrent > thresholdCurrent)
+            {
+                float stripScale = 1.0f;
+
+                if (stripRequestedCurrent > stripLimit)
+                {
+                    uint32_t targetCurrent = (stripLimit * 95) / 100;
+                    stripScale = (float)targetCurrent / (float)stripRequestedCurrent;
+                }
+                else if (stripLimit > thresholdCurrent)
+                {
+                    float exceedRatio = (float)(stripRequestedCurrent - thresholdCurrent) /
+                                        (float)(stripLimit - thresholdCurrent);
+                    float targetBrightness = 100.0f - (exceedRatio * (100.0f - autoBrLimit));
+                    stripScale = targetBrightness / 100.0f;
+                }
+                else
+                {
+                    stripScale = (float)stripLimit / (float)stripRequestedCurrent;
+                }
+
+                applyScaleToPhysicalBuffer(phys, stripScale);
+
+                actualCurrent = (uint32_t)(stripRequestedCurrent * stripScale);
+                if (actualCurrent > stripLimit) actualCurrent = stripLimit;
+
+                cacheIt->second.currentMa = actualCurrent;
+                cacheIt->second.loadPercent = stripLimit > 0 ? (uint8_t)((actualCurrent * 100) / stripLimit) : 0;
+            }
+        }
+
+        // Calculate global totals
+        _globalCurrentMa = 0;
+        _globalLimitMa = 0;
+        for (const auto& entry : _stripPowerCache)
+        {
+            _globalCurrentMa += entry.second.currentMa;
+            _globalLimitMa += entry.second.limitMa;
+        }
+        _globalLoadPercent = _globalLimitMa > 0 ? (uint8_t)((_globalCurrentMa * 100) / _globalLimitMa) : 0;
     }
+}
+
+/**
+ * Helper: Apply brightness scale to VirtualStrip buffer
+ * @private
+ */
+void NeoPixelManager::applyScaleToBuffer(VirtualStrip* vstrip, float scale)
+{
+    if (!vstrip || !vstrip->getBuffer()) return;
+
+    uint16_t ledCount = vstrip->getLedCount();
+    uint8_t bytesPerPixel = vstrip->getBytesPerLed();
+    uint8_t* buffer = vstrip->getBuffer();
+
+    // Scale all pixels in this VirtualStrip
+    for (uint16_t i = 0; i < ledCount; i++)
+    {
+        // Use size_t for offset calculation to prevent arithmetic overflow
+        // (i * bytesPerPixel can exceed uint16_t range for large LED counts)
+        size_t offset = (size_t)i * bytesPerPixel;
+
+        // Validate buffer bounds before access
+        size_t bufferSize = vstrip->getBufferSize();
+        if (offset + bytesPerPixel > bufferSize)
+        {
+            logErrorP("NeoPixelManager: Power limiting buffer overflow! LED %u, offset %u, bufferSize %u",
+                      i, (uint32_t)offset, (uint32_t)bufferSize);
+            break; // Skip remaining LEDs for this strip
+        }
+
+        buffer[offset] = (uint8_t)(buffer[offset] * scale);         // R
+        buffer[offset + 1] = (uint8_t)(buffer[offset + 1] * scale); // G
+        buffer[offset + 2] = (uint8_t)(buffer[offset + 2] * scale); // B
+        if (bytesPerPixel >= 4)
+        {
+            buffer[offset + 3] = (uint8_t)(buffer[offset + 3] * scale); // W
+        }
+        if (bytesPerPixel >= 5)
+        {
+            buffer[offset + 4] = (uint8_t)(buffer[offset + 4] * scale); // CW
+        }
+    }
+}
+
+/**
+ * Helper: Apply brightness scale to PhysicalStrip buffer
+ * Used by applyPowerLimit() when working on PhysicalStrip buffers (after syncAll())
+ * @private
+ */
+void NeoPixelManager::applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scale)
+{
+    if (!phys || !phys->getBuffer()) return;
+
+    uint16_t ledCount = phys->getLedCount();
+    uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+    uint8_t* buffer = phys->getBuffer();
+    size_t bufferSize = phys->getBufferSize();
+
+    // Scale all pixels in this PhysicalStrip
+    for (uint16_t i = 0; i < ledCount; i++)
+    {
+        size_t offset = (size_t)i * bytesPerPixel;
+
+        // Validate buffer bounds before access
+        if (offset + bytesPerPixel > bufferSize)
+        {
+            logErrorP("NeoPixelManager: Power limiting buffer overflow on PhysicalStrip! LED %u, offset %u, bufferSize %u",
+                      i, (uint32_t)offset, (uint32_t)bufferSize);
+            break; // Skip remaining LEDs for this strip
+        }
+
+        buffer[offset] = (uint8_t)(buffer[offset] * scale);         // R
+        buffer[offset + 1] = (uint8_t)(buffer[offset + 1] * scale); // G
+        buffer[offset + 2] = (uint8_t)(buffer[offset + 2] * scale); // B
+        if (bytesPerPixel >= 4)
+        {
+            buffer[offset + 3] = (uint8_t)(buffer[offset + 3] * scale); // W
+        }
+        if (bytesPerPixel >= 5)
+        {
+            buffer[offset + 4] = (uint8_t)(buffer[offset + 4] * scale); // CW
+        }
+    }
+}
+
+/**
+ * @brief Rebuild Physical→Virtual mapping table (performance optimization)
+ *
+ * Pre-computes which VirtualStrips use which PhysicalStrips to avoid O(n²) nested loops
+ * in power limiting. Called automatically when mapping becomes dirty (after addStrip/addVirtualStrip).
+ * @private
+ */
+void NeoPixelManager::rebuildPhysToVirtualMapping()
+{
+    _physToVirtualMap.clear();
+
+    // Build mapping: PhysicalStrip → [VirtualStrip1, VirtualStrip2, ...]
+    for (auto vstrip : _virtualStrips)
+    {
+        if (!vstrip) continue;
+
+        // Check all physical strips attached to this virtual strip
+        for (uint16_t i = 0; i < vstrip->getPhysicalStripCount(); i++)
+        {
+            PhysicalStrip* phys = vstrip->getPhysicalStrip(i);
+            if (phys)
+            {
+                _physToVirtualMap[phys].push_back(vstrip);
+            }
+        }
+    }
+
+    _mappingDirty = false;
+    logDebugP("NeoPixelManager: Rebuilt Phys→Virtual mapping (%u physical, %u virtual strips)",
+              _physToVirtualMap.size(), _virtualStrips.size());
 }
 
 /**
  * Sync all VirtualStrips to their PhysicalStrips
  * Handles hardware brightness and dirty flag checking
- * Call this after _applyPowerLimit() and before showAll()
+ * Call this BEFORE applyPowerLimit() and before showAll()
  */
 void NeoPixelManager::syncAll()
 {
     if (!_initialized) return;
 
     // Synchronize all Virtual→Physical buffers with Hardware-Brightness
-    // (AFTER power limiting has been applied to VirtualStrip buffers)
+    // (BEFORE power limiting is applied to PhysicalStrip buffers)
     for (auto segment : _segments)
     {
         if (segment && segment->getVirtualStrip())
@@ -645,7 +1206,7 @@ bool NeoPixelManager::showAll()
                 continue; // Skip wait if show() failed
             }
 
-            // CRITICAL: Wait for this strip to finish before starting next one!
+            // Wait for this strip to finish
             // Timeout: 100ms (sufficient for typical strips up to 1000 LEDs)
             if (!strip->waitForTransfer(100))
             {
@@ -665,11 +1226,16 @@ bool NeoPixelManager::showAll()
 /**
  * Convenience method: PowerLimit + Sync + Show all strips
  * @return true if all strips were successfully updated
+ *
+ * Pipeline:
+ * 1. applyPowerLimit() - ABL on VirtualStrip buffers
+ * 2. syncAll() - VirtualStrip → PhysicalStrip
+ * 3. showAll() - PhysicalStrip → Hardware
  */
 bool NeoPixelManager::updateAll()
 {
-    applyPowerLimit(); // Phase 2: Global power management
-    syncAll();         // Phase 3: VirtualStrip → PhysicalStrip
+    syncAll();         // Phase 2: VirtualStrip → PhysicalStrip (with brightness)
+    applyPowerLimit(); // Phase 3: ABL on PhysicalStrip buffers
     return showAll();  // Phase 4: PhysicalStrip → Hardware
 }
 
@@ -709,7 +1275,8 @@ void NeoPixelManager::update(uint32_t deltaTime)
     updateEffects(deltaTime);
 
     // ========== PHASE 2-4: POWER + SYNC + HARDWARE ==========
-    updateAll();         // Calls: applyPowerLimit() → syncAll() → showAll()
+    updateAll(); // Calls: applyPowerLimit() → syncAll() → showAll()
+
     _lastUpdateTime = 0; // Override timing for non-blocking mode
 }
 
@@ -1067,6 +1634,7 @@ VirtualStrip* NeoPixelManager::addVirtualStrip(uint16_t totalLeds, ColorOrder co
     vstrip->setPowerManager(&_powerManager);
 
     _virtualStrips.push_back(vstrip);
+    _mappingDirty = true; // Mapping needs rebuild
     logDebugP("NeoPixelManager: VirtualStrip added (%u LEDs)", totalLeds);
     return vstrip;
 }
