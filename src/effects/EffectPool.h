@@ -48,6 +48,8 @@ class NoiseEffect;
 class PaletteEffect;
 class LightningEffect;
 class GradientEffect;
+class CandleEffect;
+class CandleMultiEffect;
 
 /**
  * EffectPool - Singleton Pool for all Effect Instances
@@ -84,6 +86,8 @@ class EffectPool
     static Effect* getPalette();
     static Effect* getLightning();
     static Effect* getGradient();
+    static Effect* getCandle();
+    static Effect* getCandleMulti();
     //
     // -----------------------------------------------------------
 

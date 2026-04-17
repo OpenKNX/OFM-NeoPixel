@@ -154,6 +154,11 @@
         #include "GradientEffect.h"
     #endif
 
+    #ifndef NEOPIXEL_DISABLE_CANDLE
+        #include "CandleEffect.h"
+        #include "CandleMultiEffect.h"
+    #endif
+
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 
 // -----------------------------------------------------------
@@ -260,6 +265,11 @@ static LightningEffect* s_lightning = nullptr;
 
     #ifndef NEOPIXEL_DISABLE_GRADIENT
 static GradientEffect* s_gradient = nullptr;
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_CANDLE
+static CandleEffect* s_candle = nullptr;
+static CandleMultiEffect* s_candleMulti = nullptr;
     #endif
 
 #endif // NEOPIXEL_MINIMAL_EFFECTS
@@ -616,6 +626,34 @@ Effect* EffectPool::getGradient()
 }
     #endif
 
+    #ifndef NEOPIXEL_DISABLE_CANDLE
+/**
+ * @brief Get Candle Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getCandle()
+{
+    if (!s_candle)
+    {
+        s_candle = new CandleEffect();
+    }
+    return s_candle;
+}
+
+/**
+ * @brief Get Candle Multi Effect singleton
+ * @return Effect*
+ */
+Effect* EffectPool::getCandleMulti()
+{
+    if (!s_candleMulti)
+    {
+        s_candleMulti = new CandleMultiEffect();
+    }
+    return s_candleMulti;
+}
+    #endif
+
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 // ============================================================================
 // Dynamic Effect Registry
@@ -703,6 +741,9 @@ uint8_t EffectPool::getEffectCount()
     #endif
     #ifndef NEOPIXEL_DISABLE_RGBCCTTEST
     count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_CANDLE
+    count += 2; // Candle + CandleMulti
     #endif
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 
@@ -796,6 +837,10 @@ Effect* EffectPool::getEffectByIndex(uint8_t index)
     #endif
     #ifndef NEOPIXEL_DISABLE_RGBCCTTEST
     if (index == currentIndex++) return getRGBCCTTest();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_CANDLE
+    if (index == currentIndex++) return getCandle();
+    if (index == currentIndex++) return getCandleMulti();
     #endif
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 

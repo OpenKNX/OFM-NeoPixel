@@ -227,6 +227,8 @@ RainbowEffect rainbowEffect;
 | Palette               | ColorFromPalette        | Complete  | Color palette support        |
 | Lightning             | lightning()             | Complete  | Lightning simulation         |
 | Gradient              | fill_gradient()         | Complete  | Gradient fill effect         |
+| Candle                | candle target/fade      | Complete  | Single candle flicker        |
+| CandleMulti           | candle target/fade multi| Complete  | Each LED flickers independently |
 
 ### Original/Extended Effects
 
