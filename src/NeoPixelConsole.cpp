@@ -293,14 +293,23 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     {
         printDetailHelpHeader("Effect Commands");
         openknx.console.printHelpLine("effects", "List all available effects");
-        openknx.console.printHelpLine("effect <s> <eff>", "Assign effect to segment");
+        openknx.console.printHelpLine("effect set <s> <eff>", "Assign effect (ID or name) to segment");
+        openknx.console.printHelpLine("effect stop <s>", "Stop effect on segment");
+        openknx.console.printHelpLine("effect clear <s>", "Remove effect from segment");
+        openknx.console.printHelpLine("effect pause <s>", "Pause effect (freeze current state)");
+        openknx.console.printHelpLine("effect resume <s>", "Resume paused effect");
         openknx.console.printHelpLine("effect config <s>", "Show effect parameters");
         openknx.console.printHelpLine("effect config <s> get <i>", "Get parameter value");
         openknx.console.printHelpLine("effect config <s> set <i> <v>", "Set parameter value");
         openknx.console.printHelpLine("garage <s> <phase>", "GarageDoor: 0=OPENING 1=RUNWAY 2=DONE 3=STOP");
         printDetailHelpSeparator();
-        printDetailHelpParameter("<s>=Segment ID, <eff>=Effect Name, <i>=Parameter Index, <v>=Value");
-        printDetailHelpExample("neo effect 0 rainbow     Assign rainbow effect to segment 0");
+        printDetailHelpParameter("<s>=Segment ID, <eff>=Effect ID or Name (case-insensitive), <i>=Parameter Index, <v>=Value");
+        printDetailHelpExample("neo effect set 0 2       Assign effect by ID (Rainbow=2) to segment 0");
+        printDetailHelpExample("neo effect set 0 rainbow Assign effect by name to segment 0");
+        printDetailHelpExample("neo effect stop 0        Stop effect on segment 0");
+        printDetailHelpExample("neo effect clear 0       Remove effect from segment 0");
+        printDetailHelpExample("neo effect pause 0       Pause effect on segment 0");
+        printDetailHelpExample("neo effect resume 0      Resume effect on segment 0");
         printDetailHelpExample("neo effect config 0      Show all parameters of segment 0 effect");
         printDetailHelpExample("neo effect config 0 set 0 100   Set parameter 0 to value 100");
         printDetailHelpEnd();
@@ -876,7 +885,7 @@ bool NeoPixel::processListCommand()
     if (count == 0)
     {
         openknx.logger.log("No LED strips configured.");
-        openknx.logger.log("  Use 'neo add <gpio_pin> <led_count>' to create one.");
+        openknx.logger.log("  Use 'neo phys add <gpio_pin> <led_count>' to create one.");
     }
     else
     {
@@ -2556,7 +2565,7 @@ bool NeoPixel::processEffectsCommand()
 
     printSectionSeparator();
     openknx.logger.log("");
-    openknx.logger.log("Use 'neo effect <seg> <eff>' to assign");
+    openknx.logger.log("Use 'neo effect set <seg> <id_or_name>' to assign (e.g. 'neo effect set 0 rainbow')");
     openknx.logger.log("Use 'neo garage <seg> <phase>' to control GarageDoor phases");
     openknx.logger.log("  Phases: 0=OPENING, 1=RUNWAY, 2=COMPLETED, 3=STOPPED");
     openknx.logger.log("FastLED effects are battle-tested patterns!");
@@ -2655,13 +2664,13 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
  * @brief Process 'neo effect <str_action> <seg> <eff>' command
  * Assign or control effects on a specific segment
  * str_action values: set, stop, clear, pause, resume
- *     set: assign effect to segment
+ *     set: assign effect to segment (by numeric ID or case-insensitive name)
  *     stop: stop effect (pauses and clears segment)
  *     clear: remove effect from segment
  *     pause: pause effect (freezes current state)
  *     resume: resume paused effect
  * seg: segment ID
- * eff: effect ID
+ * eff: effect ID (numeric) or effect name (case-insensitive)
  */
 bool NeoPixel::processEffectCommand(const std::string& args)
 {
@@ -2671,7 +2680,7 @@ bool NeoPixel::processEffectCommand(const std::string& args)
         return true;
     }
 
-    // Parse arguments: <str_action> <seg_id> <effect_id>
+    // Parse arguments: <str_action> <seg_id> [<effect_id_or_name>]
     // str_action values: set, stop, clear, pause, resume
     std::string action;
     int segId, effId;
@@ -2679,7 +2688,7 @@ bool NeoPixel::processEffectCommand(const std::string& args)
     // Check if help requested or no arguments provided
     if (args.empty() || args.compare("?") == 0)
     {
-        openknx.logger.log("ERROR: Usage: neo effect <seg_id> <effect_id>");
+        openknx.logger.log("ERROR: Usage: neo effect set <seg_id> <effect_id_or_name>");
         openknx.logger.log("Use 'neo effects' to see available effects");
         openknx.logger.log("");
         return true;
@@ -2687,43 +2696,71 @@ bool NeoPixel::processEffectCommand(const std::string& args)
 
     // action and segId are mandatory
     char _action[7] = "";
-    if (sscanf(args.c_str(), "%s %d", _action, &segId) != 2)
+    if (sscanf(args.c_str(), "%6s %d", _action, &segId) != 2)
     {
         openknx.logger.log("ERROR! Action and Segment ID must be provided!");
         return true;
     }
     action = std::string(_action);
 
-    if (action.compare("set") == 0 && sscanf(args.c_str(), "%*s %d %d", &segId, &effId) != 2)
-    {
-        openknx.logger.log("ERROR! Action 'set' requires Segment ID and Effect ID!");
-        return true;
-    }
-
-    auto seg = _manager->getSegment(segId);
-    if (!seg)
-    {
-        openknx.logger.logWithValues("ERROR: Segment [%d] not found!", segId);
-        return true;
-    }
-
-    // we need to check here, if set is the action
-    // if not, we can ignore effId
-    const auto hasEffect = seg->hasEffect();
     if (action.compare("set") == 0)
     {
-        // Get effect dynamically from pool by index
-        Effect* effect = EffectPool::getEffectByIndex(effId);
+        // Try to parse the third argument as a numeric effect ID first
+        char _effArg[64] = "";
+        if (sscanf(args.c_str(), "%*s %*d %63s", _effArg) != 1)
+        {
+            openknx.logger.log("ERROR! Action 'set' requires Segment ID and Effect ID or Name!");
+            return true;
+        }
+
+        // Check if it is a pure integer
+        char* endPtr = nullptr;
+        long parsedId = strtol(_effArg, &endPtr, 10);
+        Effect* effect = nullptr;
+        if (endPtr != _effArg && *endPtr == '\0')
+        {
+            // Numeric ID
+            effId = (int)parsedId;
+            effect = EffectPool::getEffectByIndex(effId);
+        }
+        else
+        {
+            // Name lookup (case-insensitive)
+            std::string effNameLower = std::string(_effArg);
+            for (size_t i = 0; i < effNameLower.size(); i++)
+                effNameLower[i] = (char)tolower((unsigned char)effNameLower[i]);
+            const uint8_t count = EffectPool::getEffectCount();
+            for (uint8_t i = 0; i < count; i++)
+            {
+                Effect* candidate = EffectPool::getEffectByIndex(i);
+                if (!candidate) continue;
+                std::string candidateName = std::string(candidate->getName());
+                for (size_t j = 0; j < candidateName.size(); j++)
+                    candidateName[j] = (char)tolower((unsigned char)candidateName[j]);
+                if (candidateName.compare(effNameLower) == 0)
+                {
+                    effect = candidate;
+                    break;
+                }
+            }
+        }
 
         if (!effect)
         {
-            openknx.logger.logWithValues("ERROR: Effect ID %d not found!", effId);
+            openknx.logger.log("ERROR: Effect '" + std::string(_effArg) + "' not found!");
             openknx.logger.log("       Use 'neo effects' to see available effects");
             return true;
         }
 
+        auto seg = _manager->getSegment(segId);
+        if (!seg)
+        {
+            openknx.logger.logWithValues("ERROR: Segment [%d] not found!", segId);
+            return true;
+        }
+
         // Assign effect to segment, replacing existing one if necessary.
-        if (hasEffect)
+        if (seg->hasEffect())
         {
             openknx.logger.logWithValues("Effect: '%s' is replaced with '%s' to segment [%d]",
                                          seg->getEffect()->getName(),
@@ -2740,9 +2777,20 @@ bool NeoPixel::processEffectCommand(const std::string& args)
         }
         seg->setEffect(effect, true); // Assign new effect and reset parameters
         seg->resume();                // Start effect after assignment
+        return true;
     }
-    else if (action.compare("clear") == 0)
 
+    auto seg = _manager->getSegment(segId);
+    if (!seg)
+    {
+        openknx.logger.logWithValues("ERROR: Segment [%d] not found!", segId);
+        return true;
+    }
+
+    // we need to check here, if set is the action
+    // if not, we can ignore effId
+    const auto hasEffect = seg->hasEffect();
+    if (action.compare("clear") == 0)
     {
         if (!hasEffect)
         {
@@ -2838,7 +2886,7 @@ bool NeoPixel::processGarageCommand(const std::string& args)
     if (!effect)
     {
         openknx.logger.logWithValues("ERROR: Segment [%d] has no effect assigned!", segId);
-        openknx.logger.log("       Use 'neo effect <seg> 9' to assign GarageDoor effect");
+        openknx.logger.log("       Use 'neo effect set <seg> garagedoor' to assign GarageDoor effect");
         return true;
     }
 
@@ -2848,7 +2896,7 @@ bool NeoPixel::processGarageCommand(const std::string& args)
     {
         openknx.logger.logWithValues("ERROR: Segment [%d] does not have GarageDoor effect!", segId);
         openknx.logger.logWithValues("       Current effect: %s", effect->getName());
-        openknx.logger.log("       Use 'neo effect <seg> 9' to assign GarageDoor effect");
+        openknx.logger.log("       Use 'neo effect set <seg> garagedoor' to assign GarageDoor effect");
         return true;
     }
 
