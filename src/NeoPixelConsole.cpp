@@ -548,7 +548,7 @@ bool NeoPixel::processInfoCommand()
     openknx.logger.logWithValues("  DMA Channels:       %d available / %d total", availDMA, totalDMA);
 
 #elif defined(ARDUINO_ARCH_ESP32)
-    // ESP32-S3: RMT Channels
+    // ESP32 variants: RMT channels
     uint availRMT = RMT_NeoPixel_Serial::getAvailableRmtChannels();
     uint totalRMT = RMT_NeoPixel_Serial::getTotalRmtChannels();
 

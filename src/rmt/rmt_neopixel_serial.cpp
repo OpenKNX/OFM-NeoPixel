@@ -60,7 +60,28 @@ static const rmt_symbol_word_t ws2812_reset = {
  */
 static uint get_total_rmt_channels()
 {
-    return 4; // ESP32-S3 has 4 RMT channels
+    #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
+    return 4;
+    #elif defined(CONFIG_IDF_TARGET_ESP32C3)
+    return 2;
+    #else
+    return 8; // ESP32 Original
+    #endif
+}
+
+/**
+ * Check whether RMT DMA should be requested on this target.
+ *
+ * The classic ESP32 does not support RMT DMA. Other variants/framework
+ * combinations may or may not support it, so we still keep a runtime fallback.
+ */
+static bool should_request_rmt_dma()
+{
+    #if defined(CONFIG_IDF_TARGET_ESP32)
+    return false;
+    #else
+    return true;
+    #endif
 }
 
 /**
@@ -210,12 +231,21 @@ bool RMT_NeoPixel_Serial::init()
         .trans_queue_depth = 4,  // 4 transaction queue
         .flags = {
             .invert_out = false,
-            .with_dma = true, // DMA enabled
+            .with_dma = should_request_rmt_dma(),
         }};
 
-    if (rmt_new_tx_channel(&tx_chan_config, &_inst->channel) != ESP_OK)
+    esp_err_t err = rmt_new_tx_channel(&tx_chan_config, &_inst->channel);
+    if (err != ESP_OK && tx_chan_config.flags.with_dma)
     {
-        ESP_LOGE("RMT_NeoPixel", "Failed to create RMT TX channel");
+        ESP_LOGW("RMT_NeoPixel", "RMT DMA unsupported on GPIO %lu, retrying without DMA", (unsigned long)_inst->pin);
+        tx_chan_config.flags.with_dma = false;
+        err = rmt_new_tx_channel(&tx_chan_config, &_inst->channel);
+    }
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE("RMT_NeoPixel", "Failed to create RMT TX channel (err=%d, dma=%s)", err,
+                 tx_chan_config.flags.with_dma ? "on" : "off");
         return false;
     }
 

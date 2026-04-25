@@ -12,8 +12,9 @@
  *
  * Features:
  * - Hardware-precise timing (like PIO, but fewer channels)
- * - DMA for large buffers
  * - Automatic channel allocation
+ * - Optional DMA request on targets/frameworks that support it
+ * - Runtime fallback to non-DMA mode if DMA is unavailable
  * - Support for RGB and RGBW
  */
 
@@ -98,9 +99,9 @@ class RMT_NeoPixel_Serial : public IHardwareDriver
     }
     ColorOrder getColorOrder() const override { return _inst ? _inst->colorOrder : ColorOrder::RGB; }
 
-    // Static Resource Detection Methods (ESP32-S3)
+    // Static resource detection methods (ESP32 variants)
     static uint32_t getAvailableRmtChannels(); // Count available RMT channels
-    static uint32_t getTotalRmtChannels();     // Total RMT channels (4 for ESP32-S3)
+    static uint32_t getTotalRmtChannels();     // Total RMT channels for current ESP32 target
 
   private:
     rmt_neopixel_serial_inst_t* _inst;
