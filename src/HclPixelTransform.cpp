@@ -1,6 +1,4 @@
 #include "HclPixelTransform.h"
-#include "Segment.h"
-#include "HclManager.h"
 #include "LedState.h"
 #include <Arduino.h>
 #include <math.h>
@@ -43,47 +41,36 @@ void HclPixelTransform::Callback(uint16_t pixelIndex,
     const uint8_t segmentIndex = ctx->pixelToSegmentIndex[pixelIndex];
     if (segmentIndex == 0xFF) return; // Pixel doesn't belong to any segment
     
-    Segment* ownerSegment = ctx->segments[segmentIndex];
-    
     // FAST PATH: Check if HCL is enabled for this segment
     if (segmentIndex >= ctx->segmentConfigs.size()) return;
-    const HclSegmentConfig& segCfg = ctx->segmentConfigs[segmentIndex];
+    const NeoHclSegmentConfig& segCfg = ctx->segmentConfigs[segmentIndex];
     
     // FAST PATH: Skip if HCL disabled
-    if (segCfg.hclMode == HclMode::Disabled) return;
+    if (segCfg.hclMode == NeoHclMode::Disabled) return;
     
-    // Determine HCL manager and config (Global vs Custom)
-    HclManager* hclManager;
-    const HclConfig* hclConfig;
+    // Determine LightManager source and config (Global vs Custom)
+    const NeoHclConfig* hclConfig;
     
-    if (segCfg.hclMode == HclMode::Global)
+    if (segCfg.hclMode == NeoHclMode::Global)
     {
-        // Use global HCL manager and configuration
-        hclManager = ctx->globalHclManager;
         hclConfig = &ctx->globalHclConfig;
     }
-    else // HclMode::Custom
+    else // NeoHclMode::Custom
     {
-        // Use segment-specific HCL manager and configuration
-        hclManager = ownerSegment->getHclManager();
         hclConfig = &segCfg.customHclConfig;
     }
     
-    // FAST PATH: No HCL manager available
-    if (!hclManager) return;
-    
-    // FAST PATH: Get Kelvin value (cached in manager, very fast)
-    const uint16_t appliedKelvin = hclManager->getAppliedKelvin();
-    if (appliedKelvin == 0) return; // HCL not initialized yet
-    
-    // PERFORMANCE OPTIMIZATION: Cache Kelvin -> RGB conversion
-    // Kelvin changes rarely (every few minutes) but this callback runs 1000s times/second
-    // Only recalculate if Kelvin changed, then reuse cached RGB values for all pixels
-    if (appliedKelvin != ctx->cachedKelvin)
+    const uint8_t masterNum = hclConfig->resolvedMaster;
+    if (masterNum == 0 || masterNum > ctx->masterStates.size()) return;
+
+    NeoHclMasterState& masterState = ctx->masterStates[masterNum - 1];
+    if (masterState.blocked || masterState.kelvin == 0) return;
+
+    // PERFORMANCE OPTIMIZATION: Cache Kelvin -> RGB conversion per LightManager master.
+    if (masterState.kelvin != masterState.cachedKelvin)
     {
-        // Kelvin changed - recalculate RGB components and cache them
-        kelvinToRGB(appliedKelvin, ctx->cachedKr, ctx->cachedKg, ctx->cachedKb);
-        ctx->cachedKelvin = appliedKelvin;
+        kelvinToRGB(masterState.kelvin, masterState.cachedKr, masterState.cachedKg, masterState.cachedKb);
+        masterState.cachedKelvin = masterState.kelvin;
     }
     
     // PERFORMANCE OPTIMIZATION: Cache reference RGB (6500K) for brightness compensation
@@ -99,7 +86,7 @@ void HclPixelTransform::Callback(uint16_t pixelIndex,
     if (applyMode == 0) // AllColors - always apply, skip saturation calculation
     {
         // Weight is always 255 for AllColors
-        applyToPixelCached(ctx, 255, *hclConfig, r, g, b, ww, cw);
+        applyToPixelCached(ctx, masterState, 255, *hclConfig, r, g, b, ww, cw);
         return;
     }
     
@@ -113,7 +100,7 @@ void HclPixelTransform::Callback(uint16_t pixelIndex,
     if (weight == 0) return; // Skip completely if weight is 0
     
     // Apply HCL transformation to this pixel using cached values from context
-    applyToPixelCached(ctx, weight, *hclConfig, r, g, b, ww, cw);
+    applyToPixelCached(ctx, masterState, weight, *hclConfig, r, g, b, ww, cw);
 }
 
 // ============================================================================
@@ -187,8 +174,9 @@ void HclPixelTransform::kelvinToRGB(uint16_t kelvin, uint8_t& r, uint8_t& g, uin
 }
 
 void HclPixelTransform::applyToPixelCached(HclTransformContext* ctx,
+                                          NeoHclMasterState& masterState,
                                           uint8_t weight,
-                                          const HclConfig& config,
+                                          const NeoHclConfig& config,
                                           uint8_t& r, uint8_t& g, uint8_t& b,
                                           uint8_t* ww,
                                           uint8_t* cw)
@@ -196,10 +184,10 @@ void HclPixelTransform::applyToPixelCached(HclTransformContext* ctx,
     // For RGBCCT (5-channel): Not supported in cached path
     if (ww && cw) return;
     
-    // Use cached Kelvin RGB values from context
-    const uint8_t kr = ctx->cachedKr;
-    const uint8_t kg = ctx->cachedKg;
-    const uint8_t kb = ctx->cachedKb;
+    // Use cached Kelvin RGB values from the selected LightManager master.
+    const uint8_t kr = masterState.cachedKr;
+    const uint8_t kg = masterState.cachedKg;
+    const uint8_t kb = masterState.cachedKb;
     
     // For RGB/RGBW
     const uint8_t wIn = (ww) ? *ww : 0;

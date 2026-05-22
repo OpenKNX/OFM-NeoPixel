@@ -67,10 +67,6 @@ class NeoPixel : public OpenKNX::Module
     // Manager Access
     inline NeoPixelManager* getManager() { return _manager; }
 
-    // Global HCL Manager Access (OAM layer sets this after creation)
-    void setGlobalHclManager(HclManager* hcl) { _globalHclManager = hcl; }
-    HclManager* getGlobalHclManager() const { return _globalHclManager; }
-
     // Quick Access Functions
     inline bool isInitialized() const { return _initialized; }
     inline uint32_t getStripCount() const { return _manager ? _manager->getStripCount() : 0; }
@@ -97,15 +93,14 @@ class NeoPixel : public OpenKNX::Module
     float getActualFps() const;
 
   private:
-    NeoPixelManager* _manager;     // NeoPixel Manager instance
-    HclManager* _globalHclManager; // Global HCL Manager (set by OAM layer)
-    bool _initialized;             // Initialization flag
-    uint32_t _lastUpdateTime;      // Last update timestamp
-    uint32_t _updateInterval;      // Update interval in ms (for auto-update mode)
-    bool _autoUpdate;              // Auto-update mode enabled
-    uint32_t _fpsCounter;          // Frame counter for FPS measurement
-    uint32_t _fpsLastMeasure;      // Last FPS measurement timestamp
-    float _measuredFps;            // Measured FPS (updated every second)
+    NeoPixelManager* _manager; // NeoPixel Manager instance
+    bool _initialized;         // Initialization flag
+    uint32_t _lastUpdateTime;  // Last update timestamp
+    uint32_t _updateInterval;  // Update interval in ms (for auto-update mode)
+    bool _autoUpdate;          // Auto-update mode enabled
+    uint32_t _fpsCounter;      // Frame counter for FPS measurement
+    uint32_t _fpsLastMeasure;  // Last FPS measurement timestamp
+    float _measuredFps;        // Measured FPS (updated every second)
 
     // =============================================================================
     // Console command handlers - Core (always available)
@@ -167,7 +162,6 @@ class NeoPixel : public OpenKNX::Module
     bool processHardwareBrightnessCommand(const std::string& args);
     bool processEffectConfigCommand(const std::string& args);
     bool processPowerCommand(const std::string& args);
-    bool processHclCommand(const std::string& args);
 
     // Console help helper functions
     void printSectionSeparator();

@@ -796,7 +796,7 @@ build_flags =
 
 The library includes configurable limits to prevent memory exhaustion:
 
-- `NEOPIXEL_MAX_PHYSICAL_STRIPS` (default: 6) - Maximum physical LED strips
+- `NEOPIXEL_MAX_PHYSICAL_STRIPS` (default: 8) - Maximum physical LED strips
 - `NEOPIXEL_MAX_VIRTUAL_STRIPS` (default: 12) - Maximum virtual strips
 - `NEOPIXEL_MAX_SEGMENTS` (default: 16) - Maximum segments
 - `NEOPIXEL_ENFORCE_LIMITS` (default: 1) - Enable/disable limit enforcement

@@ -13,7 +13,7 @@
 
 #pragma once
 
-#include "HclManager.h"
+#include <array>
 #include <stdint.h>
 #include <vector>
 
@@ -26,10 +26,49 @@ class Segment;
  * This struct is populated by the OAM layer from ETS parameters
  * and passed to the Library's pixel transformation callback.
  */
-struct HclSegmentConfig
+enum class NeoHclMode : uint8_t
 {
-    HclMode hclMode = HclMode::Disabled; ///< HCL mode for this segment
-    HclConfig customHclConfig;           ///< Custom HCL config (used if hclMode == Custom)
+    Disabled = 0,
+    Global = 1,
+    Custom = 2
+};
+
+enum class NeoHclApplyMode : uint8_t
+{
+    AllColors = 0,
+    WhiteOnly = 1,
+    HighSaturation = 2
+};
+
+struct NeoHclConfig
+{
+    uint8_t lightManagerMaster = 0; ///< ETS-selected LightManager master (0 = disabled)
+    uint8_t resolvedMaster = 0;     ///< Runtime-clamped master number (0 = unavailable)
+    NeoHclApplyMode applyMode = NeoHclApplyMode::AllColors;
+    uint16_t minKelvin = 2700;
+    uint16_t maxKelvin = 6500;
+    uint8_t strength = 100;
+    uint8_t saturationThreshold = 64;
+    uint8_t brightnessCompensation = 100;
+    uint8_t whiteMix = 75;
+    uint8_t preserveCurve = 1;
+};
+
+struct NeoHclSegmentConfig
+{
+    NeoHclMode hclMode = NeoHclMode::Disabled; ///< HCL mode for this segment
+    NeoHclConfig customHclConfig;              ///< Segment-specific LightManager source + apply config
+};
+
+struct NeoHclMasterState
+{
+    uint16_t kelvin = 0;
+    uint8_t brightness = 0;
+    bool blocked = true;
+    uint16_t cachedKelvin = 0;
+    uint8_t cachedKr = 0;
+    uint8_t cachedKg = 0;
+    uint8_t cachedKb = 0;
 };
 
 /**
@@ -42,21 +81,14 @@ struct HclSegmentConfig
 struct HclTransformContext
 {
     std::vector<Segment*> segments;               ///< All segments (for pixel ownership lookup)
-    std::vector<HclSegmentConfig> segmentConfigs; ///< Per-segment HCL configurations
-    HclManager* globalHclManager = nullptr;       ///< Global HCL manager (if enabled)
-    HclConfig globalHclConfig;                    ///< Global HCL configuration
+    std::vector<NeoHclSegmentConfig> segmentConfigs; ///< Per-segment HCL configurations
+    NeoHclConfig globalHclConfig;                    ///< Global LightManager selection + apply config
+    std::array<NeoHclMasterState, 16> masterStates;  ///< LightManager master snapshots (1-based via array index+1)
 
     // Performance optimization: Pixel→Segment Lookup Table
     // Pre-computed at setup to avoid O(n) search on every pixel (8,280x/second!)
     // Maps pixelIndex → segmentIndex in O(1) time
     std::vector<uint8_t> pixelToSegmentIndex; ///< [pixelIndex] = segmentIndex (0xFF = no segment)
-
-    // Performance optimization: Cache Kelvin→RGB conversion
-    // Kelvin changes rarely (every few minutes), but callback is called 1000s of times/second
-    uint16_t cachedKelvin = 0; ///< Last Kelvin value used for RGB calculation
-    uint8_t cachedKr = 0;      ///< Cached red component for current Kelvin
-    uint8_t cachedKg = 0;      ///< Cached green component for current Kelvin
-    uint8_t cachedKb = 0;      ///< Cached blue component for current Kelvin
 
     // Performance optimization: Cache reference RGB (6500K) for brightness compensation
     // This is constant and only needs to be calculated once
@@ -110,8 +142,9 @@ class HclPixelTransform
      * @param cw Pixel cool white (in/out, nullable)
      */
     static void applyToPixelCached(HclTransformContext* ctx,
+                                   NeoHclMasterState& masterState,
                                    uint8_t weight,
-                                   const HclConfig& config,
+                                   const NeoHclConfig& config,
                                    uint8_t& r, uint8_t& g, uint8_t& b,
                                    uint8_t* ww, uint8_t* cw);
 

@@ -23,8 +23,7 @@ NeoPixel::NeoPixel()
       _autoUpdate(false),
       _fpsCounter(0),
       _fpsLastMeasure(0),
-      _measuredFps(0.0f),
-      _globalHclManager(nullptr)
+      _measuredFps(0.0f)
 {
     // Initialize performance tracking (always available)
     g_perfTracker.reset();

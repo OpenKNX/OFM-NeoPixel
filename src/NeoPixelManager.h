@@ -240,22 +240,6 @@ class NeoPixelManager
         loadPercent = _globalLoadPercent;
     }
 
-    // ====================================================================
-    // Global HCL Management
-    // ====================================================================
-
-    /**
-     * @brief Set global HCL manager (used by segments with HclMode::Global)
-     * @param manager HCL manager instance (ownership transferred)
-     */
-    void setGlobalHclManager(HclManager* manager);
-
-    /**
-     * @brief Get global HCL manager
-     * @return Pointer to global HCL manager (nullptr if not set)
-     */
-    HclManager* getGlobalHclManager() { return _globalHclManager; }
-
     /**
      * @brief Get power statistics for a specific PhysicalStrip
      * @param strip Physical strip pointer
@@ -286,7 +270,6 @@ class NeoPixelManager
     uint32_t _updateCount;                     // Number of updates since start
     uint32_t _errorCount;                      // Error counter
     PowerManager _powerManager;                // Power/Current management
-    HclManager* _globalHclManager;             // Global HCL manager (nullptr if not used)
 
     // Power monitoring cache (per-strip values for PER_CHANNEL mode)
     struct StripPowerStats

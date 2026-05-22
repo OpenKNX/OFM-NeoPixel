@@ -36,13 +36,6 @@ NeoPixelManager::NeoPixelManager()
  */
 NeoPixelManager::~NeoPixelManager()
 {
-    // Delete global HCL manager if owned
-    if (_globalHclManager)
-    {
-        delete _globalHclManager;
-        _globalHclManager = nullptr;
-    }
-
     // Lösche alle Strips
     for (auto strip : _strips)
     {
@@ -52,22 +45,6 @@ NeoPixelManager::~NeoPixelManager()
         }
     }
     _strips.clear();
-}
-
-/**
- * @brief Set global HCL manager (takes ownership)
- * @param manager HCL manager instance (will be deleted by NeoPixelManager)
- */
-void NeoPixelManager::setGlobalHclManager(HclManager* manager)
-{
-    // Delete old manager if exists
-    if (_globalHclManager)
-    {
-        delete _globalHclManager;
-    }
-
-    _globalHclManager = manager;
-    logDebugP("NeoPixelManager: Global HCL manager %s", manager ? "set" : "cleared");
 }
 
 // =====================================================================

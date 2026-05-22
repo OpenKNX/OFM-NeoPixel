@@ -27,7 +27,6 @@
  *   vstrip->show();           // Send all pixels
  */
 
-#include "HclManager.h"
 #include "LedState.h"
 #include "VirtualStrip.h"
 #include <stdint.h>
@@ -262,34 +261,6 @@ class Segment
     void setHardwareBrightness(uint8_t brightness) { _config.hardwareBrightness = brightness; }
     uint8_t getHardwareBrightness() const { return _config.hardwareBrightness; }
 
-    // ====================================================================
-    // HCL (Human Centric Lighting) Management
-    // ====================================================================
-
-    /**
-     * @brief Get HCL manager for this segment
-     * @return Pointer to HCL manager (nullptr if HCL disabled)
-     */
-    HclManager* getHclManager() { return _hclManager; }
-
-    /**
-     * @brief Set HCL manager for this segment
-     * @param manager HCL manager instance (ownership transferred)
-     */
-    void setHclManager(HclManager* manager);
-
-    /**
-     * @brief Check if HCL is enabled for this segment
-     * @return true if HCL manager exists and is active
-     */
-    bool hasHcl() const { return _hclManager != nullptr && _hclManager->isActive(); }
-
-    /**
-     * @brief Get current HCL Kelvin value
-     * @return Color temperature in Kelvin (0 if HCL disabled)
-     */
-    uint16_t getHclKelvin() const { return _hclManager ? _hclManager->getAppliedKelvin() : 0; }
-
   private:
     VirtualStrip* _virtualStrip; // Belongs to this virtual strip
     uint16_t _startLed;          // Start LED in virtual strip
@@ -307,7 +278,6 @@ class Segment
     LedState _ledState;          // State machine (IDLE, RUNNING, etc)
     EffectConfig _config;        // Effect configuration (~40 bytes)
     EffectState _state;          // Effect runtime variables (~12 bytes)
-    HclManager* _hclManager;     // HCL curve manager (nullptr if disabled)
 
     // Helper: Recalculate virtual length based on grouping/spacing
     void recalculateVirtualLength();
