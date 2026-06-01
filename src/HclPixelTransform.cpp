@@ -5,15 +5,15 @@
 
 /**
  * @brief HCL pixel transformation callback for VirtualStrip
- * 
+ *
  * This callback is called by VirtualStrip during syncToPhysical() for each pixel.
  * It applies HCL color temperature adjustment based on the segment's HCL configuration.
- * 
+ *
  * PERFORMANCE CRITICAL: Called for EVERY pixel on EVERY frame!
  * - Optimized for minimal CPU usage
  * - Early returns to avoid unnecessary work
  * - Direct segment lookup (segments store start/length)
- * 
+ *
  * @param pixelIndex Index of the pixel being processed
  * @param r Red component (in/out)
  * @param g Green component (in/out)
@@ -22,35 +22,35 @@
  * @param cw Cool White component (in/out, nullptr for RGB/RGBW strips)
  * @param userData Pointer to HclTransformContext
  */
-void HclPixelTransform::Callback(uint16_t pixelIndex, 
-                               uint8_t& r, uint8_t& g, uint8_t& b, 
-                               uint8_t* ww, uint8_t* cw, 
-                               void* userData)
+void HclPixelTransform::Callback(uint16_t pixelIndex,
+                                 uint8_t& r, uint8_t& g, uint8_t& b,
+                                 uint8_t* ww, uint8_t* cw,
+                                 void* userData)
 {
     // FAST PATH: Early return if no context
     if (!userData) return;
-    
+
     HclTransformContext* ctx = static_cast<HclTransformContext*>(userData);
-    
+
     // FAST PATH: Early return if no segments configured
     const size_t segCount = ctx->segments.size();
     if (segCount == 0) return;
-    
+
     if (pixelIndex >= ctx->pixelToSegmentIndex.size()) return; // Out of range
-    
+
     const uint8_t segmentIndex = ctx->pixelToSegmentIndex[pixelIndex];
     if (segmentIndex == 0xFF) return; // Pixel doesn't belong to any segment
-    
+
     // FAST PATH: Check if HCL is enabled for this segment
     if (segmentIndex >= ctx->segmentConfigs.size()) return;
     const NeoHclSegmentConfig& segCfg = ctx->segmentConfigs[segmentIndex];
-    
+
     // FAST PATH: Skip if HCL disabled
     if (segCfg.hclMode == NeoHclMode::Disabled) return;
-    
+
     // Determine LightManager source and config (Global vs Custom)
     const NeoHclConfig* hclConfig;
-    
+
     if (segCfg.hclMode == NeoHclMode::Global)
     {
         hclConfig = &ctx->globalHclConfig;
@@ -59,7 +59,7 @@ void HclPixelTransform::Callback(uint16_t pixelIndex,
     {
         hclConfig = &segCfg.customHclConfig;
     }
-    
+
     const uint8_t masterNum = hclConfig->resolvedMaster;
     if (masterNum == 0 || masterNum > ctx->masterStates.size()) return;
 
@@ -72,7 +72,7 @@ void HclPixelTransform::Callback(uint16_t pixelIndex,
         kelvinToRGB(masterState.kelvin, masterState.cachedKr, masterState.cachedKg, masterState.cachedKb);
         masterState.cachedKelvin = masterState.kelvin;
     }
-    
+
     // PERFORMANCE OPTIMIZATION: Cache reference RGB (6500K) for brightness compensation
     // This is constant and only needs to be calculated ONCE
     if (!ctx->refCached)
@@ -80,27 +80,29 @@ void HclPixelTransform::Callback(uint16_t pixelIndex,
         kelvinToRGB(6500, ctx->cachedRefR, ctx->cachedRefG, ctx->cachedRefB);
         ctx->refCached = true;
     }
-    
+
     // FAST PATH: Early exit for AllColors mode (saturation doesn't matter)
     const uint8_t applyMode = static_cast<uint8_t>(hclConfig->applyMode);
-    if (applyMode == 0) // AllColors - always apply, skip saturation calculation
+    uint8_t weight = 255;
+    if (applyMode == 1) // AllColors - always apply, skip saturation calculation
     {
-        // Weight is always 255 for AllColors
-        applyToPixelCached(ctx, masterState, 255, *hclConfig, r, g, b, ww, cw);
-        return;
+        applyToPixelCached(ctx, masterState, weight, *hclConfig, r, g, b, ww, cw);
     }
-    
-    // For WhiteOnly and HighSaturation modes: Calculate saturation
-    const uint8_t vmax = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
-    const uint8_t vmin = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
-    const uint8_t sat = (vmax == 0) ? 0 : (uint8_t)(((uint16_t)(vmax - vmin) * 255u) / vmax);
-    
-    // Check if we should apply HCL based on saturation and mode
-    const uint8_t weight = hclWeightFromSat(applyMode, sat, hclConfig->saturationThreshold);
-    if (weight == 0) return; // Skip completely if weight is 0
-    
-    // Apply HCL transformation to this pixel using cached values from context
-    applyToPixelCached(ctx, masterState, weight, *hclConfig, r, g, b, ww, cw);
+
+    else
+    {
+        // For WhiteOnly and HighSaturation modes: Calculate saturation
+        const uint8_t vmax = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
+        const uint8_t vmin = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
+        const uint8_t sat = (vmax == 0) ? 0 : (uint8_t)(((uint16_t)(vmax - vmin) * 255u) / vmax);
+
+        // Check if we should apply HCL based on saturation and mode
+        weight = hclWeightFromSat(applyMode, sat, hclConfig->saturationThreshold);
+        if (weight == 0) return;
+
+        // Apply HCL transformation to this pixel using cached values from context
+        applyToPixelCached(ctx, masterState, weight, *hclConfig, r, g, b, ww, cw);
+    }
 }
 
 // ============================================================================
@@ -174,43 +176,43 @@ void HclPixelTransform::kelvinToRGB(uint16_t kelvin, uint8_t& r, uint8_t& g, uin
 }
 
 void HclPixelTransform::applyToPixelCached(HclTransformContext* ctx,
-                                          NeoHclMasterState& masterState,
-                                          uint8_t weight,
-                                          const NeoHclConfig& config,
-                                          uint8_t& r, uint8_t& g, uint8_t& b,
-                                          uint8_t* ww,
-                                          uint8_t* cw)
+                                           NeoHclMasterState& masterState,
+                                           uint8_t weight,
+                                           const NeoHclConfig& config,
+                                           uint8_t& r, uint8_t& g, uint8_t& b,
+                                           uint8_t* ww,
+                                           uint8_t* cw)
 {
     // For RGBCCT (5-channel): Not supported in cached path
     if (ww && cw) return;
-    
+
     // Use cached Kelvin RGB values from the selected LightManager master.
     const uint8_t kr = masterState.cachedKr;
     const uint8_t kg = masterState.cachedKg;
     const uint8_t kb = masterState.cachedKb;
-    
+
     // For RGB/RGBW
     const uint8_t wIn = (ww) ? *ww : 0;
-    
+
     // Weight is already calculated by caller (includes saturation + curve)
     if (weight == 0) return;
-    
+
     uint8_t strength = (config.strength > 100) ? 100 : config.strength;
     uint16_t wFrac16 = (uint16_t)weight * (uint16_t)strength;
     uint8_t frac = (uint8_t)((wFrac16 + 50u) / 100u);
-    
+
     if (frac == 0) return;
-    
+
     // Use current pixel value/brightness basis
     const uint8_t vmax = u8_max3(r, g, b);
     uint8_t v = vmax;
     if (wIn > v) v = wIn;
-    
+
     int tr = ((int)kr * (int)v) / 255;
     int tg = ((int)kg * (int)v) / 255;
     int tb = ((int)kb * (int)v) / 255;
     int tw = 0;
-    
+
     // Brightness compensation using CACHED reference RGB (6500K)
     if (config.brightnessCompensation > 0)
     {
@@ -221,16 +223,16 @@ void HclPixelTransform::applyToPixelCached(HclTransformContext* ctx,
         {
             uint32_t scaleQ8 = (yRef << 8) / yKel;
             scaleQ8 = constrain(scaleQ8, 128u, 512u);
-            
+
             int32_t delta = (int32_t)scaleQ8 - 256;
             scaleQ8 = (uint32_t)(256 + (delta * config.brightnessCompensation) / 100);
-            
+
             tr = (int)((tr * (int)scaleQ8 + 128) >> 8);
             tg = (int)((tg * (int)scaleQ8 + 128) >> 8);
             tb = (int)((tb * (int)scaleQ8 + 128) >> 8);
         }
     }
-    
+
     // RGBW: extract neutral part into W
     if (ww)
     {
@@ -242,7 +244,7 @@ void HclPixelTransform::applyToPixelCached(HclTransformContext* ctx,
         tb -= extracted;
         tw = extracted;
     }
-    
+
     r = lerp_u8(r, clamp_u8(tr), frac);
     g = lerp_u8(g, clamp_u8(tg), frac);
     b = lerp_u8(b, clamp_u8(tb), frac);

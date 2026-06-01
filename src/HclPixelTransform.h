@@ -3,13 +3,13 @@
  * @brief HCL Pixel Transformation Callback for VirtualStrip
  *
  * Provides VirtualStrip pixel transform callback that applies HCL color temperature
- * adjustments to individual pixels based on segment configuration. 
- * This allows HCL effects to be applied at the pixel level, supporting RGB, 
- * RGBW and RGBCCT strips. The transformation is optimized for performance, 
+ * adjustments to individual pixels based on segment configuration.
+ * This allows HCL effects to be applied at the pixel level, supporting RGB,
+ * RGBW and RGBCCT strips. The transformation is optimized for performance,
  * with early exits and caching to minimize CPU usage during rendering.
  *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
-*/
+ */
 
 #pragma once
 
@@ -35,8 +35,8 @@ enum class NeoHclMode : uint8_t
 
 enum class NeoHclApplyMode : uint8_t
 {
-    AllColors = 0,
-    WhiteOnly = 1,
+    WhiteOnly = 0,
+    AllColors = 1,
     HighSaturation = 2
 };
 
@@ -44,7 +44,7 @@ struct NeoHclConfig
 {
     uint8_t lightManagerMaster = 0; ///< ETS-selected LightManager master (0 = disabled)
     uint8_t resolvedMaster = 0;     ///< Runtime-clamped master number (0 = unavailable)
-    NeoHclApplyMode applyMode = NeoHclApplyMode::AllColors;
+    NeoHclApplyMode applyMode = NeoHclApplyMode::WhiteOnly;
     uint16_t minKelvin = 2700;
     uint16_t maxKelvin = 6500;
     uint8_t strength = 100;
@@ -80,7 +80,7 @@ struct NeoHclMasterState
  */
 struct HclTransformContext
 {
-    std::vector<Segment*> segments;               ///< All segments (for pixel ownership lookup)
+    std::vector<Segment*> segments;                  ///< All segments (for pixel ownership lookup)
     std::vector<NeoHclSegmentConfig> segmentConfigs; ///< Per-segment HCL configurations
     NeoHclConfig globalHclConfig;                    ///< Global LightManager selection + apply config
     std::array<NeoHclMasterState, 16> masterStates;  ///< LightManager master snapshots (1-based via array index+1)
@@ -110,7 +110,7 @@ class HclPixelTransform
     /**
      * @brief Calculate HCL blend weight from saturation
      *
-     * @param applyMode HCL apply mode (0=AllColors, 1=WhiteOnly, 2=HighSaturation)
+     * @param applyMode HCL apply mode (0=WhiteOnly, 1=AllColors, 2=HighSaturation)
      * @param sat Current pixel saturation (0-255)
      * @param threshold Saturation threshold from config
      * @return uint8_t Weight (0-255), 0 means skip HCL completely
@@ -206,7 +206,7 @@ class HclPixelTransform
     {
         uint32_t w = 0;
 
-        if (applyMode == 1) // WhiteOnly
+        if (applyMode == 0) // WhiteOnly
         {
             // Only low-saturation (whitish) colors get HCL
             if (threshold == 0)
@@ -219,7 +219,7 @@ class HclPixelTransform
                 w = 255u - ((uint32_t)sat * 255u) / threshold;
             }
         }
-        else if (applyMode == 0) // AllColors
+        else if (applyMode == 1) // AllColors
         {
             // ALL colors get HCL, regardless of saturation
             w = 255u;
