@@ -44,5 +44,10 @@ enum class TimingMode : uint8_t
     FAST_10PCT = 7, ///< 880 kHz (1.10x)
     FAST_15PCT = 8, ///< 920 kHz (1.15x)
     FAST_20PCT = 9, ///< 960 kHz (1.20x)
-    FAST_25PCT = 10 ///< 1000 kHz (1.25x) - Maximum safe overclock
+    FAST_25PCT = 10, ///< 1000 kHz (1.25x) - Maximum safe overclock
+
+    // Custom timing: T1H (and derived values) are taken from SerialStripConfig
+    // PIO:  clkdiv is derived from T1H (fixed 3:7:6:4 PIO cycle ratio applies)
+    // RMT:  T0H/T0L/T1H/T1L are applied independently to the RMT encoder symbols
+    CUSTOM = 11 ///< Custom timing — set via setCustomTiming() / SerialStripConfig
 };

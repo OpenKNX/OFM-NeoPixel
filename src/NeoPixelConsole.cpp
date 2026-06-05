@@ -45,6 +45,26 @@
 // External performance tracker (defined in NeoPixel.cpp)!!
 extern PerformanceTracker g_perfTracker;
 
+#include "NeoPixelTimingScan.h"
+
+// ============================================================================
+// Clone Timing Profiles (definition — declared extern in NeoPixelTimingScan.h)
+// ============================================================================
+const CloneTimingProfile kCloneProfiles[] = {
+
+    // idx  name            mode               reset  R    G    B    description
+    { "STANDARD",    TimingMode::AUTO,       50,    255,   0,   0, "800kHz, 50µs reset (WS2812B default)" },
+    { "SK6812_STD",  TimingMode::AUTO,       80,      0, 255,   0, "800kHz, 80µs reset (SK6812 default)" },
+    { "SLOW_RESET",  TimingMode::AUTO,      280,      0,   0, 255, "800kHz, 280µs reset (clone long-reset)" },
+    { "SLOW10",      TimingMode::SLOW_10PCT, 80,    255, 255,   0, "720kHz, 80µs  (weak signal chain)" },
+    { "SLOW10_LONG", TimingMode::SLOW_10PCT,280,      0, 255, 255, "720kHz, 280µs (weak chain + long reset)" },
+    { "SLOW20_LONG", TimingMode::SLOW_20PCT,300,    255,   0, 255, "640kHz, 300µs (extreme / WS2811-like)" },
+};
+const uint8_t  kCloneProfileCount   = sizeof(kCloneProfiles) / sizeof(kCloneProfiles[0]);
+const uint32_t kScanColorDurationMs = 2000;  ///< Show each profile for 2 s before prompting
+const uint32_t kScanPauseDurationMs = 300;   ///< Brief blank gap between profiles (ms)
+const uint32_t kScanWaitTimeoutMs   = 10000; ///< Auto-advance if no input after 10 s
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -103,6 +123,14 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     if (diagnose)
     {
         return false;
+    }
+
+    // Scan control: intercept next/apply/stop while a qualify scan is active
+    if (_scanPhase != ScanPhase::IDLE)
+    {
+        if (command == "neo scan next"  || command == "neo qualify next")  return processScanControlCommand("next");
+        if (command == "neo scan apply" || command == "neo qualify apply") return processScanControlCommand("apply");
+        if (command == "neo scan stop"  || command == "neo qualify stop")  return processScanControlCommand("stop");
     }
 
     // Check if command starts with "neo"
@@ -192,10 +220,21 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("add <gpio> <n> [type]", "1-Wire: ws2812b|sk6812 (default: ws2812b)");
         openknx.console.printHelpLine("add <clk> <n> apa102 <data>", "SPI: APA102 (CLK + DATA pins)");
         openknx.console.printHelpLine("del <i>", "Delete physical strip by ID");
-        openknx.console.printHelpLine("timings", "List all available timing modes");
+        openknx.console.printHelpLine("timings", "List all available timing modes + clone profiles");
         openknx.console.printHelpLine("timing <i>", "Show current timing mode for strip");
         openknx.console.printHelpLine("timing <i> <mode>", "Set timing (auto|legacy|slow5-20|fast5-25)");
         openknx.console.printHelpLine("timing <i> info", "Show detailed timing information");
+        openknx.console.printHelpLine("timing <i> custom <t0h> <t0l> <t1h> <t1l>", "Set custom timing in ns");
+        openknx.console.printHelpLine("timing <i> reset",    "Revert to AUTO timing");
+        openknx.console.printHelpLine("timing <i> qualify",   "Clone qualify: full strip, interactive (next/apply/stop)");
+        openknx.console.printHelpLine("timing <i> scan",      "Alias for 'qualify'");
+        openknx.console.printHelpLine("neo scan next",        "  During qualify: advance to next profile");
+        openknx.console.printHelpLine("neo scan apply",       "  During qualify: save current profile & finish");
+        openknx.console.printHelpLine("neo scan stop",        "  During qualify: abort, restore original timing");
+        openknx.console.printHelpLine("timing <i> profile <N>", "Apply & persist clone profile N (see 'timings')");
+        openknx.console.printHelpLine("timing <i> tune",              "[EXPERT] Enter live-tuner for strip i");
+        openknx.console.printHelpLine("timing <i> tune t1h +50",      "  Adjust param while tuner is open");
+        openknx.console.printHelpLine("timing <i> tune show/save/abort", "  Status / persist / restore");
         openknx.console.printHelpLine("config <i> info", "Show config (SPI: APA102/SK9822, Serial: WS2812B/SK6812)");
         openknx.console.printHelpLine("config <i> dummy <0-2>", "Set dummy LED mode (SPI only, 0=none, 1=physical, 2=virtual)");
         openknx.console.printHelpLine("config <i> frames <start> <end>", "Set frame counts (SPI only, start: 1-8, end: 1-80)");
@@ -210,6 +249,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("config <i> skipmask clear", "Clear skip mask and free memory");
         openknx.console.printHelpLine("config <i> skipmask set <idx> <0|1>", "Enable (0) or skip (1) individual LED");
         openknx.console.printHelpLine("config <i> skipmask list", "List all skipped LEDs");
+        openknx.console.printHelpLine("config <i> levelshifter <none|txs0108|hct125|ahct125>", "Set level-shifter type (applies GPIO optimizations)");
         printDetailHelpSeparator();
         printDetailHelpParameter("<i>=ID/Index, <n>=LED Count, <gpio>=Pin, <clk>=Clock Pin, <data>=Data Pin");
         printDetailHelpExample("neo phys add 22 64 ws2812b     Create 1-Wire strip on GPIO22 with 64 LEDs");
@@ -220,6 +260,9 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         printDetailHelpExample("neo phys config 0 skipfirst 1  Skip LED#0 (dummy LED)");
         printDetailHelpExample("neo phys config 0 skipmask init Init mask, then set individual LEDs");
         printDetailHelpExample("neo phys config 0 skipmask set 5 1 Mark LED#5 as defective (skip)");
+        printDetailHelpExample("neo phys config 0 levelshifter txs0108  Enable TXS0108E GPIO optimizations (KNeoPiX)");
+        printDetailHelpExample("neo phys config 0 levelshifter hct125   Identify 74HCT125 buffer (no GPIO change)");
+        printDetailHelpExample("neo phys config 0 levelshifter ahct125  Identify 74AHCT125 buffer (no GPIO change)");
         printDetailHelpEnd();
         return true;
     }
@@ -537,7 +580,7 @@ bool NeoPixel::processInfoCommand()
     openknx.logger.logWithValues("  DMA Channels:       %d available / %d total", availDMA, totalDMA);
 
 #elif defined(ARDUINO_ARCH_ESP32)
-    // ESP32 variants: RMT channels
+    // ESP32 (all variants): RMT Channels
     uint availRMT = RMT_NeoPixel_Serial::getAvailableRmtChannels();
     uint totalRMT = RMT_NeoPixel_Serial::getTotalRmtChannels();
 
@@ -3173,12 +3216,16 @@ bool NeoPixel::processPowerCommand(const std::string& args)
         if (profile == LedProfiles::WS2812B) profileName = "WS2812B";
         else if (profile == LedProfiles::SK6812_RGBW)
             profileName = "SK6812 RGBW";
+        else if (profile == LedProfiles::SK6812_RGBCCT)
+            profileName = "SK6812 RGBCCT";
         else if (profile == LedProfiles::APA102)
             profileName = "APA102";
         else if (profile == LedProfiles::CONSERVATIVE)
             profileName = "CONSERVATIVE";
+        else if (profile == LedProfiles::CONSERVATIVE_5CH)
+            profileName = "CONSERVATIVE 5CH";
 
-        openknx.logger.logWithValues("LED Profile:      %s (R:%umA G:%umA B:%umA W:%umA)",
+        openknx.logger.logWithValues("LED Profile:      %s (R:%umA G:%umA B:%umA WW:%umA CW:%umA)",
                                      profileName, profile.redMA, profile.greenMA,
                                      profile.blueMA, profile.warmWhiteMA, profile.coolWhiteMA);
 
@@ -3446,6 +3493,16 @@ bool NeoPixel::processPowerCommand(const std::string& args)
                 profile = LedProfiles::SK6812_RGBW;
                 found = true;
             }
+            else if (profileStr == "sk6812_rgbcct")
+            {
+                profile = LedProfiles::SK6812_RGBCCT;
+                found = true;
+            }
+            else if (profileStr == "ws2805_rgbcct" || profileStr == "ws2814_rgbcct")
+            {
+                profile = LedProfiles::SK6812_RGBCCT;
+                found = true;
+            }
             else if (profileStr == "apa102")
             {
                 profile = LedProfiles::APA102;
@@ -3456,10 +3513,15 @@ bool NeoPixel::processPowerCommand(const std::string& args)
                 profile = LedProfiles::CONSERVATIVE;
                 found = true;
             }
+            else if (profileStr == "conservative_5ch")
+            {
+                profile = LedProfiles::CONSERVATIVE_5CH;
+                found = true;
+            }
 
             if (!found)
             {
-                openknx.logger.log("[ERROR] Unknown profile. Use: ws2812b|sk6812|apa102|conservative");
+                openknx.logger.log("[ERROR] Unknown profile. Use: ws2812b|sk6812|sk6812_rgbcct|apa102|conservative|conservative_5ch");
                 openknx.logger.end();
                 return false;
             }
@@ -3530,6 +3592,16 @@ bool NeoPixel::processPowerCommand(const std::string& args)
             profile = LedProfiles::SK6812_RGBW;
             found = true;
         }
+        else if (profileStr == "sk6812_rgbcct")
+        {
+            profile = LedProfiles::SK6812_RGBCCT;
+            found = true;
+        }
+        else if (profileStr == "ws2805_rgbcct" || profileStr == "ws2814_rgbcct")
+        {
+            profile = LedProfiles::SK6812_RGBCCT;
+            found = true;
+        }
         else if (profileStr == "apa102")
         {
             profile = LedProfiles::APA102;
@@ -3540,10 +3612,15 @@ bool NeoPixel::processPowerCommand(const std::string& args)
             profile = LedProfiles::CONSERVATIVE;
             found = true;
         }
+        else if (profileStr == "conservative_5ch")
+        {
+            profile = LedProfiles::CONSERVATIVE_5CH;
+            found = true;
+        }
 
         if (!found)
         {
-            openknx.logger.log("[ERROR] Unknown profile. Use: ws2812b|sk6812|apa102|conservative");
+            openknx.logger.log("[ERROR] Unknown profile. Use: ws2812b|sk6812|sk6812_rgbcct|apa102|conservative|conservative_5ch");
             openknx.logger.end();
             return false;
         }
@@ -3689,6 +3766,7 @@ const char* NeoPixel::getTimingModeName(TimingMode mode)
         case TimingMode::FAST_15PCT: return "FAST_15PCT";
         case TimingMode::FAST_20PCT: return "FAST_20PCT";
         case TimingMode::FAST_25PCT: return "FAST_25PCT";
+        case TimingMode::CUSTOM: return "CUSTOM";
         default: return "UNKNOWN";
     }
 }
@@ -3747,8 +3825,10 @@ bool NeoPixel::processPhysTimingsCommand()
     openknx.logger.log(" 8 │ FAST_15PCT      │ 920 kHz        │ +15%");
     openknx.logger.log(" 9 │ FAST_20PCT      │ 960 kHz        │ +20%");
     openknx.logger.log("10 │ FAST_25PCT      │ 1000 kHz       │ +25% maximum");
+    openknx.logger.log("11 │ CUSTOM          │ user-defined   │ Custom T0H/T0L/T1H/T1L");
     openknx.logger.log("");
     openknx.logger.log("* LEGACY mode uses fixed clkdiv, actual bitrate depends on CPU frequency");
+    openknx.logger.log("  CUSTOM: PIO derives clkdiv from T1H (fixed 3:7:6:4 ratio); RMT applies all 4 values independently");
     openknx.logger.log("");
 
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
@@ -3759,6 +3839,52 @@ bool NeoPixel::processPhysTimingsCommand()
     openknx.logger.log("  neo phys timing 0 legacy      -> Set to AUTO_LEGACY");
     openknx.logger.log("  neo phys timing 0 fast25      -> Set to FAST_25PCT (1 MHz)");
     openknx.logger.log("  neo phys timing 0 info        -> Detailed timing information");
+    openknx.logger.log("  neo phys timing 0 custom 300 900 800 600     -> Custom timing (ns): T0H T0L T1H T1L");
+    openknx.logger.log("  neo phys timing 0 custom 300 900 800 600 80  -> Custom timing + reset time (µs)");
+    openknx.logger.log("  neo phys timing 0 reset       -> Revert to AUTO timing");
+    openknx.logger.log("  neo phys timing 0 qualify     -> Interactive clone qualify (full strip, input-driven)");
+    openknx.logger.log("  neo phys timing 0 scan        -> Alias for 'qualify'");
+    openknx.logger.log("  neo phys timing 0 profile <N> -> Apply & persist a clone profile");
+    openknx.logger.log("  (during qualify): neo scan next | neo scan apply | neo scan stop");
+    openknx.logger.log("");
+    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+    openknx.logger.log("[EXPERT] Clone Live-Tuner — manual timing adjustment:");
+    openknx.logger.color(0);
+    openknx.logger.log("  NeoPixel 1-wire protocol — what T0H/T1H etc. mean:");
+    openknx.logger.log("    T0H / T0L = HIGH / LOW duration for a '0' bit (ns)");
+    openknx.logger.log("    T1H / T1L = HIGH / LOW duration for a '1' bit (ns)");
+    openknx.logger.log("    Reset     = min. LOW pause between frames (µs)");
+    openknx.logger.log("  RP2040/RP2350 (PIO): fixed 3:7:6:4 ratio; only T1H sets bitrate.");
+    openknx.logger.log("  ESP32 (RMT):         all four values applied independently.");
+    openknx.logger.log("");
+    openknx.logger.log("  [EXPERT] Live-Tuner — strip ID always part of every command:");
+    openknx.logger.log("    neo phys timing 0 tune           -> enter tuner on strip 0 (lights white)");
+    openknx.logger.log("    neo phys timing 0 tune t1h +50   -> reduce bitrate ~8% (RP2040: start here)");
+    openknx.logger.log("    neo phys timing 0 tune reset 280 -> fix strips where only 1-5 LEDs react");
+    openknx.logger.log("    neo phys timing 0 tune t0h 350   -> (ESP32) adjust 0-bit high time");
+    openknx.logger.log("    neo phys timing 1 tune t1h +50   -> tune strip 1 simultaneously");
+    openknx.logger.log("    neo phys timing 0 tune show      -> show current values for strip 0");
+    openknx.logger.log("    neo phys timing 0 tune save      -> persist to flash & exit strip 0");
+    openknx.logger.log("    neo phys timing 0 tune done      -> keep timing, exit (no flash write)");
+    openknx.logger.log("    neo phys timing 0 tune abort     -> restore original timing & exit");
+
+    openknx.logger.log("");
+    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+    openknx.logger.log("Clone Profiles (for non-responding / clone LED strips):");
+    openknx.logger.color(0);
+    openknx.logger.log("N │ Name           │ Color   │ Description");
+    openknx.logger.log("──┼────────────────┼─────────┼─────────────────────────────────────────");
+    for (uint8_t i = 0; i < kCloneProfileCount; i++)
+    {
+        const CloneTimingProfile& p = kCloneProfiles[i];
+        const char* colorName = (p.r > 0 && p.g == 0 && p.b == 0) ? "RED    " :
+                                (p.r == 0 && p.g > 0 && p.b == 0) ? "GREEN  " :
+                                (p.r == 0 && p.g == 0 && p.b > 0) ? "BLUE   " :
+                                (p.r > 0 && p.g > 0 && p.b == 0)  ? "YELLOW " :
+                                (p.r == 0 && p.g > 0 && p.b > 0)  ? "CYAN   " :
+                                (p.r > 0 && p.g == 0 && p.b > 0)  ? "MAGENTA" : "WHITE  ";
+        openknx.logger.logWithValues("%d │ %-14s │ %s │ %s", (int)i, p.name, colorName, p.desc);
+    }
 
     printSectionSeparator();
     openknx.logger.log("");
@@ -3982,6 +4108,87 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
     }
 
     // neo phys timing <id> <mode> -> Set timing mode
+    // Special subcommand: custom <t0h> <t0l> <t1h> <t1l> [resetUs]
+    if (strcmp(modeStr, "custom") == 0)
+    {
+        uint16_t t0h = 0, t0l = 0, t1h = 0, t1l = 0;
+        uint32_t resetUs = 0;
+        // Parse remaining values after "custom": t0h t0l t1h t1l [resetUs]
+        int customParsed = sscanf(args.c_str(), "%*d %*s %hu %hu %hu %hu %u",
+                                  &t0h, &t0l, &t1h, &t1l, &resetUs);
+
+        if (customParsed < 4 || t0h == 0 || t0l == 0 || t1h == 0 || t1l == 0)
+        {
+            openknx.logger.log("ERROR: Usage: neo phys timing <id> custom <t0h> <t0l> <t1h> <t1l> [resetUs]");
+            openknx.logger.log("  All timing values in ns (must be > 0).");
+            openknx.logger.log("  Example: neo phys timing 0 custom 300 900 800 600");
+            openknx.logger.log("  ResetUs optional (µs), default = 0 = keep protocol default");
+            return true;
+        }
+
+        openknx.logger.logWithValues("Setting custom timing for strip [%d]:", stripId);
+        openknx.logger.logWithValues("  T0H=%d ns  T0L=%d ns  T1H=%d ns  T1L=%d ns", t0h, t0l, t1h, t1l);
+        if (resetUs > 0)
+            openknx.logger.logWithValues("  Reset=%d µs", (int)resetUs);
+
+        if (!strip->setCustomTiming(t0h, t0l, t1h, t1l, resetUs))
+        {
+            openknx.logger.log("ERROR: Failed to set custom timing!");
+            openknx.logger.log("  Custom timing only supported for PIO Serial (RP2040/RP2350) and RMT (ESP32) drivers");
+            return true;
+        }
+
+        openknx.logger.log("Custom timing set successfully!");
+        openknx.logger.log("  RP2040/RP2350 (PIO): derives clkdiv from T1H; T0H/T0L/T1L follow fixed 3:7:6:4 ratio.");
+        openknx.logger.log("  ESP32 (RMT):         all four values applied independently.");
+        strip->clear();
+        strip->show();
+        return true;
+    }
+
+    // Special subcommand: reset -> revert to AUTO timing
+    if (strcmp(modeStr, "reset") == 0)
+    {
+        openknx.logger.logWithValues("Reverting strip [%d] to AUTO timing...", stripId);
+        strip->clearCustomTiming();
+        openknx.logger.log("Timing reverted to AUTO.");
+        strip->clear();
+        strip->show();
+        return true;
+    }
+
+    // Special subcommand: qualify (or scan alias) -> start clone timing qualify
+    if (strcmp(modeStr, "qualify") == 0 || strcmp(modeStr, "scan") == 0)
+    {
+        return processPhysTimingScanCommand(stripId);
+    }
+
+    // Special subcommand: tune [subArgs] -> live timing tuner (enter or control)
+    if (strcmp(modeStr, "tune") == 0)
+    {
+        // Extract everything after "<id> tune " as sub-arguments
+        const char* p = args.c_str();
+        while (*p && *p != ' ') p++;   // skip id
+        while (*p == ' ') p++;         // skip spaces
+        while (*p && *p != ' ') p++;   // skip "tune"
+        while (*p == ' ') p++;         // skip spaces
+        return processPhysTimingTuneCommand((uint32_t)stripId, std::string(p));
+    }
+
+    // Special subcommand: profile <N> -> apply a clone profile permanently
+    if (strcmp(modeStr, "profile") == 0)
+    {
+        int profileIdx = -1;
+        sscanf(args.c_str(), "%*d %*s %d", &profileIdx);
+        if (profileIdx < 0 || profileIdx >= (int)kCloneProfileCount)
+        {
+            openknx.logger.logWithValues("ERROR: Usage: neo phys timing <id> profile <0-%d>", (int)kCloneProfileCount - 1);
+            openknx.logger.log("  Use 'neo phys timings' to list all clone profiles.");
+            return true;
+        }
+        return processPhysTimingProfileCommand(stripId, (uint8_t)profileIdx);
+    }
+
     TimingMode newMode = parseTimingMode(modeStr);
 
     openknx.logger.logWithValues("Setting timing mode for strip [%d] to %s...", stripId, modeStr);
@@ -4002,6 +4209,493 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
 
     return true;
 }
+
+// ============================================================================
+/**
+ * @brief Start clone timing qualify for the given strip (non-blocking).
+ *
+ * Saves current timing, then kicks off the state machine in loop().
+ * Each of the 6 clone profiles is shown for kScanColorDurationMs ms on the FULL
+ * strip, then waits for user input (next/apply/stop) or auto-advances after
+ * kScanWaitTimeoutMs ms.  After all profiles the original timing is restored.
+ * Apply a found profile with: neo phys timing <id> profile <N>
+ */
+bool NeoPixel::processPhysTimingScanCommand(uint32_t stripId)
+{
+    if (_scanPhase != ScanPhase::IDLE)
+    {
+        openknx.logger.log("ERROR: A qualify scan is already running! Use 'neo scan stop' to abort.");
+        return true;
+    }
+
+    auto strip = _manager ? _manager->getStrip(stripId) : nullptr;
+    if (!strip)
+    {
+        openknx.logger.logWithValues("ERROR: Strip [%d] not found!", (int)stripId);
+        return true;
+    }
+
+    auto* cfg = strip->getConfig();
+    SerialStripConfig* sCfg = (cfg && cfg->isSerialConfig())
+                                  ? static_cast<SerialStripConfig*>(cfg)
+                                  : nullptr;
+    if (!sCfg)
+    {
+        openknx.logger.log("ERROR: Clone scan only supported for serial strips (WS2812B/SK6812).");
+        return true;
+    }
+
+    // Save original timing so we can restore it afterwards
+    _scanSavedT0H   = sCfg->getT0H();
+    _scanSavedT0L   = sCfg->getT0L();
+    _scanSavedT1H   = sCfg->getT1H();
+    _scanSavedT1L   = sCfg->getT1L();
+    _scanSavedReset = sCfg->getResetTime();
+    _scanSavedMode  = sCfg->getTimingMode();
+
+    _scanStripId    = stripId;
+    _scanProfileIdx = 0; // will be incremented at first PAUSE→SHOW transition
+
+    openknx.logger.log("");
+    openknx.logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    openknx.logger.logWithValues("  Clone Timing Qualify — Strip [%d]", (int)stripId);
+    openknx.logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    openknx.logger.log("");
+    openknx.logger.logWithValues("  Qualifying %d profiles — %ds show + %ds input-wait each.",
+                                 (int)kCloneProfileCount,
+                                 (int)(kScanColorDurationMs / 1000),
+                                 (int)(kScanWaitTimeoutMs / 1000));
+    openknx.logger.log("  Watch the ENTIRE STRIP — note the COLOR when ALL LEDs light up.");
+    openknx.logger.log("  Commands: neo scan next | neo scan apply | neo scan stop");
+    openknx.logger.log("");
+    openknx.logger.log("  Profile │ Color   │ Mode/Reset");
+    openknx.logger.log("  ────────┼─────────┼──────────────────────────────────────");
+    for (uint8_t i = 0; i < kCloneProfileCount; i++)
+    {
+        const CloneTimingProfile& p = kCloneProfiles[i];
+        const char* colorName = (p.r > 0 && p.g == 0 && p.b == 0) ? "RED    " :
+                                (p.r == 0 && p.g > 0 && p.b == 0) ? "GREEN  " :
+                                (p.r == 0 && p.g == 0 && p.b > 0) ? "BLUE   " :
+                                (p.r > 0 && p.g > 0 && p.b == 0)  ? "YELLOW " :
+                                (p.r == 0 && p.g > 0 && p.b > 0)  ? "CYAN   " :
+                                (p.r > 0 && p.g == 0 && p.b > 0)  ? "MAGENTA" : "WHITE  ";
+        openknx.logger.logWithValues("    %d     │ %s │ %s", (int)i, colorName, p.desc);
+    }
+    openknx.logger.log("");
+    openknx.logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    openknx.logger.log("");
+
+    // Apply profile 0 immediately; the state machine will start from SHOW_COLOR
+    const CloneTimingProfile& first = kCloneProfiles[0];
+    strip->setTimingMode(first.mode);
+    if (first.resetUs > 0) sCfg->setResetTime(first.resetUs);
+    auto* initDrv = strip->getDriver();
+    if (initDrv) initDrv->applyConfig(cfg);
+
+    uint16_t ledCount = strip->getLedCount();
+    for (uint16_t i = 0; i < ledCount; i++)
+        strip->setPixel(i, first.r, first.g, first.b);
+    strip->show();
+
+    openknx.logger.logWithValues("Profile 1/%d: %s — %s",
+                                 (int)kCloneProfileCount, first.name, first.desc);
+
+    _scanPhaseStart    = millis();
+    _scanPromptPrinted = false;
+    _scanPhase         = ScanPhase::SHOW_COLOR;
+
+    return true;
+}
+
+// ============================================================================
+/**
+ * @brief Apply a clone timing profile permanently (and persist to flash).
+ */
+bool NeoPixel::processPhysTimingProfileCommand(uint32_t stripId, uint8_t profileIdx)
+{
+    auto strip = _manager ? _manager->getStrip(stripId) : nullptr;
+    if (!strip)
+    {
+        openknx.logger.logWithValues("ERROR: Strip [%d] not found!", (int)stripId);
+        return true;
+    }
+
+    auto* cfg = strip->getConfig();
+    SerialStripConfig* sCfg = (cfg && cfg->isSerialConfig())
+                                  ? static_cast<SerialStripConfig*>(cfg)
+                                  : nullptr;
+    if (!sCfg)
+    {
+        openknx.logger.log("ERROR: Profile command only supported for serial strips.");
+        return true;
+    }
+
+    const CloneTimingProfile& p = kCloneProfiles[profileIdx];
+    openknx.logger.logWithValues("Applying clone profile %d (%s) to strip [%d]...",
+                                 (int)profileIdx, p.name, (int)stripId);
+    openknx.logger.logWithValues("  %s", p.desc);
+
+    strip->setTimingMode(p.mode);
+    if (p.resetUs > 0)
+    {
+        sCfg->setResetTime(p.resetUs);
+        auto* profDrv = strip->getDriver();
+        if (profDrv) profDrv->applyConfig(cfg);
+    }
+
+    strip->clear();
+    strip->show();
+
+    // Persist: save all runtime settings to flash
+    openknx.flash.save();
+
+    openknx.logger.log("Profile applied and saved to flash.");
+    openknx.logger.log("  The timing will be restored automatically after a power cycle.");
+    openknx.logger.log("  To revert: neo phys timing <id> reset");
+
+    return true;
+}
+
+// ============================================================================
+/**
+ * @brief Handle 'next / apply / stop' during an active clone timing qualify scan.
+ *
+ * Called from processCommand() (user input) and from loopTimingScan() on timeout.
+ * @param cmd  "next" | "apply" | "stop"
+ */
+bool NeoPixel::processScanControlCommand(const std::string& cmd)
+{
+    if (_scanPhase == ScanPhase::IDLE)
+    {
+        openknx.logger.log("INFO: No qualify scan is currently active.");
+        return true;
+    }
+
+    auto strip = _manager ? _manager->getStrip(_scanStripId) : nullptr;
+    if (!strip) { _scanPhase = ScanPhase::IDLE; return true; }
+
+    auto* cfg  = strip->getConfig();
+    SerialStripConfig* sCfg = (cfg && cfg->isSerialConfig())
+                                  ? static_cast<SerialStripConfig*>(cfg) : nullptr;
+
+    auto restoreOriginalTiming = [&]() {
+        if (sCfg)
+        {
+            if (_scanSavedMode == TimingMode::CUSTOM)
+                strip->setCustomTiming(_scanSavedT0H, _scanSavedT0L,
+                                       _scanSavedT1H, _scanSavedT1L, _scanSavedReset);
+            else
+            {
+                sCfg->setTiming(0, 0, 0, 0);
+                sCfg->setResetTime(_scanSavedReset);
+                sCfg->setTimingMode(_scanSavedMode);
+                strip->setTimingMode(_scanSavedMode);
+            }
+        }
+        strip->clear();
+        strip->show();
+        _scanPhase      = ScanPhase::IDLE;
+        _lastUpdateTime = millis();
+    };
+
+    // ── apply ────────────────────────────────────────────────────────────────
+    if (cmd == "apply")
+    {
+        openknx.logger.logWithValues("Applying profile %d (%s) permanently ...",
+                                     (int)_scanProfileIdx, kCloneProfiles[_scanProfileIdx].name);
+        processPhysTimingProfileCommand(_scanStripId, _scanProfileIdx);
+        _scanPhase      = ScanPhase::IDLE;
+        _lastUpdateTime = millis();
+        return true;
+    }
+
+    // ── stop ─────────────────────────────────────────────────────────────────
+    if (cmd == "stop")
+    {
+        openknx.logger.log("Qualify scan aborted. Restoring original timing ...");
+        restoreOriginalTiming();
+        openknx.logger.log("Original timing restored.");
+        return true;
+    }
+
+    // ── next ─────────────────────────────────────────────────────────────────
+    if (cmd == "next")
+    {
+        strip->clear();
+        strip->show();
+        _scanProfileIdx++;
+
+        if (_scanProfileIdx >= kCloneProfileCount)
+        {
+            openknx.logger.log("");
+            openknx.logger.log("Qualify complete. All profiles shown. Original timing restored.");
+            restoreOriginalTiming();
+            openknx.logger.log("If a profile lit the full strip, apply it with:");
+            openknx.logger.logWithValues("  neo phys timing %d profile <N>", (int)_scanStripId);
+            openknx.logger.log("");
+            return true;
+        }
+
+        // Brief pause; loopTimingScan/PAUSE will apply the next profile
+        _scanPhaseStart    = millis();
+        _scanPromptPrinted = false;
+        _scanPhase         = ScanPhase::PAUSE;
+        return true;
+    }
+
+    return false;
+}
+
+// ============================================================================
+/**
+ * @brief Live timing tuner — entry point AND control for a single strip.
+ *
+ * Called for every `neo phys timing <id> tune [subArgs]` command.
+ *
+ *   subArgs empty    → enter tuner (or show status if already active for this strip)
+ *   subArgs "show"   → print current live values
+ *   subArgs "save"   → persist to flash, exit
+ *   subArgs "done"   → keep timing (no flash write), exit
+ *   subArgs "abort"  → restore original timing, exit
+ *   subArgs "t1h +50"→ adjust T1H by +50 ns (absolute or +/- relative)
+ *
+ * The strip ID is always explicit — multiple strips can be tuned simultaneously.
+ * loop() skips normal updates while any tuner is active (_activeTuners non-empty).
+ */
+bool NeoPixel::processPhysTimingTuneCommand(uint32_t stripId, const std::string& subArgs)
+{
+    if (_scanPhase != ScanPhase::IDLE)
+    {
+        openknx.logger.log("ERROR: A qualify scan is running. Use 'neo scan stop' first.");
+        return true;
+    }
+
+    auto strip = _manager ? _manager->getStrip(stripId) : nullptr;
+    if (!strip)
+    {
+        openknx.logger.logWithValues("ERROR: Strip [%d] not found!", (int)stripId);
+        return true;
+    }
+
+    auto* cfg = strip->getConfig();
+    SerialStripConfig* sCfg = (cfg && cfg->isSerialConfig())
+                                  ? static_cast<SerialStripConfig*>(cfg) : nullptr;
+    if (!sCfg)
+    {
+        openknx.logger.log("ERROR: Live tuner only supported for serial strips (WS2812B/SK6812).");
+        return true;
+    }
+
+    bool isActive = (_activeTuners.find(stripId) != _activeTuners.end());
+
+    // ── ENTER (no subArgs or strip not yet active) ────────────────────────────
+    if (subArgs.empty() && !isActive)
+    {
+        TunerState ts;
+        ts.savedT0H    = sCfg->getT0H();
+        ts.savedT0L    = sCfg->getT0L();
+        ts.savedT1H    = sCfg->getT1H();
+        ts.savedT1L    = sCfg->getT1L();
+        ts.savedResetUs = sCfg->getResetTime();
+        ts.savedMode   = sCfg->getTimingMode();
+        auto eff = sCfg->getEffectiveTimings(strip->getProtocol());
+        ts.liveT0H     = eff.t0h;
+        ts.liveT0L     = eff.t0l;
+        ts.liveT1H     = eff.t1h;
+        ts.liveT1L     = eff.t1l;
+        ts.liveResetUs = eff.resetUs;
+        _activeTuners[stripId] = ts;
+
+        // Light full strip white
+        uint16_t ledCount = strip->getLedCount();
+        for (uint16_t i = 0; i < ledCount; i++)
+            strip->setPixel(i, 255, 255, 255);
+        strip->show();
+
+        openknx.logger.log("");
+        openknx.logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        openknx.logger.logWithValues("  [EXPERT] Clone Timing Tuner — Strip [%d]", (int)stripId);
+        openknx.logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        openknx.logger.log("  Strip is lit WHITE. Every change applies instantly.");
+        openknx.logger.log("  If all LEDs light up → that timing works for your strip!");
+        openknx.logger.log("");
+        openknx.logger.log("  NeoPixel 1-wire protocol — what each value means:");
+        openknx.logger.log("    T0H / T0L = HIGH / LOW duration for a '0' bit (ns)");
+        openknx.logger.log("    T1H / T1L = HIGH / LOW duration for a '1' bit (ns)");
+        openknx.logger.log("    Reset     = min. LOW pause between two frames (µs)");
+        openknx.logger.log("");
+#ifdef ARDUINO_ARCH_RP2040
+        openknx.logger.log("  Platform: RP2040/RP2350 (PIO driver)");
+        openknx.logger.log("    Fixed 3:7:6:4 cycle ratio — only T1H sets the bitrate.");
+        openknx.logger.log("    T0H/T0L/T1L are derived automatically.");
+        openknx.logger.log("    Start here:  neo phys timing 0 tune t1h +50");
+        openknx.logger.log("    Latch fix:   neo phys timing 0 tune reset 280");
+#endif
+#ifdef ARDUINO_ARCH_ESP32
+        openknx.logger.log("  Platform: ESP32 (RMT driver)");
+        openknx.logger.log("    All four values are applied independently.");
+        openknx.logger.log("    Start here:  neo phys timing 0 tune t1h +50");
+        openknx.logger.log("    Also try:    neo phys timing 0 tune t0h 350");
+        openknx.logger.log("    Latch fix:   neo phys timing 0 tune reset 280");
+#endif
+        openknx.logger.log("");
+        openknx.logger.logWithValues("  T0H = %4d ns    T0L = %4d ns", (int)ts.liveT0H, (int)ts.liveT0L);
+        openknx.logger.logWithValues("  T1H = %4d ns    T1L = %4d ns", (int)ts.liveT1H, (int)ts.liveT1L);
+        openknx.logger.logWithValues("  Reset = %d µs", (int)ts.liveResetUs);
+        openknx.logger.log("");
+        openknx.logger.logWithValues("  Commands (strip %d):", (int)stripId);
+        openknx.logger.logWithValues("    neo phys timing %d tune t1h +50", (int)stripId);
+        openknx.logger.logWithValues("    neo phys timing %d tune reset <µs>", (int)stripId);
+        openknx.logger.logWithValues("    neo phys timing %d tune show", (int)stripId);
+        openknx.logger.logWithValues("    neo phys timing %d tune save", (int)stripId);
+        openknx.logger.logWithValues("    neo phys timing %d tune done", (int)stripId);
+        openknx.logger.logWithValues("    neo phys timing %d tune abort", (int)stripId);
+        openknx.logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        openknx.logger.log("");
+        return true;
+    }
+
+    // ── STATUS (no subArgs but already active) ────────────────────────────────
+    if (subArgs.empty() && isActive)
+    {
+        openknx.logger.logWithValues("INFO: Tuner for strip [%d] is already active. Use:", (int)stripId);
+        openknx.logger.logWithValues("  neo phys timing %d tune show   -> current values", (int)stripId);
+        openknx.logger.logWithValues("  neo phys timing %d tune abort  -> restore & exit", (int)stripId);
+        return true;
+    }
+
+    // All control commands require an active tuner for this strip
+    if (!isActive)
+    {
+        openknx.logger.logWithValues("ERROR: No tuner active for strip [%d]. Start with:", (int)stripId);
+        openknx.logger.logWithValues("  neo phys timing %d tune", (int)stripId);
+        return true;
+    }
+
+    TunerState& ts = _activeTuners[stripId];
+
+    // ── save ──────────────────────────────────────────────────────────────────
+    if (subArgs == "save")
+    {
+        strip->setCustomTiming(ts.liveT0H, ts.liveT0L, ts.liveT1H, ts.liveT1L, ts.liveResetUs);
+        openknx.flash.save();
+        _activeTuners.erase(stripId);
+        _lastUpdateTime = millis();
+        openknx.logger.logWithValues("Strip [%d]: timing saved to flash. Tuner closed.", (int)stripId);
+        openknx.logger.logWithValues("  To revert later: neo phys timing %d reset", (int)stripId);
+        return true;
+    }
+
+    // ── done ──────────────────────────────────────────────────────────────────
+    if (subArgs == "done")
+    {
+        strip->setCustomTiming(ts.liveT0H, ts.liveT0L, ts.liveT1H, ts.liveT1L, ts.liveResetUs);
+        _activeTuners.erase(stripId);
+        _lastUpdateTime = millis();
+        openknx.logger.logWithValues("Strip [%d]: tuner closed, timing kept (not written to flash).", (int)stripId);
+        openknx.logger.logWithValues("  To save: neo phys timing %d custom %d %d %d %d %d",
+                                     (int)stripId,
+                                     (int)ts.liveT0H, (int)ts.liveT0L,
+                                     (int)ts.liveT1H, (int)ts.liveT1L, (int)ts.liveResetUs);
+        return true;
+    }
+
+    // ── abort ─────────────────────────────────────────────────────────────────
+    if (subArgs == "abort" || subArgs == "stop")
+    {
+        if (ts.savedMode == TimingMode::CUSTOM)
+            strip->setCustomTiming(ts.savedT0H, ts.savedT0L, ts.savedT1H, ts.savedT1L, ts.savedResetUs);
+        else
+        {
+            sCfg->setTiming(0, 0, 0, 0);
+            sCfg->setResetTime(ts.savedResetUs);
+            sCfg->setTimingMode(ts.savedMode);
+            strip->setTimingMode(ts.savedMode);
+        }
+        strip->clear();
+        strip->show();
+        _activeTuners.erase(stripId);
+        _lastUpdateTime = millis();
+        openknx.logger.logWithValues("Strip [%d]: original timing restored. Tuner closed.", (int)stripId);
+        return true;
+    }
+
+    // ── show ──────────────────────────────────────────────────────────────────
+    if (subArgs == "show")
+    {
+        openknx.logger.log("");
+        openknx.logger.logWithValues("  [Strip %d — Tuner active]", (int)stripId);
+        openknx.logger.logWithValues("  T0H = %4d ns    T0L = %4d ns", (int)ts.liveT0H, (int)ts.liveT0L);
+        openknx.logger.logWithValues("  T1H = %4d ns    T1L = %4d ns", (int)ts.liveT1H, (int)ts.liveT1L);
+        openknx.logger.logWithValues("  Reset = %d µs", (int)ts.liveResetUs);
+        openknx.logger.log("");
+        return true;
+    }
+
+    // ── parameter adjustment: "t1h +50", "reset 280", … ──────────────────────
+    char   paramBuf[16] = {};
+    char   valBuf[16]   = {};
+    if (sscanf(subArgs.c_str(), "%15s %15s", paramBuf, valBuf) < 2)
+    {
+        openknx.logger.log("ERROR: Usage: neo phys timing <id> tune <param> <value|+delta|-delta>");
+        openknx.logger.log("  Params: t0h  t0l  t1h  t1l  reset");
+        return true;
+    }
+
+    bool isRelative = (valBuf[0] == '+' || valBuf[0] == '-');
+    int  delta      = atoi(valBuf);
+
+    uint16_t* target16  = nullptr;
+    uint32_t* target32  = nullptr;
+    const char* paramName = paramBuf;
+
+    if      (strcmp(paramBuf, "t0h")   == 0) { target16 = &ts.liveT0H; }
+    else if (strcmp(paramBuf, "t0l")   == 0) { target16 = &ts.liveT0L; }
+    else if (strcmp(paramBuf, "t1h")   == 0) { target16 = &ts.liveT1H; }
+    else if (strcmp(paramBuf, "t1l")   == 0) { target16 = &ts.liveT1L; }
+    else if (strcmp(paramBuf, "reset") == 0 || strcmp(paramBuf, "rst") == 0)
+                                             { target32 = &ts.liveResetUs; }
+    else
+    {
+        openknx.logger.logWithValues("ERROR: Unknown param '%s'. Use: t0h t0l t1h t1l reset", paramBuf);
+        return true;
+    }
+
+    if (target16)
+    {
+        int newVal = isRelative ? ((int)*target16 + delta) : delta;
+        if (newVal <   50) newVal =   50;
+        if (newVal > 5000) newVal = 5000;
+        *target16 = (uint16_t)newVal;
+    }
+    else
+    {
+        int newVal = isRelative ? ((int)*target32 + delta) : delta;
+        if (newVal <   10) newVal =   10;
+        if (newVal > 1000) newVal = 1000;
+        *target32 = (uint32_t)newVal;
+    }
+
+    if (!strip->setCustomTiming(ts.liveT0H, ts.liveT0L, ts.liveT1H, ts.liveT1L, ts.liveResetUs))
+    {
+        openknx.logger.log("ERROR: Failed to apply timing (not supported on this driver).");
+        return true;
+    }
+
+    // Re-light strip white so user gets instant visual feedback
+    uint16_t ledCount = strip->getLedCount();
+    for (uint16_t i = 0; i < ledCount; i++)
+        strip->setPixel(i, 255, 255, 255);
+    strip->show();
+
+    openknx.logger.logWithValues("  [Strip %d] %s = %d  |  T0H=%d T0L=%d T1H=%d T1L=%d Reset=%dµs",
+                                 (int)stripId, paramName,
+                                 target16 ? (int)*target16 : (int)*target32,
+                                 (int)ts.liveT0H, (int)ts.liveT0L,
+                                 (int)ts.liveT1H, (int)ts.liveT1L, (int)ts.liveResetUs);
+    return true;
+}
+
 
 // ============================================================================
 /**
@@ -4120,6 +4814,30 @@ bool NeoPixel::processPhysConfigCommand(const std::string& args)
         }
         return processPhysConfigSkipMaskCommand(stripId, maskCmd, iss);
     }
+    else if (subCmd == "levelshifter" || subCmd == "ls")
+    {
+        std::string typeStr;
+        if (!(iss >> typeStr))
+        {
+            openknx.logger.log("ERROR: Usage: neo phys config <id> levelshifter <none|txs0108|hct125|ahct125>");
+            return true;
+        }
+        LevelShifterType lsType;
+        if (typeStr == "none" || typeStr == "0")
+            lsType = LevelShifterType::NONE;
+        else if (typeStr == "txs0108" || typeStr == "txs0108e" || typeStr == "1")
+            lsType = LevelShifterType::TXS0108E;
+        else if (typeStr == "hct125" || typeStr == "74hct125" || typeStr == "2")
+            lsType = LevelShifterType::SN74HCT125;
+        else if (typeStr == "ahct125" || typeStr == "74ahct125" || typeStr == "3")
+            lsType = LevelShifterType::SN74AHCT125;
+        else
+        {
+            openknx.logger.logWithValues("ERROR: Unknown type '%s'. Use: none | txs0108 | hct125 | ahct125", typeStr.c_str());
+            return true;
+        }
+        return processPhysConfigLevelShifterCommand(stripId, lsType);
+    }
     else
     {
         openknx.logger.log("ERROR: Unknown config subcommand. Use 'neo phys ?' for help.");
@@ -4237,25 +4955,45 @@ bool NeoPixel::processPhysConfigInfoCommand(uint32_t stripId)
     else if (serialCfg)
     {
         // Display Serial config
-        uint8_t timingMode = static_cast<uint8_t>(serialCfg->getTimingMode());
-        uint16_t t0h = serialCfg->getT0H();
-        uint16_t t0l = serialCfg->getT0L();
-        uint16_t t1h = serialCfg->getT1H();
-        uint16_t t1l = serialCfg->getT1L();
-        uint32_t reset = serialCfg->getResetTime();
+        TimingMode timingMode = serialCfg->getTimingMode();
+        const char* modeName = getTimingModeName(timingMode);
+
+        // Resolve effective timing: custom values when set, otherwise protocol defaults
+        LedProtocol protocol = strip->getProtocol();
+        auto eff = serialCfg->getEffectiveTimings(protocol);
+        const char* autoLabel = eff.isCustom ? "" : " (auto)";
 
         openknx.logger.log("Type: Serial Strip (WS2812B/SK6812)");
         openknx.logger.log("");
 
-        openknx.logger.logWithValues("Timing Mode: %d", (int)timingMode);
-        openknx.logger.logWithValues("T0H (0-bit high): %d ns", t0h);
-        openknx.logger.logWithValues("T0L (0-bit low): %d ns", t0l);
-        openknx.logger.logWithValues("T1H (1-bit high): %d ns", t1h);
-        openknx.logger.logWithValues("T1L (1-bit low): %d ns", t1l);
-        openknx.logger.logWithValues("Reset Time: %d µs", reset);
+        openknx.logger.logWithValues("Timing Mode:       %s (%d)", modeName, (int)timingMode);
+        openknx.logger.logWithValues("T0H (0-bit high):  %d ns%s", (int)eff.t0h, autoLabel);
+        openknx.logger.logWithValues("T0L (0-bit low):   %d ns%s", (int)eff.t0l, autoLabel);
+        openknx.logger.logWithValues("T1H (1-bit high):  %d ns%s", (int)eff.t1h, autoLabel);
+        openknx.logger.logWithValues("T1L (1-bit low):   %d ns%s", (int)eff.t1l, autoLabel);
+        openknx.logger.logWithValues("Reset Time:        %d µs%s", (int)eff.resetUs, autoLabel);
+
+        // Level-shifter
+        LevelShifterType ls = serialCfg->getLevelShifter();
+        const char* lsName;
+        switch (ls)
+        {
+            case LevelShifterType::TXS0108E:    lsName = "TXS0108E (bidirect., pull=off, drive+)"; break;
+            case LevelShifterType::SN74HCT125:  lsName = "74HCT125 (unidirect. buffer)";          break;
+            case LevelShifterType::SN74AHCT125: lsName = "74AHCT125 (unidirect. buffer, faster)"; break;
+            default:                            lsName = "none";                                    break;
+        }
+        openknx.logger.logWithValues("Level Shifter:     %s", lsName);
 
         openknx.logger.log("");
-        openknx.logger.log("Tip: Use 'neo phys timing <id> auto' to auto-detect optimal timing");
+        if (eff.isCustom)
+        {
+            openknx.logger.log("Tip: Use 'neo phys timing <id> reset' to revert to AUTO timing");
+        }
+        else
+        {
+            openknx.logger.log("Tip: Use 'neo phys timing <id> custom <t0h> <t0l> <t1h> <t1l>' to set custom timing for clone LEDs");
+        }
     }
     else
     {
@@ -4688,6 +5426,64 @@ bool NeoPixel::processPhysConfigSkipFirstCommand(uint32_t stripId, uint8_t count
 
     cfg->setSkipFirstLeds(count);
     openknx.logger.logWithPrefixAndValues("", "Skip first %d LEDs (forced to black)", count);
+
+    return true;
+}
+
+/**
+ * @brief Process 'neo phys config <id> levelshifter <none|txs0108>' command
+ *
+ * Configures the level-shifter type for the strip's data line.
+ * On TXS0108E: RP2040 disables internal pull-up/down; ESP32 boosts drive to 40mA + FLOAT.
+ * Setting is applied via applyConfig() immediately and persisted to flash.
+ */
+bool NeoPixel::processPhysConfigLevelShifterCommand(uint32_t stripId, LevelShifterType type)
+{
+    auto strip = _manager->getStrip(stripId);
+    if (!strip)
+    {
+        openknx.logger.log("ERROR: Strip ID not found!");
+        return true;
+    }
+
+    auto* cfg = strip->getConfig();
+    if (!cfg || !cfg->isSerialConfig())
+    {
+        openknx.logger.log("ERROR: Level-shifter config only applies to serial strips (WS2812B/SK6812)");
+        return true;
+    }
+
+    auto* serialCfg = static_cast<SerialStripConfig*>(cfg);
+    serialCfg->setLevelShifter(type);
+
+    // Apply immediately via applyConfig
+    auto* drv = strip->getDriver();
+    if (drv) drv->applyConfig(cfg);
+
+    openknx.flash.save();
+
+    const char* typeName;
+    switch (type)
+    {
+        case LevelShifterType::TXS0108E:    typeName = "TXS0108E";   break;
+        case LevelShifterType::SN74HCT125:  typeName = "74HCT125";   break;
+        case LevelShifterType::SN74AHCT125: typeName = "74AHCT125";  break;
+        default:                            typeName = "none";        break;
+    }
+    openknx.logger.logWithValues("Level-shifter set to: %s (applied)", typeName);
+
+#ifdef ARDUINO_ARCH_RP2040
+    if (type == LevelShifterType::TXS0108E)
+        openknx.logger.log("  RP2040: internal pull-up/down disabled on data pin");
+    else if (type == LevelShifterType::SN74HCT125 || type == LevelShifterType::SN74AHCT125)
+        openknx.logger.log("  RP2040: no GPIO changes (4mA drive sufficient for logic input)");
+#endif
+#ifdef ARDUINO_ARCH_ESP32
+    if (type == LevelShifterType::TXS0108E)
+        openknx.logger.log("  ESP32: drive strength boosted to 40mA, pull mode = FLOATING");
+    else if (type == LevelShifterType::SN74HCT125 || type == LevelShifterType::SN74AHCT125)
+        openknx.logger.log("  ESP32: no GPIO changes (20mA drive sufficient for logic input)");
+#endif
 
     return true;
 }

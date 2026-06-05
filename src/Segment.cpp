@@ -3,6 +3,46 @@
 #include "effects/Effect.h"
 #include <Arduino.h>
 
+// ============================================================================
+// Effektkette helpers
+// ============================================================================
+
+void Segment::setVirtualBand(uint16_t totalLength, uint16_t offset)
+{
+    _virtualTotalLength = totalLength;
+    _virtualOffset      = offset;
+}
+
+void Segment::clearVirtualBand()
+{
+    _virtualTotalLength = 0;
+    _virtualOffset      = 0;
+}
+
+/**
+ * @brief Translate virtual band index to local segment index.
+ *
+ * When the segment is part of an Effektkette (virtual band), effects compute
+ * positions in the full virtual space [0 .. virtualTotalLength-1]. This helper
+ * maps a virtual band index to a local [0 .. _virtualLength-1] index.
+ *
+ * Pixels that fall outside this segment’s window are silently dropped.
+ */
+bool Segment::translateVirtualIndex(uint16_t& index) const
+{
+    if (_virtualTotalLength == 0)
+    {
+        // Standalone: normal bounds check
+        return (index < _virtualLength);
+    }
+    // Virtual band: translate band index → local index
+    if (index < _virtualOffset) return false;
+    uint16_t local = index - _virtualOffset;
+    if (local >= _physicalLength) return false;
+    index = local;
+    return true;
+}
+
 /**
  * @brief Constructor
  * @param virtualStrip The parent VirtualStrip
@@ -87,7 +127,7 @@ void Segment::setEffect(Effect* effect, bool initializeDefaults)
  */
 bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
-    if (!_virtualStrip || index >= _virtualLength)
+    if (!_virtualStrip || !translateVirtualIndex(index))
     {
         return false;
     }
@@ -153,7 +193,7 @@ bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
  */
 bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
-    if (!_virtualStrip || index >= _virtualLength)
+    if (!_virtualStrip || !translateVirtualIndex(index))
     {
         return false;
     }
@@ -219,7 +259,7 @@ bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t 
  */
 bool Segment::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
 {
-    if (!_virtualStrip || index >= _virtualLength)
+    if (!_virtualStrip || !translateVirtualIndex(index))
     {
         return false;
     }
@@ -356,8 +396,14 @@ bool Segment::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) const
         return false;
     }
 
-    // Map virtual index to physical, considering grouping/spacing
-    uint16_t physicalStart = mapVirtualToPhysical(index);
+    // In virtual band mode, translate back to local index for reading
+    uint16_t localIdx = index;
+    if (_virtualTotalLength > 0)
+    {
+        if (index < _virtualOffset || index >= _virtualOffset + _physicalLength) { r = g = b = 0; return false; }
+        localIdx = index - _virtualOffset;
+    }
+    uint16_t physicalStart = mapVirtualToPhysical(localIdx);
     uint16_t virtualStripIndex = _startLed + physicalStart;
     return _virtualStrip->getPixel(virtualStripIndex, r, g, b);
 }
@@ -378,8 +424,13 @@ bool Segment::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8
         return false;
     }
 
-    // Map virtual index to physical, considering grouping/spacing
-    uint16_t physicalStart = mapVirtualToPhysical(index);
+    uint16_t localIdx = index;
+    if (_virtualTotalLength > 0)
+    {
+        if (index < _virtualOffset || index >= _virtualOffset + _physicalLength) { r = g = b = w = 0; return false; }
+        localIdx = index - _virtualOffset;
+    }
+    uint16_t physicalStart = mapVirtualToPhysical(localIdx);
     uint16_t virtualStripIndex = _startLed + physicalStart;
     return _virtualStrip->getPixel(virtualStripIndex, r, g, b, w);
 }
@@ -424,8 +475,17 @@ void Segment::update(uint32_t deltaTime)
         return; // No effect or no virtual strip
     }
 
-    // Effect gets segment pointer for config/state access
-    _effect->update(this, deltaTime);
+    // Route to dimensionally appropriate update function:
+    // - 3D segment + effect supports 3D → update3D()
+    // - 2D segment + effect supports 2D → update2D()
+    // - All others (1D, or effect doesn't support higher dim) → update()
+    //   update2D/3D default to update() so 1D effects still work on 2D segments.
+    if (_geo.is3D() && _effect->supports3D())
+        _effect->update3D(this, deltaTime);
+    else if (_geo.is2D() && _effect->supports2D())
+        _effect->update2D(this, deltaTime);
+    else
+        _effect->update(this, deltaTime);
 
     // Virtual strip is marked as dirty by setPixel() calls
 }
@@ -533,5 +593,124 @@ uint16_t Segment::mapVirtualToPhysical(uint16_t virtualIndex) const
     }
 
     return physicalIndex;
+}
+
+// ============================================================================
+// 2D / 3D Matrix Geometry
+// ============================================================================
+
+void Segment::setGeometry(uint8_t width, uint8_t height, LedTopology t)
+{
+    _geo.width    = width;
+    _geo.height   = height;
+    _geo.depth    = 0;
+    _geo.topology = t;
+}
+
+void Segment::setGeometry(uint8_t width, uint8_t height, uint8_t depth, LedTopology t)
+{
+    _geo.width    = width;
+    _geo.height   = height;
+    _geo.depth    = depth;
+    _geo.topology = t;
+}
+
+/**
+ * @brief Convert 2D coordinates to a linear segment index.
+ *
+ * Supports ROWS_SERPENTINE (default), ROWS_LINEAR,
+ * COLS_SERPENTINE, COLS_LINEAR.
+ *
+ * Returns 0xFFFF for out-of-bounds or missing geometry.
+ */
+uint16_t Segment::xyToIndex(uint8_t x, uint8_t y) const
+{
+    if (_geo.is1D()) return 0xFFFF;
+    if (x >= _geo.width || y >= _geo.height) return 0xFFFF;
+
+    uint16_t index;
+    switch (_geo.topology)
+    {
+        case LedTopology::ROWS_SERPENTINE:
+            // Even rows left→right, odd rows right→left
+            if ((y & 1) == 0)
+                index = (uint16_t)y * _geo.width + x;
+            else
+                index = (uint16_t)y * _geo.width + (_geo.width - 1 - x);
+            break;
+
+        case LedTopology::ROWS_LINEAR:
+            index = (uint16_t)y * _geo.width + x;
+            break;
+
+        case LedTopology::COLS_SERPENTINE:
+            // Even columns top→bottom, odd columns bottom→top
+            if ((x & 1) == 0)
+                index = x * _geo.height + y;
+            else
+                index = x * _geo.height + (_geo.height - 1 - y);
+            break;
+
+        case LedTopology::COLS_LINEAR:
+            index = x * _geo.height + y;
+            break;
+
+        default:
+            index = (uint16_t)y * _geo.width + x;
+            break;
+    }
+
+    if (index >= _physicalLength) return 0xFFFF;
+    return index;
+}
+
+/**
+ * @brief Convert 3D coordinates to a linear segment index.
+ *
+ * Layout: z-layers stacked after each other, each layer uses xyToIndex().
+ * Returns 0xFFFF for out-of-bounds or missing geometry.
+ */
+uint16_t Segment::xyzToIndex(uint8_t x, uint8_t y, uint8_t z) const
+{
+    if (!_geo.is3D()) return 0xFFFF;
+    if (z >= _geo.depth) return 0xFFFF;
+
+    uint16_t layerSize = (uint16_t)_geo.width * _geo.height;
+
+    // Temporarily treat as 2D for the xy part
+    LedGeometry geo2d = _geo;
+    geo2d.depth = 0;
+
+    // Inline the 2D index calculation (can't call xyToIndex on modified geo)
+    uint16_t xyIdx;
+    if ((y & 1) == 0)
+        xyIdx = (uint16_t)y * _geo.width + x;
+    else
+        xyIdx = (uint16_t)y * _geo.width + (_geo.width - 1 - x);
+
+    uint16_t index = z * layerSize + xyIdx;
+    if (index >= _physicalLength) return 0xFFFF;
+    return index;
+}
+
+bool Segment::setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b)
+{
+    uint16_t idx = xyToIndex(x, y);
+    if (idx == 0xFFFF) return false;
+    return setPixel(idx, r, g, b);
+}
+
+bool Segment::setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
+{
+    uint16_t idx = xyToIndex(x, y);
+    if (idx == 0xFFFF) return false;
+    return setPixel(idx, r, g, b, w);
+}
+
+bool Segment::setPixelXYZ(uint8_t x, uint8_t y, uint8_t z, uint8_t r, uint8_t g, uint8_t b)
+{
+    uint16_t idx = xyzToIndex(x, y, z);
+    if (idx == 0xFFFF) return false;
+    return setPixel(idx, r, g, b);
 }
 

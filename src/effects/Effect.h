@@ -225,4 +225,53 @@ class Effect
     }
 
     // NO MEMBER VARIABLES - Stateless!
+
+    // ====================================================================
+    // 2D / 3D Capability Extension
+    // ====================================================================
+
+    /**
+     * @brief Dimension capabilities bitmask.
+     * Bit 0 = 1D, Bit 1 = 2D, Bit 2 = 3D.
+     * Default: DIM_1D only.
+     */
+    enum EffectDim : uint8_t
+    {
+        DIM_1D = 0x01,
+        DIM_2D = 0x02,
+        DIM_3D = 0x04,
+    };
+
+    /**
+     * @brief Return supported dimensions (bitmask of EffectDim).
+     * Override to advertise 2D/3D support.
+     * Default: 1D only.
+     */
+    virtual uint8_t getCapabilities() const { return DIM_1D; }
+
+    /**
+     * @brief 2D update — called instead of update() when segment has 2D geometry
+     * and this effect advertises DIM_2D capability.
+     *
+     * Default implementation calls update() so all existing 1D effects work on
+     * 2D segments without change (rendered line by line).
+     */
+    virtual void update2D(Segment* segment, uint32_t deltaTime) { update(segment, deltaTime); }
+
+    /**
+     * @brief 3D update — called instead of update() when segment has 3D geometry
+     * and this effect advertises DIM_3D capability.
+     * Default falls back to update2D().
+     */
+    virtual void update3D(Segment* segment, uint32_t deltaTime) { update2D(segment, deltaTime); }
+
+    /**
+     * @brief Helper: does this effect support 2D rendering?
+     */
+    bool supports2D() const { return (getCapabilities() & DIM_2D) != 0; }
+
+    /**
+     * @brief Helper: does this effect support 3D rendering?
+     */
+    bool supports3D() const { return (getCapabilities() & DIM_3D) != 0; }
 };

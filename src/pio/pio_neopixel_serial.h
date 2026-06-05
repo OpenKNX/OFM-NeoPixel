@@ -34,6 +34,7 @@
 #if defined(ARDUINO_ARCH_RP2040)
 
     #include "../IHardwareDriver.h"
+    #include "../LevelShifterType.h"
     #include "../TimingMode.h"
     #include "hardware/clocks.h"
     #include "hardware/dma.h"
@@ -76,6 +77,8 @@ struct pio_neopixel_serial_inst
     volatile uint32_t fifoEmptyTime; // micros() when FIFO became empty (for reset timing)
     uint32_t resetTimeUs;            // Required reset/latch time (50-300µs depending on protocol)
     volatile bool waitingForReset;   // True after FIFO empty, waiting for reset pulse
+
+    LevelShifterType levelShifterType; // Level-shifter type (NONE or TXS0108E)
 };
 typedef struct pio_neopixel_serial_inst pio_neopixel_serial_inst_t;
 

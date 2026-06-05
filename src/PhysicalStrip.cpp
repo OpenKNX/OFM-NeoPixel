@@ -634,6 +634,30 @@ bool PhysicalStrip::setUpdateFrequency(uint32_t frequencyHz)
  * @param mode New timing mode
  * @return true if mode was changed and driver reinitialized successfully
  */
+bool PhysicalStrip::setCustomTiming(uint16_t t0h, uint16_t t0l, uint16_t t1h, uint16_t t1l, uint32_t resetUs)
+{
+    if (!_config || !_config->isSerialConfig()) return false;
+    auto* sCfg = static_cast<SerialStripConfig*>(_config);
+    sCfg->setTiming(t0h, t0l, t1h, t1l);
+    if (resetUs > 0) sCfg->setResetTime(resetUs);
+    sCfg->setTimingMode(TimingMode::CUSTOM);
+    _timingMode = TimingMode::CUSTOM;
+
+    if (!_driver) return false;
+    return _driver->applyConfig(_config);
+}
+
+void PhysicalStrip::clearCustomTiming()
+{
+    if (!_config || !_config->isSerialConfig()) return;
+    auto* sCfg = static_cast<SerialStripConfig*>(_config);
+    sCfg->setTiming(0, 0, 0, 0);
+    sCfg->setResetTime(0);
+    sCfg->setTimingMode(TimingMode::AUTO);
+    _timingMode = TimingMode::AUTO;
+    if (_driver) _driver->applyConfig(_config);
+}
+
 bool PhysicalStrip::setTimingMode(TimingMode mode)
 {
     if (_timingMode == mode)

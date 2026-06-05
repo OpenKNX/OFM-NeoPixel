@@ -5,10 +5,12 @@
  * Uses ESP32 RMT (Remote Control Module) to control WS2812/SK6812 LEDs.
  *
  * RMT channels per variant:
- * - ESP32 (Original):  8 channels (0-7, 0 reserved = 7 available)
- * - ESP32-S2:          4 channels (0-3, 0 reserved = 3 available)
- * - ESP32-S3:          4 channels (0-3, 0 reserved = 3 available)
- * - ESP32-C3:          2 channels (0-1, 0 reserved = 1 available)
+ * - ESP32 (Original):  8 TX channels
+ * - ESP32-S2:          4 TX channels
+ * - ESP32-S3:          4 TX channels
+ * - ESP32-C3:          2 TX channels
+ * - ESP32-C5:          4 TX channels
+ * - ESP32-C6:          2 TX channels
  *
  * Features:
  * - Hardware-precise timing (like PIO, but fewer channels)
@@ -23,6 +25,7 @@
 #if defined(ARDUINO_ARCH_ESP32)
 
     #include "../IHardwareDriver.h"
+    #include "../LevelShifterType.h"
     #include <driver/rmt_tx.h>
     #include <stdint.h>
     #include <stdlib.h>
@@ -44,8 +47,16 @@ struct rmt_neopixel_serial_inst
     uint8_t* buffer;   // LED data buffer
     size_t bufferSize; // Buffer size in bytes
 
+    // Custom timing (0 = use protocol default)
+    uint16_t customT0H; ///< T0H override in ns (0 = default)
+    uint16_t customT0L; ///< T0L override in ns (0 = default)
+    uint16_t customT1H; ///< T1H override in ns (0 = default)
+    uint16_t customT1L; ///< T1L override in ns (0 = default)
+
     bool initialized;   // Initialized?
     volatile bool busy; // Transfer running?
+
+    LevelShifterType levelShifterType; // Level-shifter type (NONE or TXS0108E)
 };
 typedef struct rmt_neopixel_serial_inst rmt_neopixel_serial_inst_t;
 

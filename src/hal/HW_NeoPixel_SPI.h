@@ -185,6 +185,7 @@ class HW_NeoPixel_SPI : public IHardwareDriver
     void sendEndFrame();
     void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
 
-    static bool _spi0Used; // Track SPI0 usage
-    static bool _spi1Used; // Track SPI1 usage
+    static bool _spi0Used;       // Track SPI0 usage
+    static bool _spi1Used;       // Track SPI1 usage
+    static SPIClass* _spi1Instance; // Second SPI bus instance (ESP32: HSPI/FSPI, RP2040: SPI1)
 };

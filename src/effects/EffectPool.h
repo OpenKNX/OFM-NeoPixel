@@ -50,6 +50,12 @@ class LightningEffect;
 class GradientEffect;
 class CandleEffect;
 class CandleMultiEffect;
+class FireEffect2D;  // legacy alias
+class Fire2DEffect;
+class Noise2DEffect;
+class Cylon2DEffect;
+class ScrollTextEffect;
+class Clock2DEffect;
 
 /**
  * EffectPool - Singleton Pool for all Effect Instances
@@ -88,6 +94,12 @@ class EffectPool
     static Effect* getGradient();
     static Effect* getCandle();
     static Effect* getCandleMulti();
+    // 2D effects
+    static Effect* getFire2D();
+    static Effect* getNoise2D();
+    static Effect* getCylon2D();
+    static Effect* getScrollText();
+    static Effect* getClock2D();
     //
     // -----------------------------------------------------------
 

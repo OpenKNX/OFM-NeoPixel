@@ -78,6 +78,8 @@ This design enables complex LED configurations with minimal CPU overhead through
 - **Platform Optimized**: RP2040 (PIO/DMA), RP2350 (PIO/DMA), ESP32-S3 (RMT)
 - **Fine-Grained Timing Control**: 11 timing modes for compatibility (640-1000 kHz)
 - **Overclock Safe**: Automatic clock detection, works at any CPU frequency
+- **2D / 3D Matrix Geometry**: Any `Segment` can be declared as a 2D (width×height) or 3D (width×height×depth) LED matrix using `setGeometry()`. `setPixelXY(x, y)` and `setPixelXYZ(x, y, z)` handle topology-aware coordinate mapping (serpentine rows/columns, linear, 3D stacked). Effects route automatically via `update2D()` / `update3D()` — existing 1D effects fall back gracefully.
+- **Effektkette (Distributed Rendering)**: Segments on separate KNX devices can form a virtual band. The Master segment sends a 6-byte sync telegram; each Slave renders only its local window at the correct phase offset. `getLength()` returns the virtual total length so all effects compute in the full virtual space transparently — zero effect code changes required.
 
 ---
 
@@ -2095,6 +2097,116 @@ Effect instances (shared)        ~200 bytes total
 Example Config (2 strips, 1 virtual, 2 segments)
 Total RAM                        ~1.4 KB
 ```
+
+---
+
+## 2D / 3D Matrix Support
+
+Any `Segment` can be configured as a 2D or 3D LED matrix. The physical LED chain is always 1D on the wire — the geometry is a pure software interpretation layer inside `Segment`.
+
+### Setup
+
+```cpp
+// 16×16 WS2812B matrix — single GPIO, serpentine row wiring
+Segment* seg = mgr->addSegment(vstrip, 0, 255);
+seg->setGeometry(16, 16, LedTopology::ROWS_SERPENTINE);
+
+// Paint pixels by coordinate
+seg->setPixelXY(3, 7, 255, 0, 0);    // (col=3, row=7) = red
+seg->setPixelXY(0, 0, 0, 255, 0);    // top-left = green
+```
+
+### Topologies
+
+| Value | Wiring |
+|-------|--------|
+| `LINEAR_1D` | No matrix (default, 1D strip) |
+| `ROWS_SERPENTINE` | →→ ←← →→ (most WS2812B panels) |
+| `ROWS_LINEAR` | →→ →→ →→ (all rows same direction) |
+| `COLS_SERPENTINE` | ↓↑↓↑ (column-major, alternating) |
+| `COLS_LINEAR` | ↓↓↓↓ (column-major, same direction) |
+| `ROWS_SERPENTINE_3D` | 3D volume, serpentine rows |
+
+### Index mapping
+
+```cpp
+uint16_t idx = seg->xyToIndex(x, y);    // 2D → linear
+uint16_t idx = seg->xyzToIndex(x, y, z); // 3D → linear
+```
+
+### Effect routing
+
+`Segment::update()` routes automatically:
+- `is3D()` + effect supports 3D → `update3D()`
+- `is2D()` + effect supports 2D → `update2D()`
+- Otherwise → `update()` (all existing 1D effects work on 2D segments, rendered line by line)
+
+### 2D Effects (built-in)
+
+| Effect | Description |
+|--------|-------------|
+| `FireEffect2D` | Independent fire column per matrix column |
+| `NoiseEffect2D` | Bilinear XY noise field |
+| `CylonEffect2D` | Sweeping row or column (direction via `feature1`) |
+| `ScrollTextEffect` | Horizontal scrolling 5×7 font; set text via `ScrollTextEffect::setText()` |
+| `ClockEffect` | Digital HH:MM or HH:MM:SS using `openknx.time.getLocalTime()` |
+
+### Writing a custom 2D effect
+
+```cpp
+class MyEffect : public Effect {
+    uint8_t getCapabilities() const override { return DIM_1D | DIM_2D; }
+
+    void update(Segment* seg, uint32_t dt) override { /* 1D fallback */ }
+
+    void update2D(Segment* seg, uint32_t dt) override {
+        const auto& geo = seg->getGeometry();
+        for (uint8_t y = 0; y < geo.height; y++)
+            for (uint8_t x = 0; x < geo.width; x++)
+                seg->setPixelXY(x, y, x * 16, y * 16, 0);
+    }
+};
+```
+
+---
+
+## Effektkette — Distributed Rendering
+
+Multiple NeoPixel devices can form a **virtual band**: one effect runs across all their strips as if they were physically connected. Each device renders only its local section — no pixel streaming over KNX.
+
+### Principle
+
+```
+Device A [LED 0..99]     Device B [LED 0..99]     Device C [LED 0..99]
+  Cylon eye at pos 50:
+    ●●●                                                              ← only A lights up
+                              ●●●                                    ← only B lights up
+                                                    ●●●              ← only C lights up
+```
+
+All devices run `f(t, totalLength=300)`. Each renders only its window `[offset .. offset+localLen-1]`. Pixels outside the window are silently dropped — **no effect code changes needed**.
+
+### API
+
+```cpp
+// Configure segment as part of a 300-LED virtual band starting at offset 100
+seg->setVirtualBand(300, 100);
+
+// getLength() now returns 300 — effects compute in full virtual space
+// setPixel(i, ...) silently drops pixels outside [100..199]
+```
+
+### ETS Configuration (Master on Device A, Slaves on B and C)
+
+| Parameter | Device A | Device B | Device C |
+|-----------|----------|----------|----------|
+| Effektkette Modus | Master | Slave | Slave |
+| Gesamtlänge | 300 | 300 | 300 |
+| Mein Offset | 0 | 100 | 200 |
+| Sync-Gruppe K40 | 5/1/42 | 5/1/42 | 5/1/42 |
+| Slave-Timeout | — | 30 s | 30 s |
+
+When the Master's effect KO changes, it automatically sends a 6-byte sync telegram. Slaves apply the effect with their configured offset. After the watchdog timeout without sync, slaves turn off.
 
 ---
 

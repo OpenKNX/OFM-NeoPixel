@@ -5,7 +5,7 @@
  * This interface provides a platform-agnostic API for controlling addressable LEDs.
  * Implementations exist for:
  * - PIO (RP2040/RP2350): 1-Wire and SPI
- * - RMT (ESP32 variants): 1-Wire
+ * - RMT (ESP32 all variants): 1-Wire
  * - Hardware SPI (All platforms)
  *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)

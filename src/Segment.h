@@ -34,6 +34,48 @@
 
 class Effect; // Forward declaration
 
+// ============================================================================
+// LED Topology — how a linear LED chain is physically arranged in 2D/3D
+// ============================================================================
+/**
+ * @brief Wiring topology of a 2D/3D LED matrix.
+ *
+ * Stored in 3 bits (values 0–7) in Flash (Segment Byte 10, Bits 5-7).
+ * Default 0 = LINEAR_1D means no matrix geometry (standard 1D strip).
+ *
+ * Serpentine = every other row/column is reversed (most common for WS2812B panels).
+ * Linear     = every row/column runs in the same direction (less common).
+ */
+enum class LedTopology : uint8_t
+{
+    LINEAR_1D         = 0, ///< No matrix — plain 1D strip (default)
+    ROWS_SERPENTINE   = 1, ///< →→→→ ←←←← →→→→  (row-major, alternating direction)
+    ROWS_LINEAR       = 2, ///< →→→→ →→→→ →→→→   (row-major, same direction)
+    COLS_SERPENTINE   = 3, ///< ↓↑↓↑  (col-major, alternating direction)
+    COLS_LINEAR       = 4, ///< ↓↓↓↓  (col-major, same direction)
+    ROWS_SERPENTINE_3D= 5, ///< 3D: serpentine rows, stacked depth-first
+};
+
+/**
+ * @brief 2D/3D geometry of a segment.
+ *
+ * Stored compactly: width (Byte 12), height (Byte 13), depth (Byte 14)
+ * in the segment's Flash union. All 0 / topology=LINEAR_1D = normal 1D segment.
+ *
+ * RAM cost: 5 bytes per Segment (uint8 width/height/depth + uint8 topology + 1 pad)
+ */
+struct LedGeometry
+{
+    uint8_t     width    = 0; ///< Matrix columns (0 = not set / 1D)
+    uint8_t     height   = 0; ///< Matrix rows    (0 = not set / 1D)
+    uint8_t     depth    = 0; ///< Z-layers       (0 = not set / 2D or 1D)
+    LedTopology topology = LedTopology::LINEAR_1D;
+
+    bool is1D() const { return topology == LedTopology::LINEAR_1D || width <= 1 || height <= 1; }
+    bool is2D() const { return !is1D() && depth <= 1; }
+    bool is3D() const { return !is1D() && depth > 1; }
+};
+
 /**
  * Effect Configuration - User-configurable parameters
  * ~40 bytes per Segment
@@ -130,10 +172,36 @@ class Segment
     // ====================================================================
     uint16_t getStartLed() const { return _startLed; }                    // Get start LED index
     uint16_t getEndLed() const { return _endLed; }                        // Get end LED index (inclusive)
-    uint16_t getLength() const { return _virtualLength; }                 // Get virtual length (for effects) - accounts for grouping/spacing
+    /**
+     * @brief Effective length for effect calculations.
+     * When part of an Effektkette (virtual band), returns the TOTAL virtual band length
+     * so effects compute their animation in the full virtual space.
+     * Otherwise returns the physical virtual length (accounting for grouping/spacing).
+     */
+    uint16_t getLength() const { return (_virtualTotalLength > 0) ? _virtualTotalLength : _virtualLength; }
     uint16_t getPhysicalLength() const { return _physicalLength; }        // Get physical length (actual LEDs)
     VirtualStrip* getVirtualStrip() { return _virtualStrip; }             // Get parent virtual strip
     const VirtualStrip* getVirtualStrip() const { return _virtualStrip; } // Get parent virtual strip (const)
+
+    // ====================================================================
+    // Effektkette — Virtual Band (distributed rendering across devices)
+    // ====================================================================
+    /**
+     * @brief Configure this segment as part of a virtual band (Effektkette).
+     *
+     * When set, getLength() returns totalLength (full band) so effects compute
+     * animations across the entire virtual band. setPixel() automatically
+     * translates the virtual index to a local one and silently drops pixels
+     * that fall outside this segment's window — no effect code changes needed.
+     *
+     * @param totalLength  Total length of the virtual band (all devices combined)
+     * @param offset       Where this segment starts within the virtual band
+     */
+    void setVirtualBand(uint16_t totalLength, uint16_t offset);
+    void clearVirtualBand();
+    bool     isVirtualBand()          const { return _virtualTotalLength > 0; }
+    uint16_t getVirtualTotalLength()  const { return _virtualTotalLength; }
+    uint16_t getVirtualOffset()       const { return _virtualOffset; }
 
     // ====================================================================
     // Grouping & Spacing Configuration
@@ -172,6 +240,67 @@ class Segment
      */
     void setOffset(uint16_t offset) { _offset = offset; }
     uint16_t getOffset() const { return _offset; }
+
+    // ====================================================================
+    // 2D / 3D Matrix Geometry
+    // ====================================================================
+    /**
+     * @brief Configure this segment as a 2D LED matrix.
+     *
+     * The physical LED chain is reinterpreted as a width×height grid.
+     * Width × height must not exceed the segment length (endLed - startLed + 1).
+     *
+     * @param width   Number of columns (x-axis)
+     * @param height  Number of rows    (y-axis)
+     * @param t       Wiring topology (default: ROWS_SERPENTINE — most WS2812B panels)
+     */
+    void setGeometry(uint8_t width, uint8_t height,
+                     LedTopology t = LedTopology::ROWS_SERPENTINE);
+
+    /**
+     * @brief Configure this segment as a 3D LED volume.
+     * @param width   Columns (x)
+     * @param height  Rows    (y)
+     * @param depth   Z-layers
+     * @param t       Wiring topology
+     */
+    void setGeometry(uint8_t width, uint8_t height, uint8_t depth,
+                     LedTopology t = LedTopology::ROWS_SERPENTINE_3D);
+
+    /** @brief Remove matrix geometry — segment behaves as plain 1D strip. */
+    void clearGeometry() { _geo = LedGeometry{}; }
+
+    const LedGeometry& getGeometry() const { return _geo; }
+    bool is2D() const { return _geo.is2D(); }
+    bool is3D() const { return _geo.is3D(); }
+
+    /**
+     * @brief Set a pixel by 2D coordinates (x=column, y=row).
+     *
+     * Converts (x,y) to a linear segment index via xyToIndex() and
+     * delegates to the standard setPixel(). Returns false if out of bounds
+     * or if the segment has no 2D geometry configured.
+     */
+    bool setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b);
+    bool setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
+
+    /**
+     * @brief Set a pixel by 3D coordinates (x, y, z).
+     */
+    bool setPixelXYZ(uint8_t x, uint8_t y, uint8_t z, uint8_t r, uint8_t g, uint8_t b);
+
+    /**
+     * @brief Convert 2D (x,y) to a linear segment index using the configured topology.
+     * @return Linear index within the segment [0 .. physicalLength-1],
+     *         or 0xFFFF if out of bounds / no geometry set.
+     */
+    uint16_t xyToIndex(uint8_t x, uint8_t y) const;
+
+    /**
+     * @brief Convert 3D (x,y,z) to a linear segment index.
+     * @return Linear index, or 0xFFFF if out of bounds.
+     */
+    uint16_t xyzToIndex(uint8_t x, uint8_t y, uint8_t z) const;
 
     // ====================================================================
     // Effect Management
@@ -278,6 +407,9 @@ class Segment
     LedState _ledState;          // State machine (IDLE, RUNNING, etc)
     EffectConfig _config;        // Effect configuration (~40 bytes)
     EffectState _state;          // Effect runtime variables (~12 bytes)
+    LedGeometry _geo;            // 2D/3D matrix geometry (5 bytes, default = 1D)
+    uint16_t _virtualTotalLength = 0; ///< Effektkette: total band length (0 = standalone)
+    uint16_t _virtualOffset      = 0; ///< Effektkette: this segment's start in the band
 
     // Helper: Recalculate virtual length based on grouping/spacing
     void recalculateVirtualLength();
@@ -285,4 +417,11 @@ class Segment
     // Helper: Map virtual index to physical LED indices
     // Returns start index in physical strip; groupSize LEDs starting from there get the color
     uint16_t mapVirtualToPhysical(uint16_t virtualIndex) const;
+
+    /**
+     * @brief Translate a virtual band index to a local segment index.
+     * @param index  In: virtual band index. Out: local segment index.
+     * @return true if the pixel is within this segment's local window.
+     */
+    bool translateVirtualIndex(uint16_t& index) const;
 };

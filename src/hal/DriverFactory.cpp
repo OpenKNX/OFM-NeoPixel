@@ -22,7 +22,7 @@
  * Selection logic:
  * 1-Wire Protocols (WS2812, SK6812, etc.):
  *  - RP2040/50: PIO_NeoPixel_Serial (Hardware timer via PIO)
- * - ESP32:     RMT_NeoPixel_Serial (Hardware timer via RMT)
+ * - ESP32:     RMT_NeoPixel_Serial (Hardware timer via RMT, all variants)
  *
  * SPI Protocols (APA102, WS2801, etc.):
  * - RP2040/50: Hardware SPI (faster, less flexible)

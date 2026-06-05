@@ -161,6 +161,23 @@
 
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 
+    // 2D effects (always included unless explicitly disabled)
+    #ifndef NEOPIXEL_DISABLE_FIRE2D
+        #include "Fire2DEffect.h"
+    #endif
+    #ifndef NEOPIXEL_DISABLE_NOISE2D
+        #include "Noise2DEffect.h"
+    #endif
+    #ifndef NEOPIXEL_DISABLE_CYLON2D
+        #include "Cylon2DEffect.h"
+    #endif
+    #ifndef NEOPIXEL_DISABLE_SCROLLTEXT
+        #include "ScrollTextEffect.h"
+    #endif
+    #ifndef NEOPIXEL_DISABLE_CLOCK2D
+        #include "Clock2DEffect.h"
+    #endif
+
 // -----------------------------------------------------------
 // Static singleton instances - (Initialized on first use)
 // Add here for each new effect type to be included in the pool
@@ -655,8 +672,53 @@ Effect* EffectPool::getCandleMulti()
     #endif
 
 #endif // NEOPIXEL_MINIMAL_EFFECTS
-// ============================================================================
-// Dynamic Effect Registry
+
+// ── 2D effects ───────────────────────────────────────────────────────────────
+
+#ifndef NEOPIXEL_DISABLE_FIRE2D
+static Fire2DEffect*  s_fire2d  = nullptr;
+Effect* EffectPool::getFire2D()
+{
+    if (!s_fire2d) s_fire2d = new Fire2DEffect();
+    return s_fire2d;
+}
+#endif
+
+#ifndef NEOPIXEL_DISABLE_NOISE2D
+static Noise2DEffect* s_noise2d = nullptr;
+Effect* EffectPool::getNoise2D()
+{
+    if (!s_noise2d) s_noise2d = new Noise2DEffect();
+    return s_noise2d;
+}
+#endif
+
+#ifndef NEOPIXEL_DISABLE_CYLON2D
+static Cylon2DEffect* s_cylon2d = nullptr;
+Effect* EffectPool::getCylon2D()
+{
+    if (!s_cylon2d) s_cylon2d = new Cylon2DEffect();
+    return s_cylon2d;
+}
+#endif
+
+#ifndef NEOPIXEL_DISABLE_SCROLLTEXT
+static ScrollTextEffect* s_scrollText = nullptr;
+Effect* EffectPool::getScrollText()
+{
+    if (!s_scrollText) s_scrollText = new ScrollTextEffect();
+    return s_scrollText;
+}
+#endif
+
+#ifndef NEOPIXEL_DISABLE_CLOCK2D
+static Clock2DEffect* s_clock2d = nullptr;
+Effect* EffectPool::getClock2D()
+{
+    if (!s_clock2d) s_clock2d = new Clock2DEffect();
+    return s_clock2d;
+}
+#endif
 // ============================================================================
 
 /**
@@ -746,6 +808,22 @@ uint8_t EffectPool::getEffectCount()
     count += 2; // Candle + CandleMulti
     #endif
 #endif // NEOPIXEL_MINIMAL_EFFECTS
+    // 2D effects
+    #ifndef NEOPIXEL_DISABLE_FIRE2D
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_NOISE2D
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_CYLON2D
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_SCROLLTEXT
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_CLOCK2D
+    count++;
+    #endif
 
     return count;
 }
@@ -843,6 +921,22 @@ Effect* EffectPool::getEffectByIndex(uint8_t index)
     if (index == currentIndex++) return getCandleMulti();
     #endif
 #endif // NEOPIXEL_MINIMAL_EFFECTS
+    // 2D effects
+    #ifndef NEOPIXEL_DISABLE_FIRE2D
+    if (index == currentIndex++) return getFire2D();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_NOISE2D
+    if (index == currentIndex++) return getNoise2D();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_CYLON2D
+    if (index == currentIndex++) return getCylon2D();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_SCROLLTEXT
+    if (index == currentIndex++) return getScrollText();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_CLOCK2D
+    if (index == currentIndex++) return getClock2D();
+    #endif
 
     return nullptr; // Index out of range
 }

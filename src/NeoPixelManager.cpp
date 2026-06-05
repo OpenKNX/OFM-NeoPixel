@@ -1497,7 +1497,15 @@ uint32_t NeoPixelManager::getMaxStrips()
     return 9; // RP2040: 7 PIO + 2 SPI
     #endif
 #elif defined(ARDUINO_ARCH_ESP32)
-    return 9; // ESP32: 7 RMT + 2 SPI
+    #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C5)
+    return 6; // S2/S3/C5: 4 RMT TX + 2 SPI
+    #elif defined(CONFIG_IDF_TARGET_ESP32C3)
+    return 3; // C3: 2 RMT TX + 1 SPI (only one SPI bus)
+    #elif defined(CONFIG_IDF_TARGET_ESP32C6)
+    return 4; // C6: 2 RMT TX + 2 SPI
+    #else
+    return 10; // ESP32 original: 8 RMT TX + 2 SPI
+    #endif
 #else
     return 2; // Default/Other
 #endif
@@ -1532,11 +1540,21 @@ bool NeoPixelManager::checkResourcesAvailable(LedProtocol protocol)
 #elif defined(ARDUINO_ARCH_ESP32)
     if (is1Wire)
     {
-        return rmtUsed < 7; // RMT channels 1-7 (0 reserved)
+    #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C5)
+        return rmtUsed < 4; // S2/S3/C5: 4 RMT TX channels
+    #elif defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
+        return rmtUsed < 2; // C3/C6: 2 RMT TX channels
+    #else
+        return rmtUsed < 8; // ESP32 original: 8 RMT TX channels
+    #endif
     }
     else if (isSpi)
     {
+    #if defined(CONFIG_IDF_TARGET_ESP32C3)
+        return spiUsed < 1; // C3: only 1 SPI bus available
+    #else
         return spiUsed < 2;
+    #endif
     }
 #endif
 

@@ -384,9 +384,51 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     // Apply ColorOrder
     _inst->colorOrder = serialCfg->getColorOrder();
 
-    // Timing parameters could be applied here if needed
-    // For now, timing is set at init() based on TimingMode
-    // Future: add custom timing support (t0h, t0l, t1h, t1l, resetTime)
+    // Apply level-shifter GPIO optimizations
+    _inst->levelShifterType = serialCfg->getLevelShifter();
+    if (_inst->levelShifterType == LevelShifterType::TXS0108E)
+    {
+        // TXS0108E auto-direction requires no resistive load on A-side.
+        // Drive strength (12mA + FAST) is already set in neopixel_serial_program_init().
+        // Explicitly disable internal pull-up/down to avoid interfering with direction RC.
+        gpio_set_pulls(_inst->pin, false, false);
+        #ifdef OPENKNX_DEBUG
+        openknx.logger.logWithValues("PIO NeoPixel Serial GPIO%u: TXS0108E mode - pull disabled", _inst->pin);
+        #endif
+    }
+    else if (_inst->levelShifterType == LevelShifterType::SN74HCT125 ||
+             _inst->levelShifterType == LevelShifterType::SN74AHCT125)
+    {
+        // 74HCT/AHCT: unidirectional transparent buffer; OE=GND, always enabled.
+        // TTL input threshold VIH >= 2.0V is satisfied by 3.3V output; no GPIO changes needed.
+        // Default 4mA drive + FAST slew (from pio_gpio_init) is sufficient for a logic input.
+        #ifdef OPENKNX_DEBUG
+        const char* lsN = (_inst->levelShifterType == LevelShifterType::SN74AHCT125) ? "74AHCT125" : "74HCT125";
+        openknx.logger.logWithValues("PIO NeoPixel Serial GPIO%u: %s mode - no GPIO changes needed", _inst->pin, lsN);
+        #endif
+    }
+
+    // Apply custom timing if T1H is set (CUSTOM mode)
+    // PIO program has fixed 3:7:6:4 cycle ratio → only T1H determines the bit period.
+    // Formula: clkdiv = sys_clk_hz * T1H_ns * 1e-9 / 6.0  (6 HIGH cycles per 10-cycle bit)
+    uint16_t t1h = serialCfg->getT1H();
+    if (t1h > 0 && _inst->initialized)
+    {
+        float sys_clk = (float)clock_get_hz(clk_sys);
+        float clkdiv  = sys_clk * (float)t1h * 1e-9f / 6.0f;
+        clkdiv = (clkdiv < 1.0f) ? 1.0f : clkdiv; // clkdiv < 1 not allowed
+
+        pio_sm_set_clkdiv(_inst->pio, _inst->sm, clkdiv);
+        pio_sm_clkdiv_restart(_inst->pio, _inst->sm); // apply immediately
+
+        _inst->actual_clkdiv = clkdiv;
+        _inst->actual_bitrate = sys_clk / clkdiv / 10.0f; // 10 cycles per bit
+        _inst->timingMode = TimingMode::CUSTOM;
+
+        // Update reset time if provided
+        uint32_t resetUs = serialCfg->getResetTime();
+        if (resetUs > 0) _inst->resetTimeUs = resetUs;
+    }
 
     return true;
 }

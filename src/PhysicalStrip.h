@@ -188,6 +188,16 @@ class PhysicalStrip
     TimingMode getTimingMode() const { return _timingMode; }
     bool setTimingMode(TimingMode mode);
 
+    // ====================================================================
+    // Custom Timing (PIO + RMT)
+    // Set explicit T0H/T0L/T1H/T1L values in nanoseconds.
+    // PIO:  only T1H determines the bit period (3:7:6:4 cycle ratio is fixed)
+    // RMT:  all four values are applied independently
+    // Pass resetUs = 0 to keep the protocol default.
+    // ====================================================================
+    bool setCustomTiming(uint16_t t0h, uint16_t t0l, uint16_t t1h, uint16_t t1l, uint32_t resetUs = 0);
+    void clearCustomTiming(); ///< Revert to AUTO timing
+
   private:
     IHardwareDriver* _driver;     // Underlying driver
     uint32_t _dataPin;            // GPIO pin (MOSI/Data)

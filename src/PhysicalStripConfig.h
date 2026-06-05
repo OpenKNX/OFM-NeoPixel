@@ -671,6 +671,8 @@ struct SpiStripConfig : public PhysicalStripConfig
     uint8_t _maxRgbValue = 255;                      // Default: 255 (no clamping). Can limit for power management
 };
 
+#include "LevelShifterType.h"
+
 /**
  * @brief Configuration for 1-wire LED strips (WS2812B/SK6812/etc.)
  *
@@ -760,6 +762,61 @@ struct SerialStripConfig : public PhysicalStripConfig
      */
     uint32_t getResetTime() const { return _resetTime; }
 
+    // ===== Effective Timing (resolved values for display / driver use) =====
+
+    /**
+     * @brief Resolved timing values — either from custom override or protocol defaults.
+     * Used by drivers and the console to display/apply actual ns values.
+     *
+     * For PIO the ratios T0H:T0L:T1H:T1L = 3:7:6:4 are fixed by the PIO program.
+     * Setting T1H overrides the bit period; all other values are derived.
+     * For RMT all four values are independent.
+     */
+    struct EffectiveTimingNs
+    {
+        uint16_t t0h;     ///< T0H in ns (0-bit high time)
+        uint16_t t0l;     ///< T0L in ns (0-bit low time)
+        uint16_t t1h;     ///< T1H in ns (1-bit high time)
+        uint16_t t1l;     ///< T1L in ns (1-bit low time)
+        uint32_t resetUs; ///< Reset/latch time in µs
+        bool isCustom;    ///< true = user override active, false = protocol default
+    };
+
+    /**
+     * @brief Return effective timing values for the given protocol.
+     *
+     * When custom values are stored (_t0h > 0) they are returned directly.
+     * Otherwise, standard protocol defaults are used.
+     *
+     * @param protocol LED protocol (determines defaults when in AUTO mode)
+     * @return EffectiveTimingNs with resolved timing values
+     */
+    EffectiveTimingNs getEffectiveTimings(LedProtocol protocol) const
+    {
+        if (_t0h > 0)
+        {
+            // Custom values set — return as-is
+            return { _t0h, _t0l, _t1h, _t1l, _resetTime, true };
+        }
+
+        // Protocol defaults
+        switch (protocol)
+        {
+            case LedProtocol::SK6812:
+            case LedProtocol::SK6812_RGBCCT:
+                return { 300, 900, 600, 600, _resetTime > 0 ? _resetTime : 80, false };
+
+            case LedProtocol::WS2811:
+                return { 500, 2000, 1200, 1300, _resetTime > 0 ? _resetTime : 50, false };
+
+            case LedProtocol::WS2812:
+            case LedProtocol::WS2812B:
+            case LedProtocol::WS2805_RGBCCT:
+            default:
+                return { 300, 900, 750, 600, _resetTime > 0 ? _resetTime : 50, false };
+        }
+    }
+
     // ===== Test Routines =====
 
     /**
@@ -787,11 +844,27 @@ struct SerialStripConfig : public PhysicalStripConfig
      */
     bool measureTiming(PhysicalStrip* strip, uint16_t& t0h, uint16_t& t0l, uint16_t& t1h, uint16_t& t1l);
 
+    // ===== Level Shifter =====
+
+    /**
+     * @brief Set level-shifter type for this strip's data line
+     * @param type Level-shifter type (NONE or TXS0108E)
+     * @note Driver applies GPIO optimizations on next applyConfig() call
+     */
+    void setLevelShifter(LevelShifterType type) { _levelShifter = type; }
+
+    /**
+     * @brief Get configured level-shifter type
+     * @return LevelShifterType (NONE by default)
+     */
+    LevelShifterType getLevelShifter() const { return _levelShifter; }
+
   private:
-    TimingMode _timingMode = TimingMode::AUTO; // Default: 800kHz standard
-    uint16_t _t0h = 0;                         // Default: 0 = auto-calculate
-    uint16_t _t0l = 0;                         // Default: 0 = auto-calculate
-    uint16_t _t1h = 0;                         // Default: 0 = auto-calculate
-    uint16_t _t1l = 0;                         // Default: 0 = auto-calculate
-    uint32_t _resetTime = 0;                   // Default: 0 = auto-calculate (typically 50us)
+    TimingMode       _timingMode    = TimingMode::AUTO;       // Default: 800kHz standard
+    uint16_t         _t0h           = 0;                      // Default: 0 = auto-calculate
+    uint16_t         _t0l           = 0;                      // Default: 0 = auto-calculate
+    uint16_t         _t1h           = 0;                      // Default: 0 = auto-calculate
+    uint16_t         _t1l           = 0;                      // Default: 0 = auto-calculate
+    uint32_t         _resetTime     = 0;                      // Default: 0 = auto-calculate (typically 50us)
+    LevelShifterType _levelShifter  = kHwDefaultLevelShifter; ///< Default from NEOPIXEL_HW_LEVELSHIFTER build flag (NONE if unset)
 };

@@ -108,6 +108,17 @@ void NeoPixel::loop(bool configured)
         return;
     }
 
+    // Clone timing scan state machine (non-blocking)
+    if (_scanPhase != ScanPhase::IDLE)
+    {
+        loopTimingScan();
+        return; // Scan has exclusive control — skip normal auto-update
+    }
+
+    // Clone timing tuner: hold strip at test pattern, skip normal updates
+    if (!_activeTuners.empty())
+        return;
+
 #ifdef OPENKNX_NEOPIXEL_TESTS
     // Run AnimationTest if active
     if (AnimationTest::instance().isRunning())
@@ -150,6 +161,110 @@ void NeoPixel::loop(bool configured)
                 _fpsLastMeasure = now;
             }
         }
+    }
+}
+
+// Clone timing scan profiles (shared with NeoPixelConsole.cpp)
+#include "NeoPixelTimingScan.h"
+
+/**
+ * @brief Non-blocking state machine for clone timing scan.
+ *
+ * Called every loop() iteration while _scanPhase != IDLE.
+ * Cycles through all kCloneProfiles, lighting up LEDs 0-2 in the
+ * profile's color for kScanColorDurationMs ms, then blanks them
+ * for kScanPauseDurationMs ms before moving to the next profile.
+ *
+ * After all profiles, restores the original timing and prints a summary.
+ */
+void NeoPixel::loopTimingScan()
+{
+    auto strip = _manager ? _manager->getStrip(_scanStripId) : nullptr;
+    if (!strip) { _scanPhase = ScanPhase::IDLE; return; }
+
+    uint32_t now = millis();
+
+    switch (_scanPhase)
+    {
+        case ScanPhase::SHOW_COLOR:
+        {
+            if (now - _scanPhaseStart < kScanColorDurationMs)
+                return; // Still showing — wait
+
+            // Transition to interactive wait
+            _scanPhaseStart    = now;
+            _scanPromptPrinted = false;
+            _scanPhase         = ScanPhase::WAIT_INPUT;
+            break;
+        }
+
+        case ScanPhase::WAIT_INPUT:
+        {
+            if (!_scanPromptPrinted)
+            {
+                openknx.logger.logWithValues("  Profile %d/%d active. Does the ENTIRE strip light up?",
+                                             (int)_scanProfileIdx + 1, (int)kCloneProfileCount);
+                openknx.logger.logWithValues("  (auto-advance in %ds — or type a command)",
+                                             (int)(kScanWaitTimeoutMs / 1000));
+                openknx.logger.log("  'neo scan next'  -> next profile");
+                openknx.logger.log("  'neo scan apply' -> save this profile & finish");
+                openknx.logger.log("  'neo scan stop'  -> abort, restore original timing");
+                _scanPromptPrinted = true;
+            }
+
+            if (now - _scanPhaseStart < kScanWaitTimeoutMs)
+                return; // Still waiting for input
+
+            // Timeout — advance automatically like "next"
+            openknx.logger.log("  (timeout — advancing to next profile)");
+            processScanControlCommand("next");
+            break;
+        }
+
+        case ScanPhase::PAUSE:
+        {
+            if (now - _scanPhaseStart < kScanPauseDurationMs)
+                return; // Brief blank gap — wait
+
+            if (_scanProfileIdx >= kCloneProfileCount)
+            {
+                _scanPhase = ScanPhase::IDLE; // Guard — should not happen
+                return;
+            }
+
+            // Apply next profile and light the FULL strip
+            const CloneTimingProfile& p = kCloneProfiles[_scanProfileIdx];
+            strip->setTimingMode(p.mode);
+
+            auto* cfg  = strip->getConfig();
+            SerialStripConfig* sCfg = (cfg && cfg->isSerialConfig())
+                                          ? static_cast<SerialStripConfig*>(cfg) : nullptr;
+            if (sCfg && p.resetUs > 0)
+            {
+                sCfg->setResetTime(p.resetUs);
+                auto* drv = strip->getDriver();
+                if (drv) drv->applyConfig(cfg);
+            }
+
+            uint16_t ledCount = strip->getLedCount();
+            for (uint16_t i = 0; i < ledCount; i++)
+                strip->setPixel(i, p.r, p.g, p.b);
+            strip->show();
+
+            _scanPhaseStart    = now;
+            _scanPromptPrinted = false;
+            _scanPhase         = ScanPhase::SHOW_COLOR;
+
+            openknx.logger.logWithValues("Profile %d/%d: %s — %s",
+                                         (int)_scanProfileIdx + 1,
+                                         (int)kCloneProfileCount,
+                                         p.name, p.desc);
+            break;
+        }
+
+        default:
+            _scanPhase = ScanPhase::IDLE;
+            break;
     }
 }
 

@@ -51,21 +51,55 @@ static const rmt_symbol_word_t ws2812_reset = {
     .level1 = 0,
 };
 
+/**
+ * WS2811 Timing for RMT (10MHz Resolution)
+ *
+ * WS2811 operates at 400kHz (much slower than WS2812):
+ * - 0-Bit: 0.5µs HIGH, 2.0µs LOW
+ * - 1-Bit: 1.2µs HIGH, 1.3µs LOW
+ * - Reset: >50µs LOW
+ *
+ * At 10MHz (100ns per tick):
+ * - 0.5µs = 5 ticks
+ * - 2.0µs = 20 ticks
+ * - 1.2µs = 12 ticks
+ * - 1.3µs = 13 ticks
+ */
+static const rmt_symbol_word_t ws2811_zero = {
+    .duration0 = 5,  // T0H = 0.5µs
+    .level0 = 1,
+    .duration1 = 20, // T0L = 2.0µs
+    .level1 = 0,
+};
+
+static const rmt_symbol_word_t ws2811_one = {
+    .duration0 = 12, // T1H = 1.2µs
+    .level0 = 1,
+    .duration1 = 13, // T1L = 1.3µs
+    .level1 = 0,
+};
+
 // ============================================================================
 // Static Resource Detection Helpers (ESP32)
 // ============================================================================
 
 /**
- * Get total number of RMT channels available on this ESP32 chip
+ * Get total number of RMT TX channels available on this ESP32 chip
+ * ESP32 original:  8 TX channels
+ * ESP32-S2/S3:     4 TX channels
+ * ESP32-C3/C6:     2 TX channels
+ * ESP32-C5:        4 TX channels
  */
 static uint get_total_rmt_channels()
 {
-    #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
+    #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C5)
     return 4;
-    #elif defined(CONFIG_IDF_TARGET_ESP32C3)
+    #elif defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
     return 2;
+    #elif defined(CONFIG_IDF_TARGET_ESP32)
+    return 8;
     #else
-    return 8; // ESP32 Original
+    return 4; // Safe default
     #endif
 }
 
@@ -194,20 +228,22 @@ bool RMT_NeoPixel_Serial::init()
     if (!_inst || !_inst->buffer) return false;
     if (_inst->initialized) return true;
 
-    // Find free RMT channel (1-7, 0 is reserved for library)
+    // Find a free slot in our instance tracking array (0..maxChannels-1)
     int channel = -1;
 
     // Count available channels depending on variant
     int maxChannels = 8; // ESP32 Original
 
-    #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
+    #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C5)
     maxChannels = 4;
-    #elif defined(CONFIG_IDF_TARGET_ESP32C3)
+    #elif defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
     maxChannels = 2;
     #endif
 
-    // Search for free channel (starting from 1, because 0 is reserved)
-    for (int i = 1; i < maxChannels; i++)
+    // Search for a free software slot in our instance tracking array
+    // Note: rmt_new_tx_channel() allocates HW channels automatically (new ESP-IDF 5 API).
+    // _instances[] is only used to track how many strips are active and enforce the per-chip limit.
+    for (int i = 0; i < maxChannels; i++)
     {
         if (_instances[i] == nullptr)
         {
@@ -250,11 +286,13 @@ bool RMT_NeoPixel_Serial::init()
     }
 
     // Create encoder (bytes encoder for LED data)
+    // Select timing based on protocol – WS2811 uses 400kHz, all others use 800kHz
+    bool isWS2811 = (_inst->protocol == LedProtocol::WS2811);
     rmt_bytes_encoder_config_t encoder_config = {
-        .bit0 = ws2812_zero,
-        .bit1 = ws2812_one,
+        .bit0 = isWS2811 ? ws2811_zero : ws2812_zero,
+        .bit1 = isWS2811 ? ws2811_one  : ws2812_one,
         .flags = {
-            .msb_first = 1 // MSB first for WS2812
+            .msb_first = 1 // MSB first for WS2812/WS2811
         }};
 
     if (rmt_new_bytes_encoder(&encoder_config, &_inst->encoder) != ESP_OK)
@@ -444,8 +482,8 @@ DriverCapabilities RMT_NeoPixel_Serial::getCapabilities() const
     DriverCapabilities caps;
     caps.supportsRGBW = (_inst && _inst->bytesPerLed == 4);
     caps.supportsDMA = true;
-    caps.supportsAsync = true;
-    caps.maxFrequency = 400; // ~400Hz update rate
+    caps.supportsAsync = false; // show() is blocking (rmt_tx_wait_all_done)
+    caps.maxFrequency = 400;    // ~400Hz update rate
     caps.maxLeds = 2000;
     return caps;
 }
@@ -471,8 +509,78 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     // Apply ColorOrder
     _inst->colorOrder = serialCfg->getColorOrder();
 
-    // RMT has no other runtime-configurable settings for serial strips
-    // Timing and protocol are fixed at initialization
+    // Apply level-shifter GPIO optimizations
+    _inst->levelShifterType = serialCfg->getLevelShifter();
+    if (_inst->levelShifterType == LevelShifterType::TXS0108E)
+    {
+        // TXS0108E auto-direction requires strong A-side edges and no resistive load.
+        // Boost drive capability to 40 mA for sharpest rising/falling edges.
+        gpio_set_drive_capability((gpio_num_t)_inst->pin, GPIO_DRIVE_CAP_3);
+        // Disable internal pull-up/down to avoid interfering with direction-detect RC.
+        gpio_set_pull_mode((gpio_num_t)_inst->pin, GPIO_FLOATING);
+        ESP_LOGI("RMT_NeoPixel", "GPIO%lu: TXS0108E mode - drive=40mA, pull=FLOAT", (unsigned long)_inst->pin);
+    }
+    else if (_inst->levelShifterType == LevelShifterType::SN74HCT125 ||
+             _inst->levelShifterType == LevelShifterType::SN74AHCT125)
+    {
+        // 74HCT/AHCT: unidirectional transparent buffer; OE=GND, always enabled.
+        // TTL input threshold VIH >= 2.0V is satisfied by 3.3V output; no GPIO changes needed.
+        // Default 20mA drive (GPIO_DRIVE_CAP_2) is more than sufficient for a logic input.
+        ESP_LOGI("RMT_NeoPixel", "GPIO%lu: %s mode - no GPIO changes needed",
+                 (unsigned long)_inst->pin,
+                 (_inst->levelShifterType == LevelShifterType::SN74AHCT125) ? "74AHCT125" : "74HCT125");
+    }
+
+    // Apply custom timing if T0H is set.
+    // RMT encodes T0H/T0L and T1H/T1L independently via rmt_symbol_word_t.
+    // Resolution: 10MHz = 100ns per tick  →  ticks = ns / 100
+    uint16_t t0h = serialCfg->getT0H();
+    uint16_t t0l = serialCfg->getT0L();
+    uint16_t t1h = serialCfg->getT1H();
+    uint16_t t1l = serialCfg->getT1L();
+    if (t0h > 0 && t0l > 0 && t1h > 0 && t1l > 0 && _inst->initialized)
+    {
+        // Build custom symbol words (ticks at 10 MHz = 100 ns per tick)
+        rmt_symbol_word_t custom_zero = {
+            .duration0 = (uint16_t)(t0h / 100),
+            .level0    = 1,
+            .duration1 = (uint16_t)(t0l / 100),
+            .level1    = 0,
+        };
+        rmt_symbol_word_t custom_one = {
+            .duration0 = (uint16_t)(t1h / 100),
+            .level0    = 1,
+            .duration1 = (uint16_t)(t1l / 100),
+            .level1    = 0,
+        };
+
+        // Recreate the bytes encoder with the new symbols
+        if (_inst->encoder)
+        {
+            rmt_del_encoder(_inst->encoder);
+            _inst->encoder = nullptr;
+        }
+        rmt_bytes_encoder_config_t encoder_config = {
+            .bit0  = custom_zero,
+            .bit1  = custom_one,
+            .flags = { .msb_first = 1 },
+        };
+        if (rmt_new_bytes_encoder(&encoder_config, &_inst->encoder) != ESP_OK)
+        {
+            ESP_LOGE("RMT_NeoPixel", "Failed to recreate encoder for custom timing");
+            return false;
+        }
+
+        // Store in inst for display
+        _inst->customT0H = t0h;
+        _inst->customT0L = t0l;
+        _inst->customT1H = t1h;
+        _inst->customT1L = t1l;
+
+        // Update reset time if provided
+        // (reset is handled in show() via delay, not via encoder)
+    }
+
     return true;
 }
 

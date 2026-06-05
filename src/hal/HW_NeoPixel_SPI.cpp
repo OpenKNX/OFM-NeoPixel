@@ -8,8 +8,9 @@
     #include <esp_log.h>
 #endif
 
-bool HW_NeoPixel_SPI::_spi0Used = false; // Static tracking variable for SPI0 usage
-bool HW_NeoPixel_SPI::_spi1Used = false; // Static tracking variable for SPI1 usage
+bool HW_NeoPixel_SPI::_spi0Used = false;       // Static tracking variable for SPI0 usage
+bool HW_NeoPixel_SPI::_spi1Used = false;       // Static tracking variable for SPI1 usage
+SPIClass* HW_NeoPixel_SPI::_spi1Instance = nullptr; // Second SPI bus instance (allocated on demand)
 
 // APA102/SK9822 Brightness Configuration (5-bit hardware brightness)
 // Safe range: 16-30 (below 16 flickers, 31/0xFF breaks sync on clones)
@@ -259,20 +260,42 @@ SPIClass* HW_NeoPixel_SPI::selectSPI()
     if (!_spi0Used)
     {
         _spi0Used = true;
-        return &SPI;
+        return &SPI; // SPI0 / SPI2 (IDF) / VSPI - always the default Arduino SPI bus
     }
 
     if (!_spi1Used)
     {
-        _spi1Used = true;
 #if defined(ARDUINO_ARCH_RP2040)
-        return &SPI1; // On RP2040, SPI1 is available
+        _spi1Used = true;
+        return &SPI1; // RP2040: SPI1
+
 #elif defined(ARDUINO_ARCH_ESP32)
-        // On ESP32 is SPI1 the HSPI
-        return &SPI; // Fallback, normally SPIClass HSPI would be used
+    #if defined(CONFIG_IDF_TARGET_ESP32C3)
+        // C3 has only one usable SPI bus - cannot create a second SPI strip
+        openknx.logger.logWithPrefix("HW NeoPixel SPI", "ERROR: ESP32-C3 supports only 1 SPI strip (single SPI bus)!");
+        return nullptr;
+
+    #elif defined(CONFIG_IDF_TARGET_ESP32) || defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
+        // Original ESP32 / S2 / S3: second bus is HSPI
+        if (_spi1Instance == nullptr)
+            _spi1Instance = new SPIClass(HSPI);
+        _spi1Used = true;
+        return _spi1Instance;
+
+    #else
+        // C5, C6 and future variants: second bus via FSPI
+        if (_spi1Instance == nullptr)
+            _spi1Instance = new SPIClass(FSPI);
+        _spi1Used = true;
+        return _spi1Instance;
+    #endif
+
+#else
+        return nullptr;
 #endif
-    };
-    openknx.logger.logWithPrefix("PIO NeoPixel SPI", "ERROR: All SPI instances are already in use!");
+    }
+
+    openknx.logger.logWithPrefix("HW NeoPixel SPI", "ERROR: All SPI instances are already in use!");
     return nullptr; // No SPI available
 }
 
