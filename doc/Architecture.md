@@ -1,7 +1,7 @@
 # OFM-NeoPixel - Architecture & Flow Diagrams
 
-**Version:** 0.0.1  
-**Date:** November 2025
+**Version:** 0.4.0  
+**Date:** June 2026
 
 Detailed architecture diagrams and data flow visualizations for the OFM-NeoPixel library.
 
@@ -23,6 +23,9 @@ Detailed architecture diagrams and data flow visualizations for the OFM-NeoPixel
 - [Data Flow](#data-flow)
 - [Memory Layout](#memory-layout)
 - [Effect System](#effect-system)
+- [Effektmanager (Cue Sequencer)](#effektmanager-cue-sequencer)
+- [2D / 3D Matrix Geometry](#2d--3d-matrix-geometry)
+- [Effektkette (Distributed Rendering)](#effektkette-distributed-rendering)
 - [Hardware Abstraction](#hardware-abstraction)
 - [GPIO Optimizations](#gpio-optimizations)
 - [Update Loop](#update-loop)
@@ -727,6 +730,136 @@ VirtualStrip::mapToPhysical()
      │
      ▼
 PhysicalStrip::show()
+```
+
+---
+
+## Effektmanager (Cue Sequencer)
+
+The Effektmanager (EM) is a per-segment sequencer that applies a chain of effect presets (cues) over time. EM configuration lives in KNX flash (ETS); runtime state lives in RAM.
+
+### Data Hierarchy
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│              EffektManagerData[16]  (KNX flash, ~68 KB)        │
+│                                                               │
+│  EffektManagerHeader (20 B)                                   │
+│    ├─ name[16]      ETS description                           │
+│    ├─ cueCount      active cues (1..99)                       │
+│    ├─ loop:1        restart at cue 1 when done                │
+│    ├─ nextEmId      chain target (0=stop, 1..16)              │
+│    └─ enabled       0=off, 1=on                               │
+│                                                               │
+│  EffektCue cues[99]  (48 B each)                              │
+│    ├─ effectId            which effect                        │
+│    ├─ params[10]          effect parameters                  │
+│    ├─ r,g,b,w             primary colour                     │
+│    ├─ brightness          0..255                             │
+│    ├─ durationSec         0 = hold until trigger             │
+│    ├─ fadeMs              fade-out before next cue            │
+│    ├─ cueName[14]         label                              │
+│    └─ effectText[14]      e.g. ScrollText content            │
+└──────────────────────────────────────────────────────────────┘
+           │  applyCue(cue, segment)
+           ▼
+   Segment: setEffect() + params + colour + brightness + text
+```
+
+### Sequencer State Machine (per segment, RAM only)
+
+```
+        start(emId)
+            │
+            ▼
+     ┌─────────────┐  duration elapsed   ┌──────────────┐
+     │  PLAY CUE   │────────────────────►│   FADE-OUT   │
+     │ activeCue=n │                     │  (cue.fadeMs)│
+     └─────┬───────┘                     └──────┬───────┘
+           │ triggerCue(x)                      │ fade done
+           │ (jump)                             ▼
+           │                          ┌────────────────────┐
+           │                          │  advanceToNextCue  │
+           │                          └─────────┬──────────┘
+           │                                    │
+           │              ┌──────────────┬──────┴───────┐
+           │              │ more cues    │ last cue     │
+           │              ▼              ▼              ▼
+           │        next cue n+1    loop? → cue 1   nextEmId? → chain EM
+           │                                          else → STOP
+           └──────────────────────────────────────────────►
+
+  Notes:
+   • start() interrupts any running EM immediately (Variante A)
+   • if segment is in an Effektkette → chain is paused during EM, resumed on stop
+   • last EM/cue is saved for power-off restore (restart from cue 1)
+```
+
+---
+
+## 2D / 3D Matrix Geometry
+
+The LED chain is always 1D on the wire. `Segment` adds a pure-software geometry layer that maps `(x,y)` / `(x,y,z)` coordinates to the linear pixel index according to the configured wiring topology.
+
+```
+ setGeometry(width, height[, depth], topology)
+                       │
+                       ▼
+   ┌──────────────────────────────────────────────────────────┐
+   │ Segment::update()  — automatic dispatch                  │
+   │                                                          │
+   │   is3D() && effect supports 3D ──► update3D(seg, dt)     │
+   │   is2D() && effect supports 2D ──► update2D(seg, dt)     │
+   │   otherwise                     ──► update(seg, dt)  (1D) │
+   └──────────────────────────────────────────────────────────┘
+                       │ setPixelXY(x,y) / setPixelXYZ(x,y,z)
+                       ▼
+        xyToIndex() / xyzToIndex()  — topology mapping
+                       │
+                       ▼
+            linear pixel index in VirtualStrip buffer
+
+ Topologies:
+   LINEAR_1D            no matrix (default)
+   ROWS_SERPENTINE      →→ ←← →→   (most WS2812B panels)
+   ROWS_LINEAR          →→ →→ →→
+   COLS_SERPENTINE      ↓↑↓↑
+   COLS_LINEAR          ↓↓↓↓
+   ROWS_SERPENTINE_3D   3D volume, serpentine rows
+   COLS_LINEAR_TILED    tiled panel chain, columns linear per block
+   COLS_SERP_TILED      tiled panel chain, columns serpentine per block
+```
+
+Existing 1D effects work unchanged on a 2D segment — they are rendered line by line. 2D-aware effects (Fire2D, Noise2D, Cylon2D, ScrollText, Clock2D) advertise `DIM_2D` capability and receive `update2D()`.
+
+---
+
+## Effektkette (Distributed Rendering)
+
+Several KNX devices render one logical effect across a single **virtual band**. No pixels are streamed over the bus — each device computes the full effect but only draws its local window.
+
+```
+  Virtual band: total length = 300
+
+  ┌─────────────── Device A (Master) ───────────────┐
+  │ setVirtualBand(total=300, offset=0)             │
+  │ effect computes f(t, 300), draws [0..99]        │
+  └───────────────┬─────────────────────────────────┘
+                  │ effect KO changes
+                  ▼
+         6-byte sync telegram (K40 group)
+          ┌───────┴────────┐
+          ▼                ▼
+  ┌── Device B (Slave) ──┐  ┌── Device C (Slave) ──┐
+  │ offset=100           │  │ offset=200           │
+  │ draws [100..199]     │  │ draws [200..299]      │
+  │ watchdog: off after  │  │ watchdog: off after   │
+  │ sync timeout         │  │ sync timeout          │
+  └──────────────────────┘  └───────────────────────┘
+
+  getLength() returns 300 on every device, so the effect math is
+  identical everywhere. setPixel(i,...) silently drops pixels that
+  fall outside the device's local window → zero effect code changes.
 ```
 
 ---

@@ -11,6 +11,8 @@
 #include "NeoPixel.h"
 
 // BStandard library includes
+#include <cstdarg>
+#include <cstdio>
 #include <sstream>
 
 // Effect system includes
@@ -47,6 +49,54 @@ extern PerformanceTracker g_perfTracker;
 
 #include "NeoPixelTimingScan.h"
 
+// Effektmanager/Effektkette console bridge (action enum, data provider hooks)
+#include "NeoPixelEmConsole.h"
+
+// Weak backend hooks — implemented by the OAM. Defaults: no backend present.
+int __attribute__((weak)) openknxNeoPixelEmSegmentCount()
+{
+    return -1;
+}
+
+bool __attribute__((weak)) openknxNeoPixelGetEmStatus(uint8_t seg, NeoEmSegStatus& out)
+{
+    (void)seg;
+    (void)out;
+    return false;
+}
+
+const EffektManagerData* __attribute__((weak)) openknxNeoPixelGetEmData(uint8_t emId)
+{
+    (void)emId;
+    return nullptr;
+}
+
+bool __attribute__((weak)) openknxNeoPixelGetChainStatus(uint8_t seg, NeoChainSegStatus& out)
+{
+    (void)seg;
+    (void)out;
+    return false;
+}
+
+bool __attribute__((weak)) openknxNeoPixelHandleEmChainAction(uint8_t action, int arg1, int arg2)
+{
+    (void)action;
+    (void)arg1;
+    (void)arg2;
+    return false;
+}
+
+// Plain console output bridge for OAM backend messages (errors etc.).
+void openknxNeoPixelConsolePrintf(const char* fmt, ...)
+{
+    char buffer[200];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
+    openknx.logger.log(buffer);
+}
+
 // ============================================================================
 // Clone Timing Profiles (definition — declared extern in NeoPixelTimingScan.h)
 // ============================================================================
@@ -68,7 +118,6 @@ const uint32_t kScanWaitTimeoutMs   = 10000; ///< Auto-advance if no input after
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
 /**
  * @brief Get protocol name string from LedProtocol enum
  * @param protocol LED protocol enum value
@@ -109,6 +158,9 @@ static const char* getProtocolName(LedProtocol protocol)
 void NeoPixel::showHelp()
 {
     openknx.console.printHelpLine("neo", "NeoPixel LED Control Module. Use 'neo ?' for more.");
+    openknx.console.printHelpLine("neo em ?", "Effektmanager commands (status/start/stop/dump)");
+    openknx.console.printHelpLine("neo cue ?", "Cue commands (trigger/list via em dump)");
+    openknx.console.printHelpLine("neo chain ?", "Effektkette sync commands (status/set/override/trigger)");
 }
 
 /**
@@ -179,6 +231,25 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
 
         printHelpSectionHeader("Power Management");
         openknx.console.printHelpLine("neo power ?", "Show detailed Power commands");
+
+        printHelpSectionHeader("Effektmanager (EM)");
+        openknx.console.printHelpLine("neo em status [seg]", "Show EM status (all segments or one)");
+        openknx.console.printHelpLine("neo em dump <seg>", "Dump active EM header/runtime state for one segment");
+        openknx.console.printHelpLine("neo em start <seg> <em>", "Start Effektmanager <em> on segment <seg>");
+        openknx.console.printHelpLine("neo em stop <seg>", "Stop Effektmanager on segment <seg>");
+        openknx.console.printHelpLine("neo em cue <seg> <cue>", "Trigger cue <cue> of active EM on segment <seg>");
+
+        printHelpSectionHeader("Cue Commands");
+        openknx.console.printHelpLine("neo cue <seg> <cue>", "Trigger cue <cue> of active EM on segment <seg>");
+        openknx.console.printHelpLine("neo cue", "Show cue table for all segments");
+        openknx.console.printHelpLine("neo cue list [seg]", "Show cue table for all segments or one segment");
+        openknx.console.printHelpLine("neo cue ?", "Show detailed cue command help");
+
+        printHelpSectionHeader("Effektkette (Chain)");
+        openknx.console.printHelpLine("neo chain status [seg]", "Show Effektkette status (all segments or one)");
+        openknx.console.printHelpLine("neo chain set <seg> <off|master|slave>", "Set Effektkette mode for segment");
+        openknx.console.printHelpLine("neo chain override <seg> <0|1>", "Set slave local override flag");
+        openknx.console.printHelpLine("neo chain trigger <seg>", "Send sync telegram now (master segment)");
         openknx.console.printHelpLine("neo power", "Show detailed status of global + all strips");
         openknx.console.printHelpLine("neo power <n>", "Show power status for physical strip <n>");
 
@@ -322,6 +393,56 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         printDetailHelpExample("neo power g limit 5000   Set global limit to 5A");
         printDetailHelpExample("neo power 0 limit 2000   Set strip 0 limit to 2A");
         printDetailHelpExample("neo power 0 mode 1       Strip 0 uses global mode");
+        printDetailHelpEnd();
+        return true;
+    }
+
+    // Detail help: Effektmanager
+    if (command == "neo em ?" || command == "neo em help")
+    {
+        printDetailHelpHeader("Effektmanager Commands");
+        openknx.console.printHelpLine("status [seg]", "Show EM status (all segments or one)");
+        openknx.console.printHelpLine("dump <seg>", "Dump active EM header/runtime state for one segment");
+        openknx.console.printHelpLine("start <seg> <em>", "Start Effektmanager on segment");
+        openknx.console.printHelpLine("stop <seg>", "Stop Effektmanager on segment");
+        openknx.console.printHelpLine("cue <seg> <cue>", "Trigger cue of currently active EM (or use neo cue)");
+        printDetailHelpSeparator();
+        printDetailHelpParameter("<seg>=0-based Segment Index, <em>=EM ID (0..16), <cue>=1..99");
+        printDetailHelpExample("neo em status         Show status for all segments");
+        printDetailHelpExample("neo em start 0 3      Start EM 3 on segment 0");
+        printDetailHelpExample("neo em cue 0 2        Trigger cue 2 on segment 0");
+        printDetailHelpEnd();
+        return true;
+    }
+
+    // Detail help: Cue
+    if (command == "neo cue ?" || command == "neo cue help")
+    {
+        printDetailHelpHeader("Cue Commands");
+        openknx.console.printHelpLine("<seg> <cue>", "Trigger cue of currently active EM on segment");
+        openknx.console.printHelpLine("", "Show cue table for all segments");
+        openknx.console.printHelpLine("list [seg]", "Show cue table for all segments or one segment");
+        printDetailHelpSeparator();
+        printDetailHelpParameter("<seg>=0-based Segment Index, <cue>=1..99");
+        printDetailHelpExample("neo cue 0 2           Trigger cue 2 on segment 0");
+        printDetailHelpExample("neo cue               Show cue table for all segments");
+        printDetailHelpExample("neo cue list 0        Show configured cues for active EM on segment 0");
+        printDetailHelpEnd();
+        return true;
+    }
+
+    // Detail help: Effektkette
+    if (command == "neo chain ?" || command == "neo chain help")
+    {
+        printDetailHelpHeader("Effektkette Commands");
+        openknx.console.printHelpLine("status [seg]", "Show Effektkette status (all segments or one)");
+        openknx.console.printHelpLine("set <seg> <off|master|slave>", "Set segment sync mode");
+        openknx.console.printHelpLine("override <seg> <0|1>", "Enable/disable local slave override");
+        openknx.console.printHelpLine("trigger <seg>", "Send sync telegram now (master only)");
+        printDetailHelpSeparator();
+        printDetailHelpParameter("<seg>=0-based Segment Index");
+        printDetailHelpExample("neo chain status      Show chain status for all segments");
+        printDetailHelpExample("neo chain set 0 slave Set segment 0 to slave");
         printDetailHelpEnd();
         return true;
     }
@@ -515,12 +636,474 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     }
 #endif
 
+    // neo em / neo chain commands: parsing + rendering in OFM, data/actions via backend hooks.
+    if (command == "neo em" || command.compare(0, 7, "neo em ") == 0)
+    {
+        std::string sub = (command.length() > 7) ? command.substr(7) : "";
+
+        if (sub.empty() || sub == "status")
+        {
+            printEmStatusTable(-1);
+            return true;
+        }
+        if (sub == "?")
+        {
+            openknx.logger.log("Usage: neo em status [seg] | dump <seg> | start <seg> <em> | stop <seg> | cue <seg> <cue>  (seg=0-based)");
+            return true;
+        }
+        if (sub.compare(0, 7, "status ") == 0)
+        {
+            int seg = atoi(sub.c_str() + 7);
+            if (seg < 0)
+            {
+                openknx.logger.log("Usage: neo em status [seg]");
+                return true;
+            }
+            printEmStatusTable(seg);
+            return true;
+        }
+        if (sub.compare(0, 5, "dump ") == 0)
+        {
+            int seg = atoi(sub.c_str() + 5);
+            if (seg < 0)
+            {
+                openknx.logger.log("Usage: neo em dump <seg>");
+                return true;
+            }
+            printEmCueTable(seg);
+            return true;
+        }
+        if (sub.compare(0, 6, "start ") == 0)
+        {
+            int seg = 0, em = 0;
+            if (sscanf(sub.c_str() + 6, "%d %d", &seg, &em) != 2 || seg < 0)
+            {
+                openknx.logger.log("Usage: neo em start <seg> <em>");
+                return true;
+            }
+            if (openknxNeoPixelHandleEmChainAction(NEO_EM_START, seg, em))
+                printEmStatusTable(seg);
+            else
+                openknx.logger.log("ERROR: Invalid segment or EM id");
+            return true;
+        }
+        if (sub.compare(0, 5, "stop ") == 0)
+        {
+            int seg = atoi(sub.c_str() + 5);
+            if (seg < 0)
+            {
+                openknx.logger.log("Usage: neo em stop <seg>");
+                return true;
+            }
+            if (openknxNeoPixelHandleEmChainAction(NEO_EM_STOP, seg, 0))
+                printEmStatusTable(seg);
+            else
+                openknx.logger.log("ERROR: Invalid segment");
+            return true;
+        }
+        if (sub.compare(0, 4, "cue ") == 0)
+        {
+            int seg = 0, cue = 0;
+            if (sscanf(sub.c_str() + 4, "%d %d", &seg, &cue) != 2 || seg < 0)
+            {
+                openknx.logger.log("Usage: neo em cue <seg> <cue>");
+                return true;
+            }
+            if (openknxNeoPixelHandleEmChainAction(NEO_EM_CUE, seg, cue))
+                printEmStatusTable(seg);
+            return true;
+        }
+
+        openknx.logger.log("Usage: neo em status [seg] | dump <seg> | start <seg> <em> | stop <seg> | cue <seg> <cue>  (seg=0-based)");
+        return true;
+    }
+
+    // neo cue commands (alias for neo em cue / em dump)
+    if (command == "neo cue" || command.compare(0, 8, "neo cue ") == 0)
+    {
+        std::string sub = (command.length() > 8) ? command.substr(8) : "";
+
+        if (sub.empty() || sub == "list")
+        {
+            printEmCueTable(-1);
+            return true;
+        }
+        if (sub == "?")
+        {
+            openknx.logger.log("Usage: neo cue | neo cue <seg> <cue> | neo cue list [seg]  (seg=0-based)");
+            return true;
+        }
+
+        if (sub.compare(0, 5, "list ") == 0)
+        {
+            int seg = atoi(sub.c_str() + 5);
+            if (seg < 0)
+            {
+                openknx.logger.log("Usage: neo cue list <seg>");
+                return true;
+            }
+            printEmCueTable(seg);
+            return true;
+        }
+
+        int seg = 0, cue = 0;
+        if (sscanf(sub.c_str(), "%d %d", &seg, &cue) != 2 || seg < 0)
+        {
+            openknx.logger.log("Usage: neo cue | neo cue <seg> <cue> | neo cue list [seg]  (seg=0-based)");
+            return true;
+        }
+        if (openknxNeoPixelHandleEmChainAction(NEO_EM_CUE, seg, cue))
+            printEmStatusTable(seg);
+        return true;
+    }
+
+    if (command == "neo chain" || command.compare(0, 10, "neo chain ") == 0)
+    {
+        std::string sub = (command.length() > 10) ? command.substr(10) : "";
+
+        if (sub.empty() || sub == "status")
+        {
+            printChainStatusTable(-1);
+            return true;
+        }
+        if (sub == "?")
+        {
+            openknx.logger.log("Usage: neo chain status [seg] | set <seg> <off|master|slave> | override <seg> <0|1> | trigger <seg>  (seg=0-based)");
+            return true;
+        }
+        if (sub.compare(0, 7, "status ") == 0)
+        {
+            int seg = atoi(sub.c_str() + 7);
+            if (seg < 0)
+            {
+                openknx.logger.log("Usage: neo chain status [seg]");
+                return true;
+            }
+            printChainStatusTable(seg);
+            return true;
+        }
+        if (sub.compare(0, 4, "set ") == 0)
+        {
+            int seg = 0;
+            char mode[16] = {0};
+            if (sscanf(sub.c_str() + 4, "%d %15s", &seg, mode) != 2 || seg < 0)
+            {
+                openknx.logger.log("Usage: neo chain set <seg> <off|master|slave>");
+                return true;
+            }
+            int modeValue = -1;
+            if (strcmp(mode, "off") == 0) modeValue = 0;
+            else if (strcmp(mode, "master") == 0) modeValue = 1;
+            else if (strcmp(mode, "slave") == 0) modeValue = 2;
+            if (modeValue < 0)
+            {
+                openknx.logger.log("Usage: neo chain set <seg> <off|master|slave>");
+                return true;
+            }
+            if (openknxNeoPixelHandleEmChainAction(NEO_CHAIN_SET, seg, modeValue))
+                printChainStatusTable(seg);
+            else
+                openknx.logger.log("ERROR: Invalid segment");
+            return true;
+        }
+        if (sub.compare(0, 9, "override ") == 0)
+        {
+            int seg = 0, flag = 0;
+            if (sscanf(sub.c_str() + 9, "%d %d", &seg, &flag) != 2 || seg < 0 || (flag != 0 && flag != 1))
+            {
+                openknx.logger.log("Usage: neo chain override <seg> <0|1>");
+                return true;
+            }
+            if (openknxNeoPixelHandleEmChainAction(NEO_CHAIN_OVERRIDE, seg, flag))
+                printChainStatusTable(seg);
+            else
+                openknx.logger.log("ERROR: Invalid segment");
+            return true;
+        }
+        if (sub.compare(0, 8, "trigger ") == 0)
+        {
+            int seg = atoi(sub.c_str() + 8);
+            if (seg < 0)
+            {
+                openknx.logger.log("Usage: neo chain trigger <seg>");
+                return true;
+            }
+            if (openknxNeoPixelHandleEmChainAction(NEO_CHAIN_TRIGGER, seg, 0))
+                printChainStatusTable(seg);
+            return true;
+        }
+
+        openknx.logger.log("Usage: neo chain status [seg] | set <seg> <off|master|slave> | override <seg> <0|1> | trigger <seg>  (seg=0-based)");
+        return true;
+    }
+
     return false;
 }
 
 // ============================================================================
 // Command Handlers
 // ============================================================================
+
+// ----------------------------------------------------------------------------
+// Effektmanager / Effektkette console rendering
+// Data is provided by the OAM backend via NeoPixelEmConsole.h hooks.
+// ----------------------------------------------------------------------------
+
+/** @brief Print Effektmanager status table (onlySeg = -1 for all segments) */
+void NeoPixel::printEmStatusTable(int onlySeg)
+{
+    const int segCount = openknxNeoPixelEmSegmentCount();
+    if (segCount < 0)
+    {
+        openknx.logger.log("ERROR: Effektmanager backend not available!");
+        return;
+    }
+
+    openknx.logger.log("");
+    printSectionSeparator();
+    openknx.logger.log("  Effektmanager Status");
+    printSectionSeparator();
+
+    if (segCount == 0)
+    {
+        openknx.logger.log("No segments created.");
+    }
+    else
+    {
+        openknx.logger.log("Seg │ EM │ Name            │ Cue   │ Running │ Startup │ Last │ Cues │ Loop │ Next");
+        openknx.logger.log("────┼────┼─────────────────┼───────┼─────────┼─────────┼──────┼──────┼──────┼──────");
+
+        for (int i = 0; i < segCount; i++)
+        {
+            if (onlySeg >= 0 && i != onlySeg) continue;
+
+            NeoEmSegStatus st{};
+            if (!openknxNeoPixelGetEmStatus((uint8_t)i, st)) continue;
+
+            if (!st.hasSegment)
+            {
+                openknx.logger.logWithValues("%3d │ -- │ %-15s │ %-5s │ %-7s │ %7s │ %4s │ %4s │ %4s │ %4s",
+                                             i, "<no segment>", "-", "-", "-", "-", "-", "-", "-");
+                continue;
+            }
+
+            const EffektManagerData* em = openknxNeoPixelGetEmData(st.activeEmId);
+            const char* name = em ? em->header.name : "-";
+            const int cueCount = em ? (int)em->header.cueCount : 0;
+            const int loop = (em && em->header.loop) ? 1 : 0;
+            const int next = em ? (int)em->header.nextEmId : 0;
+
+            char cueBuf[8] = "-";
+            if (em && cueCount > 0)
+                snprintf(cueBuf, sizeof(cueBuf), "%d/%d", (int)st.activeCueNum, cueCount);
+
+            openknx.logger.logWithValues("%3d │ %2d │ %-15.15s │ %-5s │ %-7s │ %7d │ %4d │ %4d │ %4d │ %4d",
+                                         i,
+                                         (int)st.activeEmId,
+                                         name,
+                                         cueBuf,
+                                         st.running ? "yes" : "no",
+                                         (int)st.startupEm,
+                                         (int)st.lastEmId,
+                                         cueCount,
+                                         loop,
+                                         next);
+        }
+    }
+
+    printSectionSeparator();
+    openknx.logger.log("");
+}
+
+/** @brief Print cue overview table for active EMs (onlySeg = -1 for all segments) */
+void NeoPixel::printEmCueTable(int onlySeg)
+{
+    const int segCount = openknxNeoPixelEmSegmentCount();
+    if (segCount < 0)
+    {
+        openknx.logger.log("ERROR: Effektmanager backend not available!");
+        return;
+    }
+
+    openknx.logger.log("");
+    printSectionSeparator();
+    openknx.logger.log("  Cue Overview");
+    printSectionSeparator();
+
+    if (segCount == 0)
+    {
+        openknx.logger.log("No segments created.");
+    }
+    else
+    {
+        openknx.logger.log("Seg │ Cue │ A │ FX │ Effect Name       │ P0  │ P1  │ P2  │ P3  │ P4  │ R   │ G   │ B   │ W   │ Bri │ Dur  │ Fade │ Name");
+        openknx.logger.log("────┼─────┼───┼────┼───────────────────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼──────┼──────┼──────────────");
+
+        for (int i = 0; i < segCount; i++)
+        {
+            if (onlySeg >= 0 && i != onlySeg) continue;
+
+            NeoEmSegStatus st{};
+            if (!openknxNeoPixelGetEmStatus((uint8_t)i, st)) continue;
+
+            const EffektManagerData* em = st.hasSegment ? openknxNeoPixelGetEmData(st.activeEmId) : nullptr;
+            if (!em)
+            {
+                openknx.logger.logWithValues("%3d │  -- │   │ -- │ %-17.17s │", i,
+                                             st.hasSegment ? "<no active EM>" : "<no segment>");
+                continue;
+            }
+
+            const uint8_t cueCount = (em->header.cueCount <= EM_CUE_COUNT) ? em->header.cueCount : EM_CUE_COUNT;
+            for (uint8_t cueNum = 1; cueNum <= cueCount; ++cueNum)
+            {
+                const EffektCue& cue = em->cues[cueNum - 1];
+                Effect* effect = EffectPool::getEffectByIndex(cue.effectId);
+                const char* effectName = effect ? effect->getName() : "unknown";
+
+                openknx.logger.logWithValues("%3d │ %3d │ %1s │ %2d │ %-17.17s │ %3d │ %3d │ %3d │ %3d │ %3d │ %3d │ %3d │ %3d │ %3d │ %3d │ %4d │ %4d │ %-14.14s",
+                                             i,
+                                             (int)cueNum,
+                                             (cueNum == st.activeCueNum) ? "*" : " ",
+                                             (int)cue.effectId,
+                                             effectName,
+                                             (int)cue.params[0],
+                                             (int)cue.params[1],
+                                             (int)cue.params[2],
+                                             (int)cue.params[3],
+                                             (int)cue.params[4],
+                                             (int)cue.r,
+                                             (int)cue.g,
+                                             (int)cue.b,
+                                             (int)cue.w,
+                                             (int)cue.brightness,
+                                             (int)cue.durationSec,
+                                             (int)cue.fadeMs,
+                                             cue.cueName);
+            }
+        }
+    }
+
+    printSectionSeparator();
+    openknx.logger.log("");
+}
+
+/** @brief Print Effektkette status table (onlySeg = -1 for all segments) */
+void NeoPixel::printChainStatusTable(int onlySeg)
+{
+    const int segCount = openknxNeoPixelEmSegmentCount();
+    if (segCount < 0)
+    {
+        openknx.logger.log("ERROR: Effektkette backend not available!");
+        return;
+    }
+
+    openknx.logger.log("");
+    printSectionSeparator();
+    openknx.logger.log("  Effektkette Status");
+    printSectionSeparator();
+
+    if (segCount == 0)
+    {
+        openknx.logger.log("No segments created.");
+    }
+    else
+    {
+        openknx.logger.log("Seg │ Mode   │ Pol │ TOut │ Ovr │ LastSync │ VTotal │ VOff");
+        openknx.logger.log("────┼────────┼─────┼──────┼─────┼──────────┼────────┼──────");
+
+        for (int i = 0; i < segCount; i++)
+        {
+            if (onlySeg >= 0 && i != onlySeg) continue;
+
+            NeoChainSegStatus st{};
+            if (!openknxNeoPixelGetChainStatus((uint8_t)i, st)) continue;
+
+            const char* modeName = "off";
+            if (st.syncMode == 1) modeName = "master";
+            else if (st.syncMode == 2) modeName = "slave";
+
+            openknx.logger.logWithValues("%3d │ %-6s │ %3d │ %4d │ %3d │ %8lu │ %6d │ %4d",
+                                         i,
+                                         modeName,
+                                         (int)st.overridePolicy,
+                                         (int)st.timeoutSteps,
+                                         st.localOverride ? 1 : 0,
+                                         (unsigned long)st.lastSyncMs,
+                                         (int)st.virtualTotalLength,
+                                         (int)st.virtualOffset);
+        }
+    }
+
+    printSectionSeparator();
+    openknx.logger.log("");
+}
+
+/** @brief Print compact Effektmanager/Effektkette sections for 'neo info' */
+void NeoPixel::printEmChainInfoCompact()
+{
+    const int segCount = openknxNeoPixelEmSegmentCount();
+    if (segCount <= 0) return; // No backend or no segments — stay silent in neo info
+
+    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+    openknx.logger.log("Effektmanager:");
+    openknx.logger.color(0);
+    for (int i = 0; i < segCount; i++)
+    {
+        NeoEmSegStatus st{};
+        if (!openknxNeoPixelGetEmStatus((uint8_t)i, st)) continue;
+
+        if (!st.hasSegment)
+        {
+            openknx.logger.logWithValues("  [%d] <no segment>", i);
+            continue;
+        }
+
+        const EffektManagerData* em = openknxNeoPixelGetEmData(st.activeEmId);
+        if (em)
+        {
+            openknx.logger.logWithValues("  [%d] EM %d '%s' -> %s, Cue %d/%d%s",
+                                         i,
+                                         (int)st.activeEmId,
+                                         em->header.name,
+                                         st.running ? "Running" : "Stopped",
+                                         (int)st.activeCueNum,
+                                         (int)em->header.cueCount,
+                                         em->header.loop ? ", Loop" : "");
+        }
+        else
+        {
+            openknx.logger.logWithValues("  [%d] Inactive (Startup EM: %d, Last EM: %d)",
+                                         i, (int)st.startupEm, (int)st.lastEmId);
+        }
+    }
+    openknx.logger.log("");
+
+    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+    openknx.logger.log("Effektkette:");
+    openknx.logger.color(0);
+    for (int i = 0; i < segCount; i++)
+    {
+        NeoChainSegStatus st{};
+        if (!openknxNeoPixelGetChainStatus((uint8_t)i, st)) continue;
+
+        if (st.syncMode == 1 || st.syncMode == 2)
+        {
+            openknx.logger.logWithValues("  [%d] %s (Total %d, Offset %d%s)",
+                                         i,
+                                         (st.syncMode == 1) ? "Master" : "Slave",
+                                         (int)st.virtualTotalLength,
+                                         (int)st.virtualOffset,
+                                         st.localOverride ? ", Override" : "");
+        }
+        else
+        {
+            openknx.logger.logWithValues("  [%d] Off", i);
+        }
+    }
+    openknx.logger.log("");
+}
+
 /**
  * @brief Process 'neo info' command - Complete system overview
  */
@@ -839,6 +1422,14 @@ bool NeoPixel::processInfoCommand()
         }
     }
     openknx.logger.log("");
+
+    // -----------------------------------------------------------------------
+    // EFFEKTMANAGER / EFFEKTKETTE (compact, data via OAM backend hooks)
+    // -----------------------------------------------------------------------
+    if (segCount > 0)
+    {
+        printEmChainInfoCompact();
+    }
 
     // -----------------------------------------------------------------------
     // STATISTICS
@@ -1759,7 +2350,7 @@ bool NeoPixel::processPhysAddCommand(const std::string& args)
     {
         openknx.logger.log("ERROR: Usage:");
         openknx.logger.log("  1-Wire (WS2812B/SK6812): neo phys add <gpio> <count> [ws2812b|sk6812]");
-        openknx.logger.log("  SPI (APA102):            neo phys add <clk> <count> apa102 <data>");
+        openknx.logger.log("  SPI (APA102):            neo phys add <clk_gpio> <count> apa102 <data_gpio>");
         return true;
     }
 
@@ -2264,7 +2855,6 @@ bool NeoPixel::processVirtDetachCommand(const std::string& args)
 // ============================================================================
 // Segment Management Commands
 // ============================================================================
-
 /**
  * @brief Process 'neo seg' command router
  */
@@ -2620,10 +3210,10 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
     int segId;
     char cmd[8] = "";
     int paramIdx;
-    uint32_t value;
 
-    // Parse: <seg> or <seg> get <idx> or <seg> set <idx> <val>
-    int parsed = sscanf(args.c_str(), "%d %7s %d %u", &segId, cmd, &paramIdx, &value);
+    // Parse: <seg> or <seg> get <idx> or <seg> set <idx>
+    // Note: We don't parse the value here because it might be a string with spaces
+    int parsed = sscanf(args.c_str(), "%d %7s %d", &segId, cmd, &paramIdx);
 
     if (parsed < 1)
     {
@@ -2649,9 +3239,20 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
         for (uint8_t i = 0; i < count; i++)
         {
             const char* name = effect->getParameterName(i);
+            ParameterType type = effect->getParameterType(i);
             uint32_t val = effect->getParameter(seg, i);
             uint32_t def = effect->getParameterDefault(i);
-            openknx.logger.logWithValues("  [%d] %-15s = %u (default: %u)", i, name, val, def);
+
+            if (type == ParameterType::PARAM_STRING)
+            {
+                // For string parameters, show the actual text
+                const char* strVal = reinterpret_cast<const char*>(val);
+                openknx.logger.logWithValues("  [%d] %-15s = \"%s\" (default: %u)", i, name, strVal, def);
+            }
+            else
+            {
+                openknx.logger.logWithValues("  [%d] %-15s = %u (default: %u)", i, name, val, def);
+            }
         }
         return true;
     }
@@ -2664,27 +3265,103 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
             openknx.logger.logWithValues("ERROR: Index %d out of range (0-%d)", paramIdx, count - 1);
             return true;
         }
+        ParameterType type = effect->getParameterType(paramIdx);
         uint32_t val = effect->getParameter(seg, paramIdx);
-        openknx.logger.logWithValues("%s.%s = %u",
-                                     effect->getName(),
-                                     effect->getParameterName(paramIdx),
-                                     val);
+
+        if (type == ParameterType::PARAM_STRING)
+        {
+            const char* strVal = reinterpret_cast<const char*>(val);
+            openknx.logger.logWithValues("%s.%s = \"%s\"",
+                                         effect->getName(),
+                                         effect->getParameterName(paramIdx),
+                                         strVal);
+        }
+        else
+        {
+            openknx.logger.logWithValues("%s.%s = %u",
+                                         effect->getName(),
+                                         effect->getParameterName(paramIdx),
+                                         val);
+        }
         return true;
     }
 
-    // Set parameter
-    if (strcmp(cmd, "set") == 0 && parsed >= 4)
+    // Set parameter - handle strings specially
+    if (strcmp(cmd, "set") == 0)
     {
         if (paramIdx >= count)
         {
             openknx.logger.logWithValues("ERROR: Index %d out of range (0-%d)", paramIdx, count - 1);
             return true;
         }
-        effect->setParameter(seg, paramIdx, value);
-        openknx.logger.logWithValues("Set %s.%s = %u",
-                                     effect->getName(),
-                                     effect->getParameterName(paramIdx),
-                                     value);
+
+        ParameterType type = effect->getParameterType(paramIdx);
+
+        // Find where the value starts after "set <idx> "
+        size_t pos = 0;
+        // Skip segment ID
+        while (pos < args.size() && args[pos] != ' ') pos++;
+        while (pos < args.size() && args[pos] == ' ') pos++;
+        // Skip "set"
+        while (pos < args.size() && args[pos] != ' ') pos++;
+        while (pos < args.size() && args[pos] == ' ') pos++;
+        // Skip parameter index
+        while (pos < args.size() && args[pos] != ' ') pos++;
+        while (pos < args.size() && args[pos] == ' ') pos++;
+
+        const char* valueStart = &args[pos];
+
+        if (type == ParameterType::PARAM_STRING)
+        {
+            if (*valueStart == '\"')
+            {
+                // Extract quoted string
+                const char* endQuote = strchr(valueStart + 1, '\"');
+                if (endQuote)
+                {
+                    size_t len = endQuote - valueStart - 1;
+                    if (len > 63) len = 63; // Safety limit for ScrollTextEffect
+
+                    char* strVal = new char[len + 1];
+                    strncpy(strVal, valueStart + 1, len);
+                    strVal[len] = '\0';
+
+                    effect->setParameter(seg, paramIdx, reinterpret_cast<uint32_t>(strVal));
+                    openknx.logger.logWithValues("Set %s.%s = \"%s\"",
+                                                 effect->getName(),
+                                                 effect->getParameterName(paramIdx),
+                                                 strVal);
+
+                    // Note: String memory is not freed - assumes it's managed by segment/effect
+                }
+                else
+                {
+                    openknx.logger.log("ERROR: Invalid string format. Use \"text\"");
+                }
+            }
+            else
+            {
+                openknx.logger.log("ERROR: String parameter requires quotes. Use \"text\"");
+            }
+        }
+        else
+        {
+            // Parse numeric value - need to parse again since we skipped it earlier
+            uint32_t numValue;
+            if (sscanf(valueStart, "%u", &numValue) == 1)
+            {
+                effect->setParameter(seg, paramIdx, numValue);
+                openknx.logger.logWithValues("Set %s.%s = %u",
+                                             effect->getName(),
+                                             effect->getParameterName(paramIdx),
+                                             numValue);
+            }
+            else
+            {
+                openknx.logger.log("ERROR: Invalid numeric value");
+            }
+        }
+
         return true;
     }
 
@@ -3854,8 +4531,21 @@ bool NeoPixel::processPhysTimingsCommand()
     openknx.logger.log("    T0H / T0L = HIGH / LOW duration for a '0' bit (ns)");
     openknx.logger.log("    T1H / T1L = HIGH / LOW duration for a '1' bit (ns)");
     openknx.logger.log("    Reset     = min. LOW pause between frames (µs)");
-    openknx.logger.log("  RP2040/RP2350 (PIO): fixed 3:7:6:4 ratio; only T1H sets bitrate.");
-    openknx.logger.log("  ESP32 (RMT):         all four values applied independently.");
+    openknx.logger.log("");
+#ifdef ARDUINO_ARCH_RP2040
+    openknx.logger.log("  Platform: RP2040/RP2350 (PIO driver)");
+    openknx.logger.log("    Fixed 3:7:6:4 cycle ratio — only T1H sets the bitrate.");
+    openknx.logger.log("    T0H/T0L/T1L are derived automatically.");
+    openknx.logger.log("    Start here:  neo phys timing 0 tune t1h +50");
+    openknx.logger.log("    Latch fix:   neo phys timing 0 tune reset 280");
+#endif
+#ifdef ARDUINO_ARCH_ESP32
+    openknx.logger.log("  Platform: ESP32 (RMT driver)");
+    openknx.logger.log("    All four values are applied independently.");
+    openknx.logger.log("    Start here:  neo phys timing 0 tune t1h +50");
+    openknx.logger.log("    Also try:    neo phys timing 0 tune t0h 350");
+    openknx.logger.log("    Latch fix:   neo phys timing 0 tune reset 280");
+#endif
     openknx.logger.log("");
     openknx.logger.log("  [EXPERT] Live-Tuner — strip ID always part of every command:");
     openknx.logger.log("    neo phys timing 0 tune           -> enter tuner on strip 0 (lights white)");
@@ -4322,8 +5012,7 @@ bool NeoPixel::processPhysTimingProfileCommand(uint32_t stripId, uint8_t profile
 
     auto* cfg = strip->getConfig();
     SerialStripConfig* sCfg = (cfg && cfg->isSerialConfig())
-                                  ? static_cast<SerialStripConfig*>(cfg)
-                                  : nullptr;
+                                  ? static_cast<SerialStripConfig*>(cfg) : nullptr;
     if (!sCfg)
     {
         openknx.logger.log("ERROR: Profile command only supported for serial strips.");

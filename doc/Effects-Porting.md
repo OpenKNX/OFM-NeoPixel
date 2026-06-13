@@ -2,8 +2,8 @@
 
 **Complete guide for porting FastLED effects to OFM-NeoPixel**
 
-**Version:** 0.0.1  
-**Date:** November 2025  
+**Version:** 0.4.0  
+**Date:** June 2026  
 **Author:** Erkan Colak
 
 ---

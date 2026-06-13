@@ -27,5 +27,6 @@ enum class ParameterType : uint8_t
     PARAM_PERCENT,    // 0-100 (Intensity, Fade)
     PARAM_ANGLE,      // 0-359 (Rotation, Phase)
     PARAM_HUE,        // 0-255 (HSV Hue)
+    PARAM_STRING,     // Text string
     PARAM_ENUM        // Effect-specific enum
 };

@@ -1,0 +1,306 @@
+/**
+ * @file EffektManager.cpp
+ * @brief Effektmanager controller implementation
+ *
+ * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
+ */
+#include "EffektManager.h"
+#include <Arduino.h>
+
+// ============================================================================
+// Start / Stop
+// ============================================================================
+
+void EffektManagerController::start(uint8_t emId, Segment* segment, const EffektManagerData* emData)
+{
+    if (!segment) return;
+
+    if (emId == EM_NONE)
+    {
+        stop(segment);
+        return;
+    }
+
+    uint8_t emIdx = emId - 1; // 0-based index
+    if (emIdx >= EM_COUNT) return;
+
+    const EffektManagerData& em = emData[emIdx];
+    if (!em.header.isEnabled()) return;
+
+    _rt.activeEmId   = emId;
+    _rt.activeCueIdx = 0;
+    _rt.cueStartMs   = millis();
+    _rt.fading       = false;
+    _rt.fadeIn       = false;
+    _rt.fadeStartMs  = 0;
+
+    // Pause Effektkette (virtual band) — EM takes priority
+    pauseEffektkette(segment);
+
+    applyCue(em.cues[0], segment);
+
+#ifdef OPENKNX_DEBUG
+    Serial.printf("[EM] Started EM %d (cues=%d, loop=%d)\n", emId, em.header.cueCount, em.header.loop);
+#endif
+}
+
+void EffektManagerController::stop(Segment* segment)
+{
+    if (!_rt.isRunning()) return;
+
+    // Restore brightness if stopped mid-fade (ramp may have left it near 0)
+    if (_rt.fading && segment) segment->setBrightness(_rt.fadeFromBri);
+
+    _rt.activeEmId   = EM_NONE;
+    _rt.activeCueIdx = 0;
+    _rt.fading       = false;
+    _rt.fadeIn       = false;
+
+    // Resume Effektkette if it was paused
+    if (segment) resumeEffektkette(segment);
+
+    // Clear segment
+    if (segment) segment->clear();
+
+#ifdef OPENKNX_DEBUG
+    Serial.printf("[EM] Stopped\n");
+#endif
+}
+
+// ============================================================================
+// Tick — called every loop() iteration
+// ============================================================================
+
+void EffektManagerController::tick(Segment* segment, const EffektManagerData* emData)
+{
+    if (!_rt.isRunning() || !segment) return;
+
+    uint8_t emIdx             = _rt.activeEmId - 1;
+    const EffektManagerData& em = emData[emIdx];
+    const EffektCue& cue      = em.cues[_rt.activeCueIdx];
+    uint32_t now              = millis();
+
+    // ── Fade transition in progress ──────────────────────────────────
+    if (_rt.fading)
+    {
+        tickFade(segment, emData);
+        return;
+    }
+
+    // ── Duration check ────────────────────────────────────────────────────
+    if (cue.durationSec == 0) return; // hold indefinitely
+
+    uint32_t elapsed = now - _rt.cueStartMs;
+    uint32_t durationMs = (uint32_t)cue.durationSec * 1000;
+
+    if (elapsed >= durationMs)
+    {
+        // Start fade-out if configured
+        if (cue.fadeMs > 0)
+            startFade(segment, cue.fadeMs);
+        else
+            advanceToNextCue(segment, emData);
+    }
+}
+
+// ============================================================================
+// Apply a cue to a segment
+// ============================================================================
+
+void EffektManagerController::applyCue(const EffektCue& cue, Segment* segment)
+{
+    if (!segment) return;
+
+    // Set colour
+    segment->setPrimaryColor(cue.r, cue.g, cue.b, cue.w);
+    segment->setBrightness(cue.brightness);
+
+    // Set effect parameters
+    Effect* effect = EffectPool::getEffectByIndex(cue.effectId);
+    if (effect)
+    {
+        uint8_t paramCount = effect->getParameterCount();
+        for (uint8_t i = 0; i < paramCount && i < EM_PARAM_COUNT; i++)
+        {
+            // String parameters take the cue's text, not the numeric slot
+            // (a numeric value would be misinterpreted as a char pointer)
+            if (effect->getParameterType(i) == ParameterType::PARAM_STRING)
+            {
+                effect->setParameter(segment, i, (uint32_t)(uintptr_t)cue.effectText);
+                continue;
+            }
+
+            uint32_t value = cue.params[i];
+            const uint32_t minValue = effect->getParameterMin(i);
+            const uint32_t maxValue = effect->getParameterMax(i);
+
+            if (value < minValue)
+            {
+                value = effect->getParameterDefault(i);
+            }
+            if (value < minValue) value = minValue;
+            if (value > maxValue) value = maxValue;
+
+            effect->setParameter(segment, i, value);
+        }
+
+
+        segment->setEffect(effect);
+    }
+    else
+    {
+        segment->clearEffect();
+        segment->clear();
+    }
+
+    _rt.cueStartMs = millis();
+#ifdef OPENKNX_DEBUG
+    Serial.printf("[EM] Applied cue %d (effect=%d, dur=%ds)\n", _rt.activeCueIdx + 1, cue.effectId, cue.durationSec);
+#endif
+}
+
+// ============================================================================
+// Advance to next cue / chain / loop
+// ============================================================================
+
+void EffektManagerController::advanceToNextCue(Segment* segment, const EffektManagerData* emData)
+{
+    uint8_t emIdx             = _rt.activeEmId - 1;
+    const EffektManagerData& em = emData[emIdx];
+
+    uint8_t nextCue = _rt.activeCueIdx + 1;
+
+    if (nextCue < em.header.cueCount)
+    {
+        // More cues in this EM
+        _rt.activeCueIdx = nextCue;
+        applyCue(em.cues[nextCue], segment);
+    }
+    else if (em.header.loop)
+    {
+        // Loop: restart from Cue 0
+        _rt.activeCueIdx = 0;
+        applyCue(em.cues[0], segment);
+#ifdef OPENKNX_DEBUG
+        Serial.printf("[EM] EM %d looping\n", _rt.activeEmId);
+#endif
+    }
+    else if (em.header.nextEmId != EM_NONE)
+    {
+        // Chain to next EM — validate target first: start() silently refuses
+        // disabled EMs, which would otherwise retry the advance every tick
+        // and freeze the segment (dark, if mid-fade).
+        uint8_t nextIdx = em.header.nextEmId - 1;
+        if (nextIdx < EM_COUNT && emData[nextIdx].header.isEnabled())
+        {
+#ifdef OPENKNX_DEBUG
+            Serial.printf("[EM] EM %d chaining to EM %d\n", _rt.activeEmId, em.header.nextEmId);
+#endif
+            start(em.header.nextEmId, segment, emData);
+        }
+        else
+        {
+#ifdef OPENKNX_DEBUG
+            Serial.printf("[EM] EM %d chain target EM %d invalid/disabled — stopping\n", _rt.activeEmId, em.header.nextEmId);
+#endif
+            stop(segment);
+        }
+    }
+    else
+    {
+        // Done — stop and resume Effektkette if applicable
+#ifdef OPENKNX_DEBUG
+        Serial.printf("[EM] EM %d finished\n", _rt.activeEmId);
+#endif
+        stop(segment);
+    }
+}
+
+// ============================================================================
+// Fade helpers
+// ============================================================================
+
+void EffektManagerController::startFade(Segment* segment, uint16_t fadeMs)
+{
+    _rt.fading      = true;
+    _rt.fadeIn      = false;
+    _rt.fadeStartMs = millis();
+    _rt.fadeMs      = fadeMs ? fadeMs : 1;
+    _rt.fadeFromBri = segment ? segment->getBrightness() : 255;
+}
+
+// Real crossfade: ramp current cue's brightness down over fadeMs/2,
+// switch to the next cue, then ramp the new cue's brightness up over fadeMs/2.
+// Works because effects redraw every frame and Segment::setPixel scales by brightness.
+void EffektManagerController::tickFade(Segment* segment, const EffektManagerData* emData)
+{
+    uint32_t elapsed = millis() - _rt.fadeStartMs;
+    uint16_t half    = _rt.fadeMs / 2 ? _rt.fadeMs / 2 : 1;
+
+    if (!_rt.fadeIn)
+    {
+        // ── Fade-out phase ──
+        if (elapsed < half)
+        {
+            segment->setBrightness((uint8_t)((uint32_t)_rt.fadeFromBri * (half - elapsed) / half));
+            return;
+        }
+        // Fade-out done — switch cue (applyCue sets the new cue's brightness)
+        advanceToNextCue(segment, emData);
+        if (!_rt.isRunning()) return; // EM stopped — no fade-in (stop() restored brightness)
+        // Fade in the new cue — also across a chain boundary (start() cleared fading)
+        _rt.fading      = true;
+        _rt.fadeIn      = true;
+        _rt.fadeStartMs = millis();
+        _rt.fadeFromBri = segment->getBrightness(); // target = new cue brightness
+        segment->setBrightness(0);                  // start fade-in from black
+        return;
+    }
+
+    // ── Fade-in phase ──
+    if (elapsed < half)
+    {
+        segment->setBrightness((uint8_t)((uint32_t)_rt.fadeFromBri * elapsed / half));
+        return;
+    }
+    segment->setBrightness(_rt.fadeFromBri);
+    _rt.fading = false;
+    _rt.fadeIn = false;
+}
+
+bool EffektManagerController::triggerCue(uint8_t cueNum, Segment* segment, const EffektManagerData* emData)
+{
+    if (!_rt.isRunning() || !segment || !emData) return false;
+
+    if (cueNum == 0) return false;
+
+    uint8_t emIdx = _rt.activeEmId - 1;
+    if (emIdx >= EM_COUNT) return false;
+
+    const EffektManagerData& em = emData[emIdx];
+    if (!em.header.isEnabled() || cueNum > em.header.cueCount) return false;
+
+    _rt.activeCueIdx = cueNum - 1;
+    _rt.fading = false;
+    _rt.fadeIn = false;
+    _rt.fadeStartMs = 0;
+
+    applyCue(em.cues[_rt.activeCueIdx], segment);
+    return true;
+}
+
+void EffektManagerController::pauseEffektkette(Segment* segment)
+{
+    if (!segment || !segment->isVirtualBand()) return;
+    _savedBandTotal  = segment->getVirtualTotalLength();
+    _savedBandOffset = segment->getVirtualOffset();
+    segment->clearVirtualBand();
+}
+
+void EffektManagerController::resumeEffektkette(Segment* segment)
+{
+    if (!segment || _savedBandTotal == 0) return;
+    segment->setVirtualBand(_savedBandTotal, _savedBandOffset);
+    _savedBandTotal  = 0;
+    _savedBandOffset = 0;
+}

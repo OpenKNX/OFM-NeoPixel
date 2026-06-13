@@ -165,6 +165,12 @@ class NeoPixel : public OpenKNX::Module
     bool processEffectConfigCommand(const std::string& args);
     bool processPowerCommand(const std::string& args);
 
+    // Effektmanager / Effektkette console rendering (data via NeoPixelEmConsole.h hooks)
+    void printEmStatusTable(int onlySeg);
+    void printEmCueTable(int onlySeg);
+    void printChainStatusTable(int onlySeg);
+    void printEmChainInfoCompact();
+
     // Console help helper functions
     void printSectionSeparator();
     void printHelpSectionHeader(const char* title);

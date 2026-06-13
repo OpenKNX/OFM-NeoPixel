@@ -324,9 +324,12 @@ void Segment::setAll(uint8_t r, uint8_t g, uint8_t b)
 {
     if (!_virtualStrip) return;
 
-    for (uint16_t i = 0; i < _virtualLength; i++)
+    // In virtual band mode setPixel expects band indices — iterate our window
+    uint16_t start = (_virtualTotalLength > 0) ? _virtualOffset : 0;
+    uint16_t count = (_virtualTotalLength > 0) ? _physicalLength : _virtualLength;
+    for (uint16_t i = 0; i < count; i++)
     {
-        setPixel(i, r, g, b);
+        setPixel(start + i, r, g, b);
     }
 }
 
@@ -341,9 +344,11 @@ void Segment::setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
     if (!_virtualStrip) return;
 
-    for (uint16_t i = 0; i < _virtualLength; i++)
+    uint16_t start = (_virtualTotalLength > 0) ? _virtualOffset : 0;
+    uint16_t count = (_virtualTotalLength > 0) ? _physicalLength : _virtualLength;
+    for (uint16_t i = 0; i < count; i++)
     {
-        setPixel(i, r, g, b, w);
+        setPixel(start + i, r, g, b, w);
     }
 }
 
@@ -359,9 +364,11 @@ void Segment::setAll(uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
 {
     if (!_virtualStrip) return;
 
-    for (uint16_t i = 0; i < _virtualLength; i++)
+    uint16_t start = (_virtualTotalLength > 0) ? _virtualOffset : 0;
+    uint16_t count = (_virtualTotalLength > 0) ? _physicalLength : _virtualLength;
+    for (uint16_t i = 0; i < count; i++)
     {
-        setPixel(i, r, g, b, ww, cw);
+        setPixel(start + i, r, g, b, ww, cw);
     }
 }
 
@@ -391,7 +398,8 @@ void Segment::clearAll()
  */
 bool Segment::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) const
 {
-    if (!_virtualStrip || index >= _virtualLength)
+    // In band mode, index is a band index (may exceed local length) — translated below
+    if (!_virtualStrip || (_virtualTotalLength == 0 && index >= _virtualLength))
     {
         return false;
     }
@@ -419,7 +427,8 @@ bool Segment::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) const
  */
 bool Segment::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& w) const
 {
-    if (!_virtualStrip || index >= _virtualLength)
+    // In band mode, index is a band index (may exceed local length) — translated below
+    if (!_virtualStrip || (_virtualTotalLength == 0 && index >= _virtualLength))
     {
         return false;
     }
@@ -447,13 +456,21 @@ bool Segment::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8
  */
 bool Segment::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& ww, uint8_t& cw) const
 {
-    if (!_virtualStrip || index >= _virtualLength)
+    // In band mode, index is a band index (may exceed local length) — translated below
+    if (!_virtualStrip || (_virtualTotalLength == 0 && index >= _virtualLength))
     {
         return false;
     }
 
+    uint16_t localIdx = index;
+    if (_virtualTotalLength > 0)
+    {
+        if (index < _virtualOffset || index >= _virtualOffset + _physicalLength) { r = g = b = ww = cw = 0; return false; }
+        localIdx = index - _virtualOffset;
+    }
+
     // Map virtual index to physical, considering grouping/spacing
-    uint16_t physicalStart = mapVirtualToPhysical(index);
+    uint16_t physicalStart = mapVirtualToPhysical(localIdx);
     uint16_t virtualStripIndex = _startLed + physicalStart;
     return _virtualStrip->getPixel(virtualStripIndex, r, g, b, ww, cw);
 }
@@ -655,6 +672,30 @@ uint16_t Segment::xyToIndex(uint8_t x, uint8_t y) const
             index = x * _geo.height + y;
             break;
 
+        case LedTopology::COLS_LINEAR_TILED:
+        case LedTopology::COLS_SERP_TILED:
+        {
+            // Generic tiled panel-chain mapping:
+            // - Data is chained panel-by-panel (tile-major)
+            // - Inside each panel, columns are wired top->bottom (linear or serpentine)
+            // Tile block height is configured via matrix depth (for this topology only).
+            uint8_t tileH = _geo.depth;
+            if (tileH == 0) tileH = _geo.height;
+            if (tileH > _geo.height) tileH = _geo.height;
+
+            uint16_t panel = y / tileH;
+            uint16_t yInTile = y % tileH;
+
+            if (_geo.topology == LedTopology::COLS_SERP_TILED && (x & 1) != 0)
+            {
+                yInTile = tileH - 1 - yInTile;
+            }
+
+            uint16_t panelSize = static_cast<uint16_t>(_geo.width) * tileH;
+            index = panel * panelSize + static_cast<uint16_t>(x) * tileH + yInTile;
+            break;
+        }
+
         default:
             index = (uint16_t)y * _geo.width + x;
             break;
@@ -705,6 +746,96 @@ bool Segment::setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b, 
     uint16_t idx = xyToIndex(x, y);
     if (idx == 0xFFFF) return false;
     return setPixel(idx, r, g, b, w);
+}
+
+uint16_t Segment::getRenderWidth() const
+{
+    if (_geo.is1D()) return _virtualLength;
+
+    // Distributed 2D across a virtual band: derive global width from band length and local panel height.
+    if (_virtualTotalLength > _physicalLength && _geo.height > 0 && (_virtualTotalLength % _geo.height) == 0)
+    {
+        return _virtualTotalLength / _geo.height;
+    }
+
+    return _geo.width;
+}
+
+uint16_t Segment::getRenderHeight() const
+{
+    if (_geo.is1D()) return 1;
+    return _geo.height;
+}
+
+bool Segment::mapGlobalXYToLocal(uint16_t x, uint16_t y, uint8_t& localX, uint8_t& localY) const
+{
+    if (_geo.is1D() || _geo.width == 0 || _geo.height == 0)
+    {
+        return false;
+    }
+
+    // Standalone/local matrix path.
+    if (_virtualTotalLength == 0)
+    {
+        if (x >= _geo.width || y >= _geo.height) return false;
+        localX = static_cast<uint8_t>(x);
+        localY = static_cast<uint8_t>(y);
+        return true;
+    }
+
+    // Distributed 2D path over virtual band.
+    // Convention: panels of equal height are arranged SIDE BY SIDE along the band.
+    // Global matrix = (totalLength / height) columns × height rows.
+    // virtualOffset = LEDs before this panel → panelStartX = virtualOffset / height.
+    if (_geo.height == 0 || (_virtualTotalLength % _geo.height) != 0 ||
+        (_virtualOffset % _geo.height) != 0)
+    {
+        return false;
+    }
+
+    const uint16_t globalWidth = _virtualTotalLength / _geo.height;
+    if (x >= globalWidth || y >= _geo.height)
+    {
+        return false;
+    }
+
+    const uint16_t panelStartX = _virtualOffset / _geo.height;
+    if (x < panelStartX)
+    {
+        return false;
+    }
+
+    const uint16_t lx = x - panelStartX;
+    if (lx >= _geo.width || lx > 255 || y > 255)
+    {
+        return false;
+    }
+
+    localX = static_cast<uint8_t>(lx);
+    localY = static_cast<uint8_t>(y);
+    return true;
+}
+
+bool Segment::setPixelGlobalXY(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b)
+{
+    uint8_t localX = 0;
+    uint8_t localY = 0;
+    if (!mapGlobalXYToLocal(x, y, localX, localY))
+    {
+        return false;
+    }
+    return setPixelXY(localX, localY, r, g, b);
+}
+
+bool Segment::setPixelGlobalXY(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
+{
+    uint8_t localX = 0;
+    uint8_t localY = 0;
+    if (!mapGlobalXYToLocal(x, y, localX, localY))
+    {
+        return false;
+    }
+    return setPixelXY(localX, localY, r, g, b, w);
 }
 
 bool Segment::setPixelXYZ(uint8_t x, uint8_t y, uint8_t z, uint8_t r, uint8_t g, uint8_t b)

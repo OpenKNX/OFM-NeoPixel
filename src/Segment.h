@@ -54,6 +54,8 @@ enum class LedTopology : uint8_t
     COLS_SERPENTINE   = 3, ///< ↓↑↓↑  (col-major, alternating direction)
     COLS_LINEAR       = 4, ///< ↓↓↓↓  (col-major, same direction)
     ROWS_SERPENTINE_3D= 5, ///< 3D: serpentine rows, stacked depth-first
+    COLS_LINEAR_TILED = 6, ///< 2D tiled: panel-major chain, columns linear inside each tile block
+    COLS_SERP_TILED   = 7, ///< 2D tiled: panel-major chain, columns serpentine inside each tile block
 };
 
 /**
@@ -71,9 +73,14 @@ struct LedGeometry
     uint8_t     depth    = 0; ///< Z-layers       (0 = not set / 2D or 1D)
     LedTopology topology = LedTopology::LINEAR_1D;
 
+    bool isTiled2D() const
+    {
+        return topology == LedTopology::COLS_LINEAR_TILED || topology == LedTopology::COLS_SERP_TILED;
+    }
+
     bool is1D() const { return topology == LedTopology::LINEAR_1D || width <= 1 || height <= 1; }
-    bool is2D() const { return !is1D() && depth <= 1; }
-    bool is3D() const { return !is1D() && depth > 1; }
+    bool is2D() const { return !is1D() && (depth <= 1 || isTiled2D()); }
+    bool is3D() const { return !is1D() && depth > 1 && !isTiled2D(); }
 };
 
 /**
@@ -111,6 +118,11 @@ struct EffectConfig
     uint32_t legacyOption1; // Legacy option1 (32-bit)
     uint32_t legacyOption2; // Legacy option2 (32-bit)
 
+    // Effect text parameter (PARAM_STRING) — per segment, owned by whoever sets the effect
+    // (ETS config, Cue, Scene, KO). 240 chars + NUL. ETS/Cue/Scene fields stay at 14 chars;
+    // longer texts are assembled via the EffectText KO (set) + EffectTextAppend KO (14-char chunks).
+    char effectText[241];
+
     // Convenience accessors for color components (RGBW)
     inline uint8_t r() const { return (primaryRGBW >> 24) & 0xFF; }
     inline uint8_t g() const { return (primaryRGBW >> 16) & 0xFF; }
@@ -134,7 +146,7 @@ struct EffectConfig
           primaryCW(0), secondaryCW(0),
           option1(0), option2(0), option3(0),
           feature1(false), feature2(false), feature3(false),
-          legacyOption1(0), legacyOption2(0) {}
+          legacyOption1(0), legacyOption2(0) { effectText[0] = '\0'; }
 };
 
 /**
@@ -285,6 +297,25 @@ class Segment
     bool setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
 
     /**
+     * @brief Set a pixel in global 2D coordinates across a virtual band.
+     *
+     * In standalone mode this falls back to local setPixelXY().
+     * In virtual-band mode, (x,y) are interpreted on a global matrix and clipped
+     * to this segment's virtual window before being mapped to local panel coords.
+     */
+    bool setPixelGlobalXY(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b);
+    bool setPixelGlobalXY(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
+
+    /**
+     * @brief Logical render size used by distributed 2D effects.
+     *
+     * For normal segments this equals local geometry width/height.
+     * For distributed 2D virtual bands width may expand to the global matrix width.
+     */
+    uint16_t getRenderWidth() const;
+    uint16_t getRenderHeight() const;
+
+    /**
      * @brief Set a pixel by 3D coordinates (x, y, z).
      */
     bool setPixelXYZ(uint8_t x, uint8_t y, uint8_t z, uint8_t r, uint8_t g, uint8_t b);
@@ -424,4 +455,5 @@ class Segment
      * @return true if the pixel is within this segment's local window.
      */
     bool translateVirtualIndex(uint16_t& index) const;
+    bool mapGlobalXYToLocal(uint16_t x, uint16_t y, uint8_t& localX, uint8_t& localY) const;
 };

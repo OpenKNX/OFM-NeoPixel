@@ -1,11 +1,11 @@
 # OFM-NeoPixel
 
-**Version:** 0.0.2  
+**Version:** 0.4.0  
 **Platform:** OpenKNX (RP2040, RP2350, ESP32-S3)  
 **License:** GNU GPL v3.0  
 **Author:** Erkan Çolak
 
-A high-performance, hardware-optimized LED control library for addressable RGB/RGBW/RGBCCT strips on OpenKNX devices with **self-describing effects**, **stateless architecture**, **per-strip power management**, and **Human Centric Lighting (HCL)**.
+A high-performance, hardware-optimized LED control library for addressable RGB/RGBW/RGBCCT strips on OpenKNX devices with **self-describing effects**, **stateless architecture**, **2D/3D matrix geometry**, an **Effektmanager cue sequencer**, **distributed cross-device rendering (Effektkette)**, **per-strip power management**, and **Human Centric Lighting (HCL)**.
 
 ---
 
@@ -35,9 +35,14 @@ A high-performance, hardware-optimized LED control library for addressable RGB/R
   - [Virtual Strip Commands](#virtual-strip-commands)
   - [Segment Commands](#segment-commands)
   - [Effect Commands](#effect-commands)
+  - [Effektmanager & Cue Commands](#effektmanager--cue-commands)
+  - [Effektkette (Chain) Commands](#effektkette-chain-commands)
 - [API Reference](#api-reference)
 - [Examples](#examples)
 - [Performance](#performance)
+- [2D / 3D Matrix Support](#2d--3d-matrix-support)
+- [Effektmanager (Cue Sequencer)](#effektmanager-cue-sequencer)
+- [Effektkette — Distributed Rendering](#effektkette--distributed-rendering)
 - [Power Management & Current Limiting](#power-management--current-limiting)
   - [How It Works](#how-it-works)
   - [LED Current Profiles](#led-current-profiles)
@@ -164,6 +169,30 @@ This design enables complex LED configurations with minimal CPU overhead through
 - **12 Parameter Types**: UINT8, BOOL, COLOR_RGB, PERCENT, ENUM, etc.
 - **Zero Code Changes**: Add new effects without modifying Segment/Console/UI
 - **Type-Safe**: ParameterType enum for validation
+
+### 2D / 3D Matrix Geometry
+
+- **Topology-Aware Mapping**: Declare any `Segment` as a 2D (`width×height`) or 3D (`width×height×depth`) matrix via `setGeometry()`
+- **8 Wiring Topologies**: Serpentine/linear rows & columns, 3D volumes, and tiled panel chains
+- **Coordinate API**: `setPixelXY(x, y)` / `setPixelXYZ(x, y, z)` with automatic index mapping
+- **Automatic Effect Routing**: `update2D()` / `update3D()` dispatch; 1D effects fall back gracefully line-by-line
+- **Built-in 2D Effects**: Fire2D, Noise2D, Cylon2D, ScrollText (5×7 font), Clock2D
+
+### Effektmanager (Cue Sequencer)
+
+- **16 Effektmanager Instances**: Each a timed sequence of up to 99 effect cues, stored in KNX flash via ETS
+- **Self-Contained Cues**: Every cue carries effect ID, up to 10 parameters, primary colour, brightness, duration, fade and text
+- **Per-Segment Playback**: Any segment can run any EM via KO; automatic cue advance with configurable fade transitions
+- **Chaining & Loop**: An EM can loop or chain into a follow-up EM for endless show sequences
+- **Power-Off Restore**: Active EM/cue state is persisted and restored after reboot
+- **Console & KO Control**: Start/stop/trigger cues live via `neo em` / `neo cue` or KNX group objects
+
+### Effektkette (Distributed Rendering)
+
+- **Virtual LED Band Across Devices**: Multiple KNX devices render one continuous effect — no pixel streaming over the bus
+- **Master/Slave Sync**: Master sends a compact 6-byte sync telegram; slaves render their local window at the correct phase offset
+- **Transparent To Effects**: `getLength()` reports the full virtual length, so effects compute in the full space with zero code changes
+- **Watchdog Safety**: Slaves fall back to off after a configurable sync timeout
 
 ### Segment Transformations
 
@@ -1394,6 +1423,49 @@ neo hwbrightness <segIndex> <value>
     neo hwbrightness 0 200         # 78% hardware brightness
 ```
 
+### Effektmanager & Cue Commands
+
+Run timed effect-cue sequences (Effektmanager) on a segment. Segment indices are 0-based.
+
+```bash
+neo em                          # EM status table for all segments
+neo em status [seg]             # EM status (all segments or one)
+neo em dump <seg>               # Dump active EM header + runtime state for one segment
+neo em start <seg> <em>         # Start Effektmanager <em> (1-16) on segment <seg>
+neo em stop <seg>               # Stop Effektmanager on segment <seg>
+neo em cue <seg> <cue>          # Trigger cue <cue> of the active EM on segment <seg>
+neo em ?                        # Detailed Effektmanager help
+
+# Cue shortcuts (alias for the em cue / em dump actions)
+neo cue                         # Cue table for all segments
+neo cue list [seg]              # Cue table for all segments or one
+neo cue <seg> <cue>             # Trigger cue <cue> of the active EM on segment <seg>
+neo cue ?                       # Detailed cue help
+
+# Examples
+neo em start 0 3                # Start EM 3 on segment 0
+neo em cue 0 2                  # Jump to cue 2 on segment 0
+neo cue list 0                  # List configured cues of the active EM on segment 0
+```
+
+### Effektkette (Chain) Commands
+
+Configure and drive the distributed virtual band (one effect across multiple devices). Segment indices are 0-based.
+
+```bash
+neo chain                              # Chain status table for all segments
+neo chain status [seg]                 # Effektkette status (all segments or one)
+neo chain set <seg> <off|master|slave> # Set Effektkette mode for a segment
+neo chain override <seg> <0|1>         # Set slave local-override flag
+neo chain trigger <seg>                # Send sync telegram now (master segment)
+neo chain ?                            # Detailed Effektkette help
+
+# Examples
+neo chain set 0 master                 # Make segment 0 the chain master
+neo chain set 0 slave                  # Make segment 0 a chain slave
+neo chain trigger 0                    # Re-broadcast the master sync telegram
+```
+
 ### Testing Commands
 
 Available when compiled with `-DOPENKNX_NEOPIXEL_TESTS`:
@@ -2126,6 +2198,10 @@ seg->setPixelXY(0, 0, 0, 255, 0);    // top-left = green
 | `COLS_SERPENTINE` | ↓↑↓↑ (column-major, alternating) |
 | `COLS_LINEAR` | ↓↓↓↓ (column-major, same direction) |
 | `ROWS_SERPENTINE_3D` | 3D volume, serpentine rows |
+| `COLS_LINEAR_TILED` | Tiled panel-chain, columns linear inside each panel block |
+| `COLS_SERP_TILED` | Tiled panel-chain, columns serpentine inside each panel block |
+
+For tiled topologies, `matrix depth` is interpreted as tile block height (for example `8` for chained `32x8` panels).
 
 ### Index mapping
 
@@ -2145,11 +2221,20 @@ uint16_t idx = seg->xyzToIndex(x, y, z); // 3D → linear
 
 | Effect | Description |
 |--------|-------------|
-| `FireEffect2D` | Independent fire column per matrix column |
-| `NoiseEffect2D` | Bilinear XY noise field |
-| `CylonEffect2D` | Sweeping row or column (direction via `feature1`) |
+| `Fire2DEffect` | Independent fire column per matrix column |
+| `Noise2DEffect` | Bilinear XY noise field |
+| `Cylon2DEffect` | Sweeping row or column (direction via `feature1`) |
 | `ScrollTextEffect` | Horizontal scrolling 5×7 font; set text via `ScrollTextEffect::setText()` |
-| `ClockEffect` | Digital HH:MM or HH:MM:SS using `openknx.time.getLocalTime()` |
+| `Clock2DEffect` | Digital HH:MM or HH:MM:SS using `openknx.time.getLocalTime()` |
+| `Snake2DEffect` | Auto-playing snake across the matrix |
+| `Matrix2DEffect` | "Digital rain" falling-code columns |
+| `Tetris2DEffect` | Auto-playing Tetris with stacking blocks |
+| `Tron2DEffect` | Light-cycle trails |
+| `StarfieldWarp2DEffect` | Warp-speed starfield |
+| `PlasmaNebula2DEffect` | Animated plasma / nebula field |
+| `UfoSwarm2DEffect` | Swarming UFO sprites |
+
+Access any of them via `EffectPool::getFire2D()`, `EffectPool::getTetris2D()`, etc.
 
 ### Writing a custom 2D effect
 
@@ -2170,9 +2255,64 @@ class MyEffect : public Effect {
 
 ---
 
-## Effektkette — Distributed Rendering
+## Effektmanager (Cue Sequencer)
 
-Multiple NeoPixel devices can form a **virtual band**: one effect runs across all their strips as if they were physically connected. Each device renders only its local section — no pixel streaming over KNX.
+The **Effektmanager (EM)** turns a single segment into a self-running light show. Each EM is a timed sequence of **cues** — effect presets that are applied one after another with optional fades, looping and chaining. EMs are configured in ETS and stored in KNX flash, so they survive reboots and run autonomously without any external logic.
+
+### Concept
+
+```
+EffektManager (16 instances, stored in KNX flash via ETS)
+  └── Cue 1 ─► Cue 2 ─► Cue 3 ─► … ─► Cue N   (up to 99 cues)
+        │
+        └── applyTo(Segment)  →  effect + parameters + colour + brightness + text
+
+When the last cue ends:  loop ↺   or   chain → next EM   or   stop
+```
+
+Any segment can activate any EM via KO or console. The EM runs its cues in order; when a cue's duration elapses it fades out and advances to the next. Interrupting playback (e.g. starting another EM) takes effect immediately.
+
+### Data Model
+
+| Element | Size | Description |
+|---------|------|-------------|
+| `EffektManagerHeader` | 20 bytes | Name, active cue count, loop flag, next-EM target, enabled flag |
+| `EffektCue` | 48 bytes | Effect ID, 10 parameters, RGBW colour, brightness, duration (s), fade (ms), cue name (14), effect text (14) |
+| `EffektManagerData` | ~4.3 KB | One header + up to 99 cues |
+| **Total** | **~68 KB** | 16 EMs in enlarged KNX flash |
+
+Runtime state (active EM, current cue, fade phase, last EM/cue for restore) lives in RAM only and is **not** persisted — except the *last active EM/cue*, which is saved for power-off restore.
+
+### Playback Behaviour
+
+- **Cue duration**: `durationSec = 0` holds the cue until the next external trigger; otherwise the EM auto-advances after the configured seconds.
+- **Fade transitions**: `fadeMs` defines a fade-out before the next cue (`0` = hard cut).
+- **Loop**: when set, the EM restarts at cue 1 after the last cue.
+- **Chain**: `nextEmId` (1–16) starts a follow-up EM when the sequence ends (`0` = stop).
+- **Effektkette interaction**: starting an EM on a segment that is part of an Effektkette **pauses** the chain; it resumes when the EM stops.
+- **Power-off restore**: the active EM is saved and restarted (from cue 1) after reboot.
+
+### Console Usage
+
+```bash
+# Start Effektmanager 3 on segment 0, then watch it run
+neo em start 0 3
+neo em status              # status table for all segments
+neo em dump 0              # header + runtime state for segment 0
+
+# Jump straight to a specific cue of the active EM
+neo cue 0 2                # trigger cue 2 on segment 0
+neo cue list 0             # list configured cues of the active EM
+
+# Stop and return to normal operation
+neo em stop 0
+```
+
+> Full command reference: see [Effektmanager & Cue Commands](#effektmanager--cue-commands).
+
+---
+
+
 
 ### Principle
 

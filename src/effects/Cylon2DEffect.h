@@ -169,6 +169,10 @@ class Cylon2DEffect : public Effect
         const auto& geo = segment->getGeometry();
         if (geo.is1D()) return;
 
+        uint16_t renderW = segment->getRenderWidth();
+        uint16_t renderH = segment->getRenderHeight();
+        if (renderW == 0 || renderH == 0) return;
+
         _timeAcc += deltaTime;
         auto& cfg  = segment->getConfig();
         uint8_t hue      = cfg.option1;
@@ -177,15 +181,20 @@ class Cylon2DEffect : public Effect
         uint16_t speed   = (uint16_t)cfg.speed + 1;
         bool vertical    = cfg.feature1;
 
-        uint16_t dim    = vertical ? geo.height : geo.width;
-        uint32_t period = (uint32_t)(dim * 2 - 2) * (256 - speed + 1) * 4;
+        uint16_t dim    = vertical ? renderH : renderW;
+        if (dim < 2) return;
+        // Calculate period based on dimension and speed
+        // Each step takes (256-speed) ms, full cycle: (dim-1)*2 steps
+        uint32_t period = (uint32_t)(dim - 1) * 2 * (256 - speed);
         if (period == 0) period = 1;
-        uint32_t phase  = _timeAcc % period;
+        
+        // Bounce algorithm: go from 0 to dim-1 and back
+        uint32_t step = (_timeAcc / (256 - speed)) % ((uint32_t)(dim - 1) * 2);
         uint16_t pos;
-        if (phase < period / 2)
-            pos = (uint16_t)((phase * (dim - 1)) / (period / 2));
+        if (step < dim)
+            pos = (uint16_t)step;
         else
-            pos = (uint16_t)(dim - 1 - ((phase - period / 2) * (dim - 1)) / (period / 2));
+            pos = (uint16_t)(2 * (dim - 1) - step);
 
         uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, 255);
         uint8_t r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
@@ -210,11 +219,11 @@ class Cylon2DEffect : public Effect
             uint16_t epos = pos + e;
             if (epos >= dim) break;
             if (vertical)
-                for (uint8_t x = 0; x < geo.width; x++)
-                    segment->setPixelXY(x, (uint8_t)epos, r, g, b);
+                for (uint16_t x = 0; x < renderW; x++)
+                    segment->setPixelGlobalXY(x, epos, r, g, b);
             else
-                for (uint8_t y = 0; y < geo.height; y++)
-                    segment->setPixelXY((uint8_t)epos, y, r, g, b);
+                for (uint16_t y = 0; y < renderH; y++)
+                    segment->setPixelGlobalXY(epos, y, r, g, b);
         }
     }
 };

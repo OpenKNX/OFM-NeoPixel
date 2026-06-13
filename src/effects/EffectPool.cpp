@@ -34,6 +34,11 @@
 // #define NEOPIXEL_DISABLE_CYLON
 // #define NEOPIXEL_DISABLE_RGBWTEST
 // #define NEOPIXEL_DISABLE_RGBCCTTEST
+// GarageDoorEffect is deprecated — replaced by Effektmanager Sequencer.
+// Define NEOPIXEL_ENABLE_GARAGEDOOR to re-enable if needed for migration.
+#ifndef NEOPIXEL_ENABLE_GARAGEDOOR
+    #define NEOPIXEL_DISABLE_GARAGEDOOR
+#endif
 // #define NEOPIXEL_DISABLE_GARAGEDOOR
 // #define NEOPIXEL_DISABLE_FIRE
 // #define NEOPIXEL_DISABLE_THEATERCHASE
@@ -177,6 +182,27 @@
     #ifndef NEOPIXEL_DISABLE_CLOCK2D
         #include "Clock2DEffect.h"
     #endif
+    #ifndef NEOPIXEL_DISABLE_SNAKE2D
+        #include "Snake2DEffect.h"
+    #endif
+    #ifndef NEOPIXEL_DISABLE_MATRIX2D
+        #include "Matrix2DEffect.h"
+    #endif
+    #ifndef NEOPIXEL_DISABLE_TETRIS2D
+        #include "Tetris2DEffect.h"
+    #endif
+    #ifndef NEOPIXEL_DISABLE_TRON2D
+        #include "Tron2DEffect.h"
+    #endif
+    #ifndef NEOPIXEL_DISABLE_STARFIELDWARP2D
+        #include "StarfieldWarp2DEffect.h"
+    #endif
+    #ifndef NEOPIXEL_DISABLE_PLASMANEBULA2D
+        #include "PlasmaNebula2DEffect.h"
+    #endif
+    #ifndef NEOPIXEL_DISABLE_UFOSWARM2D
+        #include "UfoSwarm2DEffect.h"
+    #endif
 
 // -----------------------------------------------------------
 // Static singleton instances - (Initialized on first use)
@@ -290,8 +316,30 @@ static CandleMultiEffect* s_candleMulti = nullptr;
     #endif
 
 #endif // NEOPIXEL_MINIMAL_EFFECTS
-//
 // -----------------------------------------------------------
+
+#ifndef NEOPIXEL_DISABLE_SNAKE2D
+static Snake2DEffect* s_snake2d = nullptr;
+#endif
+
+#ifndef NEOPIXEL_DISABLE_MATRIX2D
+static Matrix2DEffect* s_matrix2d = nullptr;
+#endif
+#ifndef NEOPIXEL_DISABLE_TETRIS2D
+static Tetris2DEffect* s_tetris2d = nullptr;
+#endif
+#ifndef NEOPIXEL_DISABLE_TRON2D
+static Tron2DEffect* s_tron2d = nullptr;
+#endif
+#ifndef NEOPIXEL_DISABLE_STARFIELDWARP2D
+static StarfieldWarp2DEffect* s_starfieldWarp2d = nullptr;
+#endif
+#ifndef NEOPIXEL_DISABLE_PLASMANEBULA2D
+static PlasmaNebula2DEffect* s_plasmaNebula2d = nullptr;
+#endif
+#ifndef NEOPIXEL_DISABLE_UFOSWARM2D
+static UfoSwarm2DEffect* s_ufoSwarm2d = nullptr;
+#endif
 
 /**
  * @brief Get Solid Effect singleton
@@ -445,15 +493,20 @@ Effect* EffectPool::getRGBCCTTest()
 
 /**
  * @brief Get Garage Door Effect singleton
+ * @deprecated Replaced by Effektmanager Sequencer. Enable with NEOPIXEL_ENABLE_GARAGEDOOR.
  * @return Effect*
  */
 Effect* EffectPool::getGarageDoor()
 {
+#ifndef NEOPIXEL_DISABLE_GARAGEDOOR
     if (!s_garageDoor)
     {
         s_garageDoor = new GarageDoorEffect();
     }
     return s_garageDoor;
+#else
+    return getSolid(); // fallback
+#endif
 }
 
 /**
@@ -719,6 +772,62 @@ Effect* EffectPool::getClock2D()
     return s_clock2d;
 }
 #endif
+
+#ifndef NEOPIXEL_DISABLE_SNAKE2D
+Effect* EffectPool::getSnake2D()
+{
+    if (!s_snake2d) s_snake2d = new Snake2DEffect();
+    return s_snake2d;
+}
+#endif
+
+#ifndef NEOPIXEL_DISABLE_MATRIX2D
+Effect* EffectPool::getMatrix2D()
+{
+    if (!s_matrix2d) s_matrix2d = new Matrix2DEffect();
+    return s_matrix2d;
+}
+#endif
+
+#ifndef NEOPIXEL_DISABLE_TETRIS2D
+Effect* EffectPool::getTetris2D()
+{
+    if (!s_tetris2d) s_tetris2d = new Tetris2DEffect();
+    return s_tetris2d;
+}
+#endif
+
+#ifndef NEOPIXEL_DISABLE_TRON2D
+Effect* EffectPool::getTron2D()
+{
+    if (!s_tron2d) s_tron2d = new Tron2DEffect();
+    return s_tron2d;
+}
+#endif
+
+#ifndef NEOPIXEL_DISABLE_STARFIELDWARP2D
+Effect* EffectPool::getStarfieldWarp2D()
+{
+    if (!s_starfieldWarp2d) s_starfieldWarp2d = new StarfieldWarp2DEffect();
+    return s_starfieldWarp2d;
+}
+#endif
+
+#ifndef NEOPIXEL_DISABLE_PLASMANEBULA2D
+Effect* EffectPool::getPlasmaNebula2D()
+{
+    if (!s_plasmaNebula2d) s_plasmaNebula2d = new PlasmaNebula2DEffect();
+    return s_plasmaNebula2d;
+}
+#endif
+
+#ifndef NEOPIXEL_DISABLE_UFOSWARM2D
+Effect* EffectPool::getUfoSwarm2D()
+{
+    if (!s_ufoSwarm2d) s_ufoSwarm2d = new UfoSwarm2DEffect();
+    return s_ufoSwarm2d;
+}
+#endif
 // ============================================================================
 
 /**
@@ -822,6 +931,27 @@ uint8_t EffectPool::getEffectCount()
     count++;
     #endif
     #ifndef NEOPIXEL_DISABLE_CLOCK2D
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_SNAKE2D
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_MATRIX2D
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_TETRIS2D
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_TRON2D
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_STARFIELDWARP2D
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_PLASMANEBULA2D
+    count++;
+    #endif
+    #ifndef NEOPIXEL_DISABLE_UFOSWARM2D
     count++;
     #endif
 
@@ -936,6 +1066,27 @@ Effect* EffectPool::getEffectByIndex(uint8_t index)
     #endif
     #ifndef NEOPIXEL_DISABLE_CLOCK2D
     if (index == currentIndex++) return getClock2D();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_SNAKE2D
+    if (index == currentIndex++) return getSnake2D();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_MATRIX2D
+    if (index == currentIndex++) return getMatrix2D();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_TETRIS2D
+    if (index == currentIndex++) return getTetris2D();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_TRON2D
+    if (index == currentIndex++) return getTron2D();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_STARFIELDWARP2D
+    if (index == currentIndex++) return getStarfieldWarp2D();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_PLASMANEBULA2D
+    if (index == currentIndex++) return getPlasmaNebula2D();
+    #endif
+    #ifndef NEOPIXEL_DISABLE_UFOSWARM2D
+    if (index == currentIndex++) return getUfoSwarm2D();
     #endif
 
     return nullptr; // Index out of range

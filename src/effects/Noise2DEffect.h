@@ -192,6 +192,10 @@ class Noise2DEffect : public Effect
         const auto& geo = segment->getGeometry();
         if (geo.is1D()) { update(segment, deltaTime); return; }
 
+        uint16_t renderW = segment->getRenderWidth();
+        uint16_t renderH = segment->getRenderHeight();
+        if (renderW == 0 || renderH == 0) return;
+
         _timeAcc += deltaTime;
         auto& cfg = segment->getConfig();
         uint8_t  scale   = cfg.option1 ? cfg.option1 : 64;
@@ -200,11 +204,11 @@ class Noise2DEffect : public Effect
         uint16_t ty      = (uint16_t)((_timeAcc * speed) >> 9);
         bool     palMode = cfg.feature1;
 
-        for (uint8_t y = 0; y < geo.height; y++)
+        for (uint16_t y = 0; y < renderH; y++)
         {
-            for (uint8_t x = 0; x < geo.width; x++)
+            for (uint16_t x = 0; x < renderW; x++)
             {
-                uint8_t n = smoothNoise2D(x, y, tx, ty, scale);
+                uint8_t n = smoothNoise2D(static_cast<uint8_t>(x & 0xFF), static_cast<uint8_t>(y & 0xFF), tx, ty, scale);
                 uint8_t r, g, b;
                 if (palMode)
                 {
@@ -219,7 +223,7 @@ class Noise2DEffect : public Effect
                     g = (rgb >>  8) & 0xFF;
                     b =  rgb        & 0xFF;
                 }
-                segment->setPixelXY(x, y, r, g, b);
+                segment->setPixelGlobalXY(x, y, r, g, b);
             }
         }
     }

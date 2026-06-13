@@ -1,7 +1,7 @@
 # OFM-NeoPixel Developer Documentation
 
-**Version:** 0.0.1  
-**Date:** November 2025  
+**Version:** 0.4.0  
+**Date:** June 2026  
 **Author:** Erkan Colak
 
 Complete API reference and development guide for OFM-NeoPixel library.
@@ -27,7 +27,9 @@ Complete API reference and development guide for OFM-NeoPixel library.
   - [PhysicalStrip](#physicalstrip)
   - [VirtualStrip](#virtualstrip)
   - [Segment](#segment)
+  - [2D / 3D Geometry API](#2d--3d-geometry-api)
   - [Effect System](#effect-system)
+  - [Effektmanager API](#effektmanager-api)
 - [Console Commands](#console-commands)
 - [Testing & Benchmarking](#testing--benchmarking)
 - [Build Configuration](#build-configuration)
@@ -800,6 +802,95 @@ void clear();
 
 ---
 
+### 2D / 3D Geometry API
+
+A `Segment` can be declared as a 2D or 3D matrix. The geometry is a pure software interpretation layer — the physical LED chain stays 1D. Coordinate setters map `(x,y)` / `(x,y,z)` to a linear index using the configured `LedTopology`.
+
+#### Configuring Geometry
+
+```cpp
+// 2D matrix (width × height), default ROWS_SERPENTINE
+void setGeometry(uint8_t width, uint8_t height,
+                 LedTopology t = LedTopology::ROWS_SERPENTINE);
+
+// 3D volume (width × height × depth)
+void setGeometry(uint8_t width, uint8_t height, uint8_t depth,
+                 LedTopology t = LedTopology::ROWS_SERPENTINE_3D);
+
+const LedGeometry& getGeometry() const;
+bool is2D() const;
+bool is3D() const;
+```
+
+**Topologies (`LedTopology`):**
+
+| Value | Wiring |
+|-------|--------|
+| `LINEAR_1D` | No matrix (default, 1D strip) |
+| `ROWS_SERPENTINE` | →→ ←← →→ (most WS2812B panels) |
+| `ROWS_LINEAR` | →→ →→ →→ (all rows same direction) |
+| `COLS_SERPENTINE` | ↓↑↓↑ (column-major, alternating) |
+| `COLS_LINEAR` | ↓↓↓↓ (column-major, same direction) |
+| `ROWS_SERPENTINE_3D` | 3D volume, serpentine rows |
+| `COLS_LINEAR_TILED` | Tiled panel chain, columns linear per block |
+| `COLS_SERP_TILED` | Tiled panel chain, columns serpentine per block |
+
+#### Coordinate Setters
+
+```cpp
+bool setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b);
+bool setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
+bool setPixelXYZ(uint8_t x, uint8_t y, uint8_t z, uint8_t r, uint8_t g, uint8_t b);
+
+uint16_t xyToIndex(uint8_t x, uint8_t y) const;   // 0xFFFF if out of bounds
+uint16_t xyzToIndex(uint8_t x, uint8_t y, uint8_t z) const;
+```
+
+#### Distributed 2D (virtual band)
+
+```cpp
+// Global-coordinate setters used by distributed 2D effects across multiple devices
+bool setPixelGlobalXY(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b);
+bool setPixelGlobalXY(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
+
+uint16_t getRenderWidth() const;   // global matrix width in band mode
+uint16_t getRenderHeight() const;
+```
+
+**Example: 16×16 serpentine panel**
+
+```cpp
+auto seg = mgr->addSegment(vstrip, 0, 255);
+seg->setGeometry(16, 16, LedTopology::ROWS_SERPENTINE);
+
+seg->setPixelXY(0, 0, 0, 255, 0);   // top-left = green
+seg->setPixelXY(3, 7, 255, 0, 0);   // (col=3, row=7) = red
+
+// Assign a 2D-aware effect
+seg->setEffect(EffectPool::getFire2D());
+```
+
+#### Writing a 2D-aware effect
+
+```cpp
+class MyEffect : public Effect {
+    uint8_t getCapabilities() const override { return DIM_1D | DIM_2D; }
+
+    void update(Segment* seg, uint32_t dt) override { /* 1D fallback */ }
+
+    void update2D(Segment* seg, uint32_t dt) override {
+        const auto& geo = seg->getGeometry();
+        for (uint8_t y = 0; y < geo.height; y++)
+            for (uint8_t x = 0; x < geo.width; x++)
+                seg->setPixelXY(x, y, x * 16, y * 16, 0);
+    }
+};
+```
+
+`Segment::update()` dispatches automatically: `is3D()` + 3D-capable → `update3D()`, `is2D()` + 2D-capable → `update2D()`, otherwise → `update()` (1D, rendered line by line).
+
+---
+
 ### Effect System
 
 Base class for creating custom effects.
@@ -909,6 +1000,100 @@ Effect* effect = EffectPool::getEffect(1);  // Rainbow
 
 ---
 
+### Effektmanager API
+
+The Effektmanager (EM) is a per-segment sequencer that applies a chain of effect presets (cues) over time. EM data is stored in KNX flash (configured via ETS); each segment owns an `EffektManagerController` that drives playback.
+
+#### Headers
+
+```cpp
+#include "EffektManager.h"
+```
+
+#### Constants
+
+```cpp
+constexpr uint8_t EM_COUNT      = 16;  // Number of Effektmanager instances
+constexpr uint8_t EM_CUE_COUNT  = 99;  // Max cues per EM
+constexpr uint8_t EM_PARAM_COUNT = 10; // Max effect parameters per cue
+constexpr uint8_t EM_TEXT_LEN   = 14;  // Cue/effect text length (DPT 16)
+constexpr uint8_t EM_NONE       = 0;   // EM id 0 = "no EM / stop"
+```
+
+#### Data Structures
+
+```cpp
+struct EffektCue                  // 48 bytes
+{
+    uint8_t  effectId;            // Effect ID (0 = Solid/Off)
+    uint8_t  params[10];          // Effect parameters
+    uint8_t  r, g, b, w;          // Primary colour
+    uint8_t  brightness;          // 0-255
+    uint16_t durationSec;         // 0 = hold until next trigger
+    uint16_t fadeMs;              // Fade-out before next cue (0 = hard cut)
+    char     cueName[14];         // Cue label
+    char     effectText[14];      // Effect-specific text (e.g. ScrollText)
+};
+
+struct EffektManagerHeader        // 20 bytes
+{
+    char     name[16];            // ETS description
+    uint8_t  cueCount;            // Active cues (1-99)
+    uint8_t  loop : 1;            // Restart at cue 1 when finished
+    uint8_t  nextEmId;            // Chain target (0 = stop, 1-16)
+    uint8_t  enabled;             // 0 = off, 1 = on
+    bool isEnabled() const;
+};
+
+struct EffektManagerData          // header + cues[99]
+{
+    EffektManagerHeader header;
+    EffektCue           cues[EM_CUE_COUNT];
+};
+```
+
+#### Controller API
+
+```cpp
+class EffektManagerController
+{
+  public:
+    // Start EM <emId> (1-16) on a segment; EM_NONE stops. Interrupts any running EM.
+    void start(uint8_t emId, Segment* segment, const EffektManagerData* emData);
+
+    // Stop the running EM and restore normal operation.
+    void stop(Segment* segment);
+
+    // Advance the sequencer — call every loop() tick.
+    void tick(Segment* segment, const EffektManagerData* emData);
+
+    // Apply one cue immediately (effect + params + colour + brightness + text).
+    void applyCue(const EffektCue& cue, Segment* segment);
+
+    // Jump to a specific 1-based cue of the active EM.
+    bool triggerCue(uint8_t cueNum, Segment* segment, const EffektManagerData* emData);
+
+    bool    isRunning()    const;   // EM currently active?
+    uint8_t activeEmId()   const;   // 0 if idle
+    uint8_t activeCueNum() const;   // 1-based, 0 if idle
+
+    // Power-off persistence
+    void saveState();
+    void restoreState(Segment* segment, const EffektManagerData* emData);
+    uint8_t lastEmId() const;
+    void    setLastEmId(uint8_t emId);
+};
+```
+
+**Behaviour highlights:**
+
+- `start()` interrupts any running EM immediately (Variante A).
+- If the segment is part of an Effektkette, the chain is paused while the EM runs and resumes on `stop()`.
+- When a cue's `durationSec` elapses, the controller fades out (`fadeMs`) and advances; on the last cue it loops, chains to `nextEmId`, or stops.
+- `saveState()` / `restoreState()` persist and restart the active EM (from cue 1) across reboots.
+
+---
+
 ## Console Commands
 
 Complete reference for all `neo` console commands.
@@ -975,6 +1160,31 @@ neo <category> <action> [parameters]
 | `neo effect <seg> <id>` | Assign effect | `neo effect 0 1` |
 | `neo color <seg> <r> <g> <b>` | Set color | `neo color 0 255 0 0` |
 | `neo brightness <seg> <value>` | Set brightness | `neo brightness 0 128` |
+
+### Effektmanager & Cue Commands
+
+Segment indices are 0-based.
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `neo em` / `neo em status [seg]` | EM status table | `neo em status` |
+| `neo em dump <seg>` | Active EM header + runtime state | `neo em dump 0` |
+| `neo em start <seg> <em>` | Start EM (1-16) on segment | `neo em start 0 3` |
+| `neo em stop <seg>` | Stop EM on segment | `neo em stop 0` |
+| `neo em cue <seg> <cue>` | Trigger cue of active EM | `neo em cue 0 2` |
+| `neo cue` / `neo cue list [seg]` | Cue table | `neo cue list 0` |
+| `neo cue <seg> <cue>` | Trigger cue (alias) | `neo cue 0 2` |
+
+### Effektkette (Chain) Commands
+
+Segment indices are 0-based.
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `neo chain` / `neo chain status [seg]` | Chain status table | `neo chain status` |
+| `neo chain set <seg> <off\|master\|slave>` | Set chain mode | `neo chain set 0 master` |
+| `neo chain override <seg> <0\|1>` | Slave local-override flag | `neo chain override 0 1` |
+| `neo chain trigger <seg>` | Send sync telegram now (master) | `neo chain trigger 0` |
 
 ### Update Commands
 
@@ -1251,5 +1461,5 @@ Then check console for debug messages during initialization and updates.
 
 ---
 
-**Last Updated:** November 2025  
-**Version:** 0.0.1
+**Last Updated:** June 2026  
+**Version:** 0.4.0

@@ -1,7 +1,7 @@
 # OFM-NeoPixel Quickstart Guide
 
-**Version:** 0.0.1  
-**Date:** November 2025
+**Version:** 0.4.0  
+**Date:** June 2026
 
 Get up and running with OFM-NeoPixel in minutes.
 
@@ -23,6 +23,8 @@ Get up and running with OFM-NeoPixel in minutes.
 - [Your First LED Strip](#your-first-led-strip)
 - [Multi-Strip Setup](#multi-strip-setup)
 - [Adding Effects](#adding-effects)
+- [2D Matrix in 5 Minutes](#2d-matrix-in-5-minutes)
+- [Effektmanager (Cue Sequences)](#effektmanager-cue-sequences)
 - [Console Configuration](#console-configuration)
 - [Common Patterns](#common-patterns)
 - [Next Steps](#next-steps)
@@ -304,6 +306,71 @@ void loop() {
 | 5 | BPM | Pulsing to BPM |
 | 6 | Cylon | Bouncing pixel |
 | 7 | Wipe | Color wipe |
+
+---
+
+## 2D Matrix in 5 Minutes
+
+Any segment can be turned into a 2D matrix. The LED chain stays 1D on the wire — the geometry is a software layer inside `Segment`.
+
+```cpp
+void setup() {
+    openknx.init(0);
+    openknx.addModule(13, neoPixelModule);
+    openknx.setup();
+
+    auto mgr = neoPixelModule.getManager();
+
+    // 16x16 panel = 256 LEDs on one GPIO
+    auto phys   = mgr->addStrip(9, 256, LedProtocol::WS2812B);
+    auto vstrip = mgr->addVirtualStrip(256, ColorOrder::GRB);
+    mgr->attachPhysicalToVirtual(vstrip, phys, 0);
+
+    auto seg = mgr->addSegment(vstrip, 0, 255);
+
+    // Declare geometry — most WS2812B panels are serpentine rows
+    seg->setGeometry(16, 16, LedTopology::ROWS_SERPENTINE);
+
+    // Paint by coordinate
+    seg->setPixelXY(0, 0, 0, 255, 0);     // top-left = green
+    seg->setPixelXY(3, 7, 255, 0, 0);     // (col=3,row=7) = red
+
+    // Or assign a 2D-aware effect (Fire2D, Noise2D, Cylon2D, ScrollText, Clock2D)
+    mgr->attachEffect(seg, EffectPool::getFire2D());
+
+    neoPixelModule.setUpdateSpeed(UpdateSpeed::FAST);
+    neoPixelModule.setAutoUpdate(true);
+}
+```
+
+Existing 1D effects also run on a 2D segment — they are simply rendered line by line. See [README - 2D / 3D Matrix Support](../README.md#2d--3d-matrix-support) for all topologies and 3D usage.
+
+---
+
+## Effektmanager (Cue Sequences)
+
+An **Effektmanager (EM)** runs a timed sequence of effect presets (cues) on a segment — looping, chaining and fading automatically. EMs are configured in ETS and stored in KNX flash, but you can drive and test them from the console.
+
+```bash
+# Start Effektmanager 3 on segment 0 and watch it run
+neo em start 0 3
+neo em status                 # status table for all segments
+neo em dump 0                 # active EM header + runtime state for segment 0
+
+# Jump to a specific cue of the active EM
+neo cue 0 2                   # trigger cue 2 on segment 0
+neo cue list 0                # list configured cues of the active EM
+
+# Stop and return to normal operation
+neo em stop 0
+```
+
+Key points:
+- Each EM holds up to 99 cues; every cue carries effect ID, parameters, colour, brightness, duration, fade and text.
+- `durationSec = 0` holds a cue until the next trigger; otherwise the EM auto-advances.
+- An EM can **loop** or **chain** into a follow-up EM, and the active EM is restored after a reboot.
+
+See [README - Effektmanager (Cue Sequencer)](../README.md#effektmanager-cue-sequencer) for the full data model.
 
 ---
 
@@ -747,4 +814,4 @@ neo help                        # Detailed help
 
 **Happy LED Controlling!**
 
-Last Updated: November 2025
+Last Updated: June 2026

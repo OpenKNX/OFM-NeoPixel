@@ -2,8 +2,8 @@
 
 **Complete guide for porting FastLED effects to OFM-NeoPixel**
 
-**Version:** 0.0.2  
-**Date:** 2025-11-06  
+**Version:** 0.4.0  
+**Date:** 2026-06-13  
 **Author:** Copyright (c) 2025 Erkan Çolak - OpenKNX
 
 ---

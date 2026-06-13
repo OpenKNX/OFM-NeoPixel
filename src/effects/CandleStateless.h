@@ -75,39 +75,6 @@ namespace CandleStateless
         return static_cast<uint8_t>(target + (255U - intensity));
     }
 
-    inline uint8_t initialTarget(uint32_t seed)
-    {
-        return static_cast<uint8_t>(130U + randomRange(seed, 0, 4));
-    }
-
-    inline uint8_t computeFadeStep(uint8_t current, uint8_t target, uint8_t speedFactorValue)
-    {
-        const uint8_t diff = (target > current) ? (target - current) : (current - target);
-        uint8_t step = diff >> speedFactorValue;
-        if (step == 0) step = 1;
-        return step;
-    }
-
-    inline uint16_t computeDuration(uint8_t current, uint8_t target, uint8_t fadeStep)
-    {
-        const uint8_t diff = (target > current) ? (target - current) : (current - target);
-        if (diff == 0) return 1;
-        return static_cast<uint16_t>((diff + fadeStep - 1U) / fadeStep);
-    }
-
-    inline uint8_t advanceBrightness(uint8_t current, uint8_t target, uint8_t fadeStep, uint16_t frameOffset)
-    {
-        const uint16_t delta = static_cast<uint16_t>(fadeStep) * static_cast<uint16_t>(frameOffset + 1U);
-
-        if (target > current)
-        {
-            const uint16_t value = static_cast<uint16_t>(current) + delta;
-            return static_cast<uint8_t>(value > 255U ? 255U : value);
-        }
-
-        return (delta >= current) ? 0U : static_cast<uint8_t>(current - delta);
-    }
-
     inline uint8_t blendChannel(uint8_t background, uint8_t foreground, uint8_t amount)
     {
         const int16_t delta = static_cast<int16_t>(foreground) - static_cast<int16_t>(background);
@@ -133,45 +100,25 @@ namespace CandleStateless
     inline uint8_t sampleBrightness(uint32_t seed, uint32_t absoluteFrame, uint8_t speed, uint8_t intensity,
                                     uint16_t cycleSegments)
     {
-        const uint8_t speedFactorValue = speedFactor(speed);
+        // O(1) stateless sampling: time is divided into slots; each slot has a
+        // deterministic random target brightness, sampled values interpolate
+        // linearly between consecutive targets. Slot length follows the speed
+        // factor (2..16 frames), matching the original fade-step durations.
+        const uint8_t slotShift = speedFactor(speed); // 1..4 -> 2..16 frames per slot
+        const uint32_t slotLen = 1UL << slotShift;
 
-        uint32_t totalFrames = 0;
-        uint8_t current = 128;
-        uint8_t target = initialTarget(seed);
-        uint8_t fadeStep = 1;
+        // De-phase pixels so slot boundaries don't align across the strip
+        const uint32_t shifted = absoluteFrame + (seed & (slotLen - 1U));
+        const uint32_t slot = shifted >> slotShift;
+        const uint32_t frac = shifted & (slotLen - 1U);
 
-        for (uint16_t phase = 0; phase < cycleSegments; phase++)
-        {
-            const uint16_t duration = computeDuration(current, target, fadeStep);
-            totalFrames += duration;
+        const uint32_t phaseA = slot % cycleSegments;
+        const uint32_t phaseB = (slot + 1U) % cycleSegments;
+        const uint8_t a = nextTarget(seed, phaseA, intensity);
+        const uint8_t b = nextTarget(seed, phaseB, intensity);
 
-            current = advanceBrightness(current, target, fadeStep, duration - 1U);
-            target = nextTarget(seed, phase, intensity);
-            fadeStep = computeFadeStep(current, target, speedFactorValue);
-        }
-
-        if (totalFrames == 0) return 128;
-
-        uint32_t frameInCycle = absoluteFrame % totalFrames;
-        current = 128;
-        target = initialTarget(seed);
-        fadeStep = 1;
-
-        for (uint16_t phase = 0; phase < cycleSegments; phase++)
-        {
-            const uint16_t duration = computeDuration(current, target, fadeStep);
-            if (frameInCycle < duration)
-            {
-                return advanceBrightness(current, target, fadeStep, static_cast<uint16_t>(frameInCycle));
-            }
-
-            frameInCycle -= duration;
-            current = advanceBrightness(current, target, fadeStep, duration - 1U);
-            target = nextTarget(seed, phase, intensity);
-            fadeStep = computeFadeStep(current, target, speedFactorValue);
-        }
-
-        return current;
+        const int32_t delta = static_cast<int32_t>(b) - static_cast<int32_t>(a);
+        return static_cast<uint8_t>(static_cast<int32_t>(a) + ((delta * static_cast<int32_t>(frac)) >> slotShift));
     }
 
     inline uint32_t currentFrame()

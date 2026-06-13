@@ -1,0 +1,193 @@
+/**
+ * @file EffektManager.h
+ * @brief Effektmanager — global effect preset sequencer for NeoPixel segments
+ *
+ * Architecture:
+ *   EffektManager  (16 global instances, stored in KNX-Flash via ETS)
+ *     └── EffektCue  (up to 99 cues per EM, sequential playback)
+ *           └── applyTo(Segment*)  → sets effect + parameters + colour + text
+ *
+ * Each segment can activate any EM via KO. The EM runs its cues in order,
+ * applying each to the segment. When finished it can chain to another EM
+ * or loop. Cue transitions use a configurable fade-out.
+ *
+ * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
+ */
+#pragma once
+
+#include "Segment.h"
+#include "effects/EffectPool.h"
+#include "effects/ScrollTextEffect.h"
+#include <stdint.h>
+#include <string.h>
+
+// ============================================================================
+// Constants
+// ============================================================================
+static constexpr uint8_t  EM_COUNT      = 16;   ///< Number of Effektmanager instances
+static constexpr uint8_t  EM_CUE_COUNT  = 99;   ///< Max cues per EM
+static constexpr uint8_t  EM_TEXT_LEN   = 14;   ///< Cue text length (DPT 16 compatible)
+static constexpr uint8_t  EM_PARAM_COUNT = 10;  ///< Max effect parameters per cue
+
+// EM ID 0 = "no EM / stop"
+static constexpr uint8_t  EM_NONE       = 0;
+
+// ============================================================================
+// EffektCue — one effect preset (44 bytes)
+// ============================================================================
+struct EffektCue
+{
+    uint8_t  effectId;                  ///< Effect ID (0-33, 0=Solid/Aus)
+    uint8_t  params[EM_PARAM_COUNT];    ///< Effect parameters 0-4
+    uint8_t  r, g, b, w;               ///< Primary colour
+    uint8_t  brightness;               ///< Brightness 0-255
+    uint16_t durationSec;              ///< Duration in seconds (0 = hold until next trigger)
+    uint16_t fadeMs;                   ///< Fade-out duration before next cue (ms, 0 = hard cut)
+    char     cueName[EM_TEXT_LEN];     ///< Cue name (null-terminated)
+    char     effectText[EM_TEXT_LEN];  ///< Effect-specific text (null-terminated)
+};
+// Struct is packed by layout: 1+10+4+1+2+2+14+14 = 48 bytes (no padding needed)
+static_assert(sizeof(EffektCue) == 48, "EffektCue size mismatch — check layout");
+
+// ============================================================================
+// EffektManagerHeader — one EM configuration (~8 bytes)
+// ============================================================================
+struct EffektManagerHeader
+{
+    // Layout muss exakt dem ETS-XML entsprechen (NeoPixel.EM.templ.xml):
+    char     name[16];       ///< Byte  0–15: Beschreibung (ETS-Name)
+    uint8_t  cueCount;       ///< Byte 16:    Anzahl aktiver Cues (1–10)
+    uint8_t  loop : 1;       ///< Byte 17, Bit 0: Loop
+    uint8_t  _pad : 7;
+    uint8_t  nextEmId;       ///< Byte 18:    Folgeziel (0=Stop, 1–16)
+    uint8_t  enabled;        ///< Byte 19:    Aktiv (0=Aus, 1=Ein)
+
+    EffektManagerHeader()
+        : cueCount(1), loop(0), _pad(0), nextEmId(EM_NONE), enabled(0)
+    {
+        memset(name, 0, sizeof(name));
+    }
+
+    bool isEnabled() const { return enabled != 0 && cueCount > 0; }
+};
+
+// ============================================================================
+// EffektManagerData — full data for one EM (stored in KNX-Flash via ETS)
+// ============================================================================
+struct EffektManagerData
+{
+    EffektManagerHeader header;
+    EffektCue           cues[EM_CUE_COUNT];
+
+    EffektManagerData() = default;
+};
+// 16 × (20 + 99 × 44) = 16 × 4376 = 70016 bytes ≈ 68 KB — fits in enlarged KNX-Flash
+
+// ============================================================================
+// EffektManagerRuntime — per-segment runtime state (RAM only, not persisted)
+// ============================================================================
+struct EffektManagerRuntime
+{
+    uint8_t  activeEmId    = EM_NONE;  ///< Currently running EM (0 = idle)
+    uint8_t  activeCueIdx  = 0;        ///< Current cue index (0-based)
+    uint32_t cueStartMs    = 0;        ///< millis() when current cue started
+    uint32_t fadeStartMs   = 0;        ///< millis() when fade phase started (0 = not fading)
+    bool     fading        = false;    ///< true during fade transition
+    bool     fadeIn        = false;    ///< false = fade-out phase, true = fade-in phase
+    uint16_t fadeMs        = 300;      ///< total fade duration (from cue.fadeMs)
+    uint8_t  fadeFromBri   = 255;      ///< brightness reference for current ramp
+    uint8_t  lastEmId      = EM_NONE;  ///< EM active before power-off (for restore)
+    uint8_t  lastCueIdx    = 0;        ///< Cue active before power-off
+
+    bool isRunning() const { return activeEmId != EM_NONE; }
+};
+
+// ============================================================================
+// EffektManagerController — manages EM execution for one segment
+// ============================================================================
+class EffektManagerController
+{
+  public:
+    /**
+     * @brief Start an Effektmanager on a segment.
+     *
+     * Interrupts any currently running EM immediately (Variante A).
+     * If the segment is part of an Effektkette (virtual band), the chain
+     * is paused until the EM finishes or is stopped.
+     *
+     * @param emId   1-based EM index (1-16), or EM_NONE (0) to stop
+     * @param segment Target segment
+     * @param emData  Pointer to the EM data array (indexed by emId-1)
+     */
+    void start(uint8_t emId, Segment* segment, const EffektManagerData* emData);
+
+    /**
+     * @brief Stop the running EM and restore normal operation.
+     * Effektkette (if active) resumes after stop.
+     */
+    void stop(Segment* segment);
+
+    /**
+     * @brief Advance the sequencer — call every loop() tick.
+     *
+     * Handles:
+     *   - Cue duration timer
+     *   - Fade-out transition
+     *   - Auto-advance to next cue / chain to next EM
+     *   - Loop
+     */
+    void tick(Segment* segment, const EffektManagerData* emData);
+
+    /**
+     * @brief Apply a single cue to a segment immediately.
+     * Sets effect, parameters, colour, brightness, and (if applicable) text.
+     */
+    void applyCue(const EffektCue& cue, Segment* segment);
+
+    /** @brief Returns true if an EM is currently running on this segment. */
+    bool isRunning() const { return _rt.isRunning(); }
+
+    /**
+     * @brief Trigger a specific cue of the currently active EM immediately.
+     *
+     * @param cueNum 1-based cue number
+     * @return true if cue was applied, false on invalid state/range
+     */
+    bool triggerCue(uint8_t cueNum, Segment* segment, const EffektManagerData* emData);
+
+    /** @brief Returns the active EM ID (0 if idle). */
+    uint8_t activeEmId()  const { return _rt.activeEmId; }
+
+    /** @brief Returns the active Cue index (1-based, 0 if idle). */
+    uint8_t activeCueNum() const { return _rt.isRunning() ? _rt.activeCueIdx + 1 : 0; }
+
+    /** @brief Save state for power-off persistence. */
+    void saveState()
+    {
+        _rt.lastEmId   = _rt.activeEmId;
+        _rt.lastCueIdx = _rt.activeCueIdx;
+    }
+
+    /** @brief Restore after power-on (restarts the saved EM from Cue 1). */
+    void restoreState(Segment* segment, const EffektManagerData* emData)
+    {
+        if (_rt.lastEmId != EM_NONE)
+            start(_rt.lastEmId, segment, emData);
+    }
+
+    /** @brief Get the last known EM ID (for flash persistence). */
+    uint8_t lastEmId() const { return _rt.lastEmId; }
+
+    /** @brief Set the last known EM ID (loaded from flash). */
+    void setLastEmId(uint8_t emId) { _rt.lastEmId = emId; }
+  private:
+    EffektManagerRuntime _rt;
+    uint16_t _savedBandTotal  = 0; ///< Effektkette total length saved before EM start
+    uint16_t _savedBandOffset = 0; ///< Effektkette offset saved before EM start
+
+    void advanceToNextCue(Segment* segment, const EffektManagerData* emData);
+    void startFade(Segment* segment, uint16_t fadeMs);
+    void tickFade(Segment* segment, const EffektManagerData* emData);
+    void pauseEffektkette(Segment* segment);
+    void resumeEffektkette(Segment* segment);
+};
