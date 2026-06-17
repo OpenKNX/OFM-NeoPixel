@@ -53,7 +53,7 @@ class Matrix2DEffect : public Effect
     const char* getDescription(const char* lang = nullptr) override
     {
         return EFFECT_DESC_DE_EN(
-            "Digitaler Matrix-Regen in 2D. Varianten: Gruen, Gold oder Gemischt mit optionalen Glitch-Blitzen.",
+            "Digitaler Matrix-Regen in 2D. Varianten: Grün, Gold oder Gemischt mit optionalen Glitch-Blitzen.",
             "Digital Matrix rain in 2D. Variants: green, gold, or mixed with optional glitch flashes.");
     }
 
@@ -79,7 +79,7 @@ class Matrix2DEffect : public Effect
         {
             case 0: return PARAM_DESC_DE_EN("Geschwindigkeit des Regens.", "Rain speed.");
             case 1: return PARAM_DESC_DE_EN("Dichte der Spalten in Prozent.", "Column density in percent.");
-            case 2: return PARAM_DESC_DE_EN("Palette: 0=Gruen, 1=Gold, 2=Gemischt.", "Palette: 0=Green, 1=Gold, 2=Mixed.");
+            case 2: return PARAM_DESC_DE_EN("Palette: 0=Grün, 1=Gold, 2=Gemischt.", "Palette: 0=Green, 1=Gold, 2=Mixed.");
             case 3: return PARAM_DESC_DE_EN("Glitch-Blitze aktivieren.", "Enable glitch flashes.");
             default: return nullptr;
         }

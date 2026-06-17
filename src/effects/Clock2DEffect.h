@@ -7,7 +7,9 @@
  * never wrapping around.
  *
  * Parameters:
- *   0 ViewMode     — 0=Digital, 1=Binaer, 2=Auto-Wechsel (digital/binary alternating)
+ *   0 ViewMode     — 0=Digital, 1=Binär BCD-Spalten, 2=Binär Zeilen,
+ *                    3=Auto-Wechsel (BCD), 4=Auto-Wechsel (Zeilen)
+ *                    (folds the former separate BinaryStyle into ViewMode)
  *   1 ShowSeconds  — 0=HH:MM, 1=HH:MM:SS (binary: 4 vs 6 BCD columns / 2 vs 3 rows)
  *   2 BlinkColon   — 0=steady colon, 1=blink every second (digital only)
  *   3 ColourHue    — hue override (>0) or auto colour when primary is black
@@ -16,31 +18,36 @@
  *   6 DateHue      — separate hue for the date (0=same as clock)
  *   7 SwitchSec    — alternation interval in seconds (time/date, digital/binary)
  *   8 ScrollSpeed  — scroll speed when content is wider than matrix (0=static)
- *   9 BinaryStyle  — 0=BCD columns (classic binary clock), 1=binary rows (H/M/S)
+ *   9 Font         — text font: 0=5x7, 1=4x6, 2=3x5 (digital/date only)
  *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 #pragma once
 #include "../Segment.h"
 #include "Effect.h"
-#include "ScrollTextEffect.h" // reuse font constants
+#include "ScrollTextFonts.h" // reuse the built-in 5x7 bitmap font (kScrollFonts[0])
 #include "FastLEDMath.h"
 #include "OpenKNX.h"
 #include <stdio.h>
 
 namespace Clock2DFont
 {
-    inline void drawChar(Segment* seg, int16_t xStart, char ch,
+    // The clock renders with one of the shared bitmap fonts (5x7/4x6/3x5),
+    // selected per segment via the Font parameter and passed in as a descriptor.
+
+    inline void drawChar(Segment* seg, int16_t xStart, char ch, const ScrollFontDesc& f,
                          uint8_t r, uint8_t g, uint8_t b, uint8_t matW, uint8_t matH)
     {
-        if (ch < kFontFirst || ch > 0x7E) ch = ' ';
-        uint8_t yOff = matH > kFontHeight ? (matH - kFontHeight) / 2 : 0;
-        uint8_t rows = matH < kFontHeight ? matH : kFontHeight;
-        for (uint8_t col = 0; col < kFontWidth; col++)
+        uint8_t uch = (uint8_t)ch;
+        if (uch < kScrollFontFirstAscii || uch > kScrollFontLastAscii) uch = ' ';
+        uint8_t gi = (uint8_t)(uch - kScrollFontFirstAscii);
+        uint8_t yOff = matH > f.height ? (matH - f.height) / 2 : 0;
+        uint8_t rows = matH < f.height ? matH : f.height;
+        for (uint8_t col = 0; col < f.width; col++)
         {
             int16_t px = xStart + col;
             if (px < 0 || px >= matW) continue;
-            uint8_t bits = pgm_read_byte(&kFont5x7[ch - kFontFirst][col]);
+            uint8_t bits = pgm_read_byte(&f.data[(uint16_t)gi * f.width + col]);
             for (uint8_t row = 0; row < rows; row++)
             {
                 bool on = (bits >> row) & 1;
@@ -50,26 +57,27 @@ namespace Clock2DFont
         }
     }
 
-    inline void drawColon(Segment* seg, int16_t xStart,
+    inline void drawColon(Segment* seg, int16_t xStart, const ScrollFontDesc& f,
                           uint8_t r, uint8_t g, uint8_t b, uint8_t matW, uint8_t matH)
     {
         if (xStart < 0 || xStart >= matW) return;
-        uint8_t yOff = matH > kFontHeight ? (matH - kFontHeight) / 2 : 0;
-        uint8_t dot1 = yOff + 2;
-        uint8_t dot2 = yOff + 4;
+        uint8_t yOff = matH > f.height ? (matH - f.height) / 2 : 0;
+        uint8_t d1 = f.height / 3;            // colon dots scale with font height
+        uint8_t dot1 = yOff + d1;
+        uint8_t dot2 = yOff + (uint8_t)(f.height - 1 - d1);
         if (dot1 < matH) seg->setPixelXY((uint8_t)xStart, dot1, r, g, b);
         if (dot2 < matH) seg->setPixelXY((uint8_t)xStart, dot2, r, g, b);
     }
 
-    // Width of a rendered string: chars are 5+1 px, ':' is 2 px (dots + gap)
-    inline uint16_t textWidth(const char* s)
+    // Width of a rendered string: chars are width+1 px, ':' is 2 px (dots + gap)
+    inline uint16_t textWidth(const char* s, const ScrollFontDesc& f)
     {
         uint16_t w = 0;
-        for (; *s; s++) w += (*s == ':') ? 2 : (uint16_t)(kFontWidth + 1);
+        for (; *s; s++) w += (*s == ':') ? 2 : (uint16_t)(f.width + 1);
         return w > 0 ? (uint16_t)(w - 1) : 0; // drop trailing gap
     }
 
-    inline void drawString(Segment* seg, const char* s, int16_t x,
+    inline void drawString(Segment* seg, const char* s, int16_t x, const ScrollFontDesc& f,
                            uint8_t r, uint8_t g, uint8_t b, bool colonVisible,
                            uint8_t matW, uint8_t matH)
     {
@@ -77,13 +85,13 @@ namespace Clock2DFont
         {
             if (*s == ':')
             {
-                if (colonVisible) drawColon(seg, x, r, g, b, matW, matH);
+                if (colonVisible) drawColon(seg, x, f, r, g, b, matW, matH);
                 x += 2;
             }
             else
             {
-                drawChar(seg, x, *s, r, g, b, matW, matH);
-                x += kFontWidth + 1;
+                drawChar(seg, x, *s, f, r, g, b, matW, matH);
+                x += f.width + 1;
             }
             if (x >= matW) break;
         }
@@ -125,7 +133,7 @@ class Clock2DEffect : public Effect
             case 6: return "DateHue";
             case 7: return "SwitchSec";
             case 8: return "ScrollSpeed";
-            case 9: return "BinaryStyle";
+            case 9: return "Font";
             default: return nullptr;
         }
     }
@@ -135,8 +143,8 @@ class Clock2DEffect : public Effect
         switch (index)
         {
             case 0: return PARAM_DESC_DE_EN(
-                "Anzeigemodus: 0=Digital, 1=Binär, 2=Auto-Wechsel zwischen Digital und Binär (Intervall siehe SwitchSec).",
-                "View mode: 0=digital, 1=binary, 2=auto-alternate between digital and binary (interval: SwitchSec).");
+                "Anzeigemodus: 0=Digital, 1=Binär BCD-Spalten, 2=Binär Zeilen, 3=Auto-Wechsel Digital/Binär (BCD), 4=Auto-Wechsel Digital/Binär (Zeilen). Intervall siehe SwitchSec.",
+                "View mode: 0=digital, 1=binary BCD columns, 2=binary rows, 3=auto-alternate digital/binary (BCD), 4=auto-alternate digital/binary (rows). Interval: SwitchSec.");
             case 1: return PARAM_DESC_DE_EN(
                 "Sekunden anzeigen: 0=HH:MM, 1=HH:MM:SS. Bei Binär: 4 statt 6 BCD-Spalten bzw. 2 statt 3 Zeilen.",
                 "Show seconds: 0=HH:MM, 1=HH:MM:SS. Binary: 4 vs 6 BCD columns / 2 vs 3 rows.");
@@ -162,8 +170,8 @@ class Clock2DEffect : public Effect
                 "Scrollgeschwindigkeit, wenn die Anzeige breiter als die Matrix ist: scrollt bis zum Ende und zurück (Ping-Pong). 0=statisch (Anfang sichtbar), 1=langsam bis 255=schnell.",
                 "Scroll speed when content is wider than the matrix: scrolls to the end and back (ping-pong). 0=static (start visible), 1=slow to 255=fast.");
             case 9: return PARAM_DESC_DE_EN(
-                "Binär-Darstellung: 0=BCD-Spalten (klassische Binäruhr, 1 Spalte je Ziffer), 1=Binär-Zeilen (je eine Zeile für Stunde/Minute/Sekunde).",
-                "Binary style: 0=BCD columns (classic binary clock, one column per digit), 1=binary rows (one row each for hour/minute/second).");
+                "Schrift für Digital-/Datumsanzeige: 0=5×7 (Standard), 1=4×6, 2=3×5 (kleinste). Wirkt nur auf Text, nicht auf die Binär-Darstellung.",
+                "Font for digital/date display: 0=5×7 (default), 1=4×6, 2=3×5 (smallest). Affects text only, not the binary display.");
             default: return nullptr;
         }
     }
@@ -226,7 +234,7 @@ class Clock2DEffect : public Effect
     {
         switch (index)
         {
-            case 0: return 2;
+            case 0: return 4;   // ViewMode: digital/binBCD/binRows/autoBCD/autoRows
             case 1: return 1;
             case 2: return 1;
             case 3: return 255;
@@ -235,7 +243,7 @@ class Clock2DEffect : public Effect
             case 6: return 255;
             case 7: return 30;
             case 8: return 255;
-            case 9: return 1;
+            case 9: return kScrollFontCount - 1; // Font: 0=5x7..2=3x5
             default: return 255;
         }
     }
@@ -247,8 +255,10 @@ class Clock2DEffect : public Effect
             switch (enumValue)
             {
                 case 0: return "Digital";
-                case 1: return "Binaer";
-                case 2: return "Auto-Wechsel";
+                case 1: return "Binär BCD-Spalten";
+                case 2: return "Binär Zeilen";
+                case 3: return "Auto-Wechsel (BCD)";
+                case 4: return "Auto-Wechsel (Zeilen)";
             }
         }
         if (paramIndex == 4)
@@ -273,8 +283,9 @@ class Clock2DEffect : public Effect
         {
             switch (enumValue)
             {
-                case 0: return "BCD-Spalten";
-                case 1: return "Binaer-Zeilen";
+                case 0: return "5x7";
+                case 1: return "4x6";
+                case 2: return "3x5";
             }
         }
         return nullptr;
@@ -284,10 +295,10 @@ class Clock2DEffect : public Effect
     {
         switch (paramIndex)
         {
-            case 0: return 3;
+            case 0: return 5;
             case 4: return 3;
             case 5: return 3;
-            case 9: return 2;
+            case 9: return kScrollFontCount;
             default: return 0;
         }
     }
@@ -307,7 +318,7 @@ class Clock2DEffect : public Effect
             case 6: return (cfg.legacyOption1 >> 8) & 0xFF;    // DateHue
             case 7: return (cfg.legacyOption1 >> 16) & 0xFF;   // SwitchSec
             case 8: return (cfg.legacyOption1 >> 24) & 0xFF;   // ScrollSpeed
-            case 9: return cfg.feature3;                       // BinaryStyle
+            case 9: return cfg.legacyOption2 & 0xFF;           // Font
             default: return 0;
         }
     }
@@ -327,7 +338,7 @@ class Clock2DEffect : public Effect
             case 6: cfg.legacyOption1 = (cfg.legacyOption1 & ~0x0000FF00UL) | ((value & 0xFF) << 8);  break;
             case 7: cfg.legacyOption1 = (cfg.legacyOption1 & ~0x00FF0000UL) | ((value & 0xFF) << 16); break;
             case 8: cfg.legacyOption1 = (cfg.legacyOption1 & ~0xFF000000UL) | ((value & 0xFF) << 24); break;
-            case 9: cfg.feature3 = static_cast<bool>(value);    break;
+            case 9: cfg.legacyOption2 = (value < kScrollFontCount) ? value : 0; break; // Font
         }
     }
 
@@ -341,7 +352,12 @@ class Clock2DEffect : public Effect
         if (geo.is1D()) return;
 
         auto& cfg = segment->getConfig();
-        uint8_t viewMode    = cfg.option2;                       // 0=digital 1=binary 2=alternate
+        // ViewMode encodes display + binary style: 0=digital, 1=binary BCD,
+        // 2=binary rows, 3=auto-alternate (BCD), 4=auto-alternate (rows).
+        uint8_t viewMode    = cfg.option2;
+        bool isAuto         = (viewMode >= 3);
+        bool binaryRows     = (viewMode == 2 || viewMode == 4);
+        bool binaryBase     = (viewMode == 1 || viewMode == 2);  // explicit (non-auto) binary
         bool showSeconds    = cfg.feature1;
         bool blinkColon     = cfg.feature2;
         uint8_t dateMode    = cfg.option3;                       // 0=off 1=alternate 2=only
@@ -349,7 +365,8 @@ class Clock2DEffect : public Effect
         uint8_t dateHue     = (cfg.legacyOption1 >> 8) & 0xFF;
         uint8_t switchSec   = (cfg.legacyOption1 >> 16) & 0xFF;
         uint8_t scrollSpeed = (cfg.legacyOption1 >> 24) & 0xFF;
-        bool binaryRows     = cfg.feature3;
+        uint8_t fontIdx     = (uint8_t)(cfg.legacyOption2 & 0xFF);
+        const ScrollFontDesc& font = kScrollFonts[fontIdx < kScrollFontCount ? fontIdx : 0];
         uint8_t matW = geo.width;
         uint8_t matH = geo.height;
         if (switchSec < 2) switchSec = 5;
@@ -376,10 +393,10 @@ class Clock2DEffect : public Effect
         // Phase logic: which content is shown right now?
         uint32_t slot = (millis() / 1000UL) / switchSec;
         bool showDate = (dateMode == 2 && timeValid);
-        bool binary   = (viewMode == 1);
+        bool binary   = binaryBase;
         if (dateMode == 1 && timeValid)
         {
-            if (viewMode == 2)
+            if (isAuto)
             {
                 // 4-phase cycle: digital -> date -> binary -> date
                 switch (slot & 3)
@@ -394,7 +411,7 @@ class Clock2DEffect : public Effect
                 showDate = slot & 1;
             }
         }
-        else if (viewMode == 2)
+        else if (isAuto)
         {
             binary = slot & 1;
         }
@@ -434,8 +451,8 @@ class Clock2DEffect : public Effect
                     snprintf(buf, sizeof(buf), "%02u.%02u.", (unsigned)day, (unsigned)month);
                     break;
             }
-            int16_t x = contentX(Clock2DFont::textWidth(buf), matW, scrollSpeed);
-            Clock2DFont::drawString(segment, buf, x, dr, dg, db, true, matW, matH);
+            int16_t x = contentX(Clock2DFont::textWidth(buf, font), matW, scrollSpeed);
+            Clock2DFont::drawString(segment, buf, x, font, dr, dg, db, true, matW, matH);
         }
         else if (binary)
         {
@@ -453,8 +470,8 @@ class Clock2DEffect : public Effect
                          (unsigned)hour, (unsigned)minute, (unsigned)second);
             else
                 snprintf(buf, sizeof(buf), "%02u:%02u", (unsigned)hour, (unsigned)minute);
-            int16_t x = contentX(Clock2DFont::textWidth(buf), matW, scrollSpeed);
-            Clock2DFont::drawString(segment, buf, x, r, g, b, colonVisible, matW, matH);
+            int16_t x = contentX(Clock2DFont::textWidth(buf, font), matW, scrollSpeed);
+            Clock2DFont::drawString(segment, buf, x, font, r, g, b, colonVisible, matW, matH);
         }
     }
 

@@ -407,7 +407,7 @@ class Tetris2DEffect : public Effect
             case 2: return PARAM_DESC_DE_EN("Geist-Stein: 0=aus, 1=an.", "Ghost piece: 0=off, 1=on.");
             case 3: return PARAM_DESC_DE_EN("Farbmodus: 0=Form-Farbe, 1=Zufall, 2=Regenbogen.", "Color mode: 0=per shape, 1=random, 2=rainbow.");
             case 4: return PARAM_DESC_DE_EN("Volle Reihen aufblitzen: 0=aus, 1=an.", "Flash cleared lines: 0=off, 1=on.");
-            case 5: return PARAM_DESC_DE_EN("Selbstspielende KI: 0=aus (manuell), 1=Anfaenger, 2=Normal, 3=Profi.", "Self-playing AI: 0=off (manual), 1=beginner, 2=normal, 3=expert.");
+            case 5: return PARAM_DESC_DE_EN("Selbstspielende KI: 0=aus (manuell), 1=Anfänger, 2=Normal, 3=Profi.", "Self-playing AI: 0=off (manual), 1=beginner, 2=normal, 3=expert.");
             default: return nullptr;
         }
     }

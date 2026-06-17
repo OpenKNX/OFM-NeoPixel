@@ -77,6 +77,9 @@ void EffektManagerController::tick(Segment* segment, const EffektManagerData* em
 
     uint8_t emIdx             = _rt.activeEmId - 1;
     const EffektManagerData& em = emData[emIdx];
+    // Guard against a stale/out-of-range cue index (e.g. EM data reloaded with
+    // fewer cues). cueCount <= EM_CUE_COUNT, so this keeps the access in bounds.
+    if (_rt.activeCueIdx >= em.header.cueCount) { _rt.activeCueIdx = 0; return; }
     const EffektCue& cue      = em.cues[_rt.activeCueIdx];
     uint32_t now              = millis();
 

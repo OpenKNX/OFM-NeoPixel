@@ -4,7 +4,7 @@
  *
  * Architecture:
  *   EffektManager  (16 global instances, stored in KNX-Flash via ETS)
- *     └── EffektCue  (up to 99 cues per EM, sequential playback)
+ *     └── EffektCue  (up to EM_CUE_COUNT=10 cues per EM, sequential playback)
  *           └── applyTo(Segment*)  → sets effect + parameters + colour + text
  *
  * Each segment can activate any EM via KO. The EM runs its cues in order,
@@ -25,7 +25,7 @@
 // Constants
 // ============================================================================
 static constexpr uint8_t  EM_COUNT      = 16;   ///< Number of Effektmanager instances
-static constexpr uint8_t  EM_CUE_COUNT  = 99;   ///< Max cues per EM
+static constexpr uint8_t  EM_CUE_COUNT  = 10;   ///< Max cues per EM (matches ETS: Cue 1..10 per EM)
 static constexpr uint8_t  EM_TEXT_LEN   = 14;   ///< Cue text length (DPT 16 compatible)
 static constexpr uint8_t  EM_PARAM_COUNT = 10;  ///< Max effect parameters per cue
 
@@ -33,12 +33,12 @@ static constexpr uint8_t  EM_PARAM_COUNT = 10;  ///< Max effect parameters per c
 static constexpr uint8_t  EM_NONE       = 0;
 
 // ============================================================================
-// EffektCue — one effect preset (44 bytes)
+// EffektCue — one effect preset (48 bytes)
 // ============================================================================
 struct EffektCue
 {
     uint8_t  effectId;                  ///< Effect ID (0-33, 0=Solid/Aus)
-    uint8_t  params[EM_PARAM_COUNT];    ///< Effect parameters 0-4
+    uint8_t  params[EM_PARAM_COUNT];    ///< Effect parameters 0-9
     uint8_t  r, g, b, w;               ///< Primary colour
     uint8_t  brightness;               ///< Brightness 0-255
     uint16_t durationSec;              ///< Duration in seconds (0 = hold until next trigger)
@@ -81,7 +81,7 @@ struct EffektManagerData
 
     EffektManagerData() = default;
 };
-// 16 × (20 + 99 × 44) = 16 × 4376 = 70016 bytes ≈ 68 KB — fits in enlarged KNX-Flash
+// 16 × (20 + 10 × 48) = 16 × 500 = 8000 bytes ≈ 8 KB (EM_CUE_COUNT matches ETS Cue 1..10)
 
 // ============================================================================
 // EffektManagerRuntime — per-segment runtime state (RAM only, not persisted)

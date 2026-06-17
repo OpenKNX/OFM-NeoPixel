@@ -339,7 +339,7 @@ class Snake2DEffect : public Effect
     const char* getDescription(const char* lang = nullptr) override
     {
         return EFFECT_DESC_DE_EN(
-            "Klassisches Snake auf einer 2D LED-Matrix. Die Schlange frisst zufaelliges Futter und waechst.",
+            "Klassisches Snake auf einer 2D LED-Matrix. Die Schlange frisst zufälliges Futter und wächst.",
             "Classic snake on a 2D LED matrix. The snake eats random food and grows.");
     }
 
@@ -365,8 +365,8 @@ class Snake2DEffect : public Effect
         {
             case 0: return PARAM_DESC_DE_EN("Geschwindigkeit der Schlange.", "Snake movement speed.");
             case 1: return PARAM_DESC_DE_EN("Farbton des Kopfes.", "Head hue.");
-            case 2: return PARAM_DESC_DE_EN("Koerpermodus: 0=fix, 1=rainbow, 2=fade.", "Body mode: 0=fixed, 1=rainbow, 2=fade.");
-            case 3: return PARAM_DESC_DE_EN("Koerper-Farbton fuer fix/fade.", "Body hue for fixed/fade.");
+            case 2: return PARAM_DESC_DE_EN("Körpermodus: 0=fix, 1=rainbow, 2=fade.", "Body mode: 0=fixed, 1=rainbow, 2=fade.");
+            case 3: return PARAM_DESC_DE_EN("Körper-Farbton für fix/fade.", "Body hue for fixed/fade.");
             default: return nullptr;
         }
     }

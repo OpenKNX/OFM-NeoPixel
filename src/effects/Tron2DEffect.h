@@ -57,7 +57,7 @@ class Tron2DEffect : public Effect
             case 0: return PARAM_DESC_DE_EN("Geschwindigkeit der Scanner.", "Scanner speed.");
             case 1: return PARAM_DESC_DE_EN("Neon-Farbton.", "Neon hue.");
             case 2: return PARAM_DESC_DE_EN("Abstand der Grid-Linien.", "Grid line spacing.");
-            case 3: return PARAM_DESC_DE_EN("Glow-Intensitaet.", "Glow intensity.");
+            case 3: return PARAM_DESC_DE_EN("Glow-Intensität.", "Glow intensity.");
             default: return nullptr;
         }
     }

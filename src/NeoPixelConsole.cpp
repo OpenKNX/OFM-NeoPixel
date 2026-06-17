@@ -3322,7 +3322,12 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
                     size_t len = endQuote - valueStart - 1;
                     if (len > 63) len = 63; // Safety limit for ScrollTextEffect
 
-                    char* strVal = new char[len + 1];
+                    // Stack buffer: len is already capped at 63 above, so 64 bytes
+                    // always fit. setParameter() copies the text into the segment's
+                    // own buffer (e.g. ScrollTextEffect -> cfg.effectText), so no
+                    // heap allocation is needed here (previously leaked one block
+                    // per command since the pointer was never freed).
+                    char strVal[64];
                     strncpy(strVal, valueStart + 1, len);
                     strVal[len] = '\0';
 
@@ -3331,8 +3336,6 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
                                                  effect->getName(),
                                                  effect->getParameterName(paramIdx),
                                                  strVal);
-
-                    // Note: String memory is not freed - assumes it's managed by segment/effect
                 }
                 else
                 {
