@@ -1,8 +1,12 @@
 /**
  * @file SparkleEffect.h
- * @brief Sparkle effect - Fast random sparkles with party vibe
+ * @brief Sparkle effect - random sparkles with selectable rendering mode
  *
- * Similar to twinkle but with more random, party-like sparkles.
+ * Consolidated effect. Mode selects the rendering style:
+ *   Mode 0 (Sparkle):  fast random sparkles with party vibe
+ *   Mode 1 (Twinkle):  random sparkles fading in/out like twinkling stars
+ *   Mode 2 (Confetti): random colored pixels fading over time (FastLED Confetti)
+ *
  * Based on FastLED examples.
  *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
@@ -14,20 +18,18 @@
 #include "FastLEDMath.h"
 
 /**
- * Sparkle Effect
+ * Sparkle Effect (Sparkle / Twinkle / Confetti)
  *
- * Similar to twinkle but with more random, party-like sparkles.
- */
-/**
  * Config usage:
- *   - config.speed     : base speed of sparkles (higher=more frequent)
- *   - config.option1   : fade rate (0-220, default 200) - how fast sparkles fade
- *   - config.option2   : sparkle count (0-255, maps to 1-8) - sparkles per frame
- *   - config.option3   : probability (50-200, default 100) - sparkle chance
- *   - config.feature1  : white only mode (0=color/rainbow, 1=white sparkles only)
- *   - config.feature2  : burst mode (0=continuous, 1=random bursts)
+ *   - config.speed     : base speed / spawn rate
+ *   - config.option1   : Sparkle/Twinkle fade rate, Confetti saturation
+ *   - config.option2   : Sparkle sparkle count, Twinkle density
+ *   - config.option3   : Sparkle probability
+ *   - config.feature1  : Sparkle whiteOnly, Twinkle rainbow mode
+ *   - config.feature2  : Sparkle burst, Twinkle variable brightness
+ *   - config.mode      : 0=Sparkle, 1=Twinkle, 2=Confetti
  *   - config.intensity : master brightness (0-255)
- *   - config.r/g/b     : sparkle color (if all 0, uses random rainbow)
+ *   - config.r/g/b     : color (if all 0, uses random rainbow / white)
  */
 class SparkleEffect : public Effect
 {
@@ -42,45 +44,47 @@ class SparkleEffect : public Effect
     void update(Segment* segment, uint32_t deltaTime) override
     {
         if (!segment) return;
+        if (segment->getLength() == 0) return;
 
+        switch (segment->getConfig().mode)
+        {
+            case 1: updateTwinkle(segment, deltaTime); break;
+            case 2: updateConfetti(segment, deltaTime); break;
+            default: updateSparkle(segment, deltaTime); break;
+        }
+    }
+
+    // ── Mode 0: Sparkle ──────────────────────────────────────────────────
+    void updateSparkle(Segment* segment, uint32_t deltaTime)
+    {
         auto& config = segment->getConfig();
         uint16_t length = segment->getLength();
 
-        if (length == 0) return;
-
-        // Use option1 for fade rate (180-220, default 200)
+        // option1: fade rate (180-220, default 200)
         uint8_t fadeRate = config.option1 > 0 ? (180 + config.option1 / 6) : 200;
         fadeRate = fadeRate > 220 ? 220 : fadeRate;
 
-        // Use option2 for sparkle count (1-8, default based on speed)
+        // option2: sparkle count (1-8)
         uint8_t sparkleCount = config.option2 > 0 ? (1 + config.option2 / 32) : (1 + config.speed / 64);
         sparkleCount = sparkleCount > 8 ? 8 : sparkleCount;
 
-        // Use option3 for probability (50-200, default 100)
+        // option3: probability (50-200, default 100)
         uint8_t probability = config.option3 > 0 ? config.option3 : 100;
         probability = probability > 200 ? 200 : probability;
 
-        // Use feature1 for color mode (0=set color/rainbow, 1=white only)
         bool whiteOnly = config.feature1;
-
-        // Use feature2 for burst mode (0=continuous, 1=burst)
         bool burstMode = config.feature2;
 
-        // Fade all pixels more aggressively than twinkle
         for (uint16_t i = 0; i < length; i++)
         {
             uint8_t r, g, b;
             segment->getPixel(i, r, g, b);
-
-            // Apply configurable fade rate
             r = FastLEDMath::scale8(r, fadeRate);
             g = FastLEDMath::scale8(g, fadeRate);
             b = FastLEDMath::scale8(b, fadeRate);
-
             segment->setPixel(i, r, g, b);
         }
 
-        // Add multiple sparkles
         uint8_t actualSparkles = burstMode ? (FastLEDMath::random8() < 50 ? sparkleCount * 2 : 0) : sparkleCount;
 
         for (uint8_t i = 0; i < actualSparkles; i++)
@@ -88,38 +92,135 @@ class SparkleEffect : public Effect
             if (FastLEDMath::random8() < probability)
             {
                 int pos = FastLEDMath::random16(length);
-
                 uint8_t r, g, b;
                 if (whiteOnly)
                 {
-                    // White sparkles only
                     uint8_t brightness = FastLEDMath::random8(64, 255);
                     brightness = FastLEDMath::scale8(brightness, config.intensity);
                     r = g = b = brightness;
                 }
                 else if (config.r() == 0 && config.g() == 0 && config.b() == 0)
                 {
-                    // No color configured, use random rainbow colors
-                    uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(
-                        FastLEDMath::random8(), 255, config.intensity);
+                    uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(FastLEDMath::random8(), 255, config.intensity);
                     r = (rgb >> 16) & 0xFF;
                     g = (rgb >> 8) & 0xFF;
                     b = rgb & 0xFF;
                 }
                 else
                 {
-                    // Use configured color with random brightness
                     uint8_t brightness = FastLEDMath::random8(64, 255);
                     brightness = FastLEDMath::scale8(brightness, config.intensity);
-
                     r = FastLEDMath::scale8(config.r(), brightness);
                     g = FastLEDMath::scale8(config.g(), brightness);
                     b = FastLEDMath::scale8(config.b(), brightness);
                 }
-
                 segment->setPixel(pos, r, g, b);
             }
         }
+    }
+
+    // ── Mode 1: Twinkle ──────────────────────────────────────────────────
+    void updateTwinkle(Segment* segment, uint32_t deltaTime)
+    {
+        auto& config = segment->getConfig();
+        uint16_t length = segment->getLength();
+
+        // option1: fade rate (200-240, default 220)
+        uint8_t fadeRate = config.option1 > 0 ? (200 + config.option1 / 6) : 220;
+        fadeRate = fadeRate > 240 ? 240 : fadeRate;
+
+        // option2: density (10-200, default 100)
+        uint8_t density = config.option2 > 0 ? config.option2 : 100;
+        density = density > 200 ? 200 : density;
+
+        bool rainbowMode = config.feature1;
+        bool variableBrightness = config.feature2;
+
+        for (uint16_t i = 0; i < length; i++)
+        {
+            uint8_t r, g, b;
+            segment->getPixel(i, r, g, b);
+            r = FastLEDMath::scale8(r, fadeRate);
+            g = FastLEDMath::scale8(g, fadeRate);
+            b = FastLEDMath::scale8(b, fadeRate);
+            segment->setPixel(i, r, g, b);
+        }
+
+        uint8_t chanceOfTwinkle = ((config.speed * density) / 255) / 2;
+        if (FastLEDMath::random8() < chanceOfTwinkle)
+        {
+            int pos = FastLEDMath::random16(length);
+            uint8_t r, g, b;
+            if (rainbowMode)
+            {
+                uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(FastLEDMath::random8(), 255, config.intensity);
+                r = (rgb >> 16) & 0xFF;
+                g = (rgb >> 8) & 0xFF;
+                b = rgb & 0xFF;
+            }
+            else if (config.r() == 0 && config.g() == 0 && config.b() == 0)
+            {
+                uint8_t brightness = variableBrightness ? FastLEDMath::random8(128, 255) : 255;
+                brightness = FastLEDMath::scale8(brightness, config.intensity);
+                r = g = b = brightness;
+            }
+            else
+            {
+                uint8_t brightness = variableBrightness ? FastLEDMath::random8(128, 255) : 255;
+                brightness = FastLEDMath::scale8(brightness, config.intensity);
+                r = FastLEDMath::scale8(config.r(), brightness);
+                g = FastLEDMath::scale8(config.g(), brightness);
+                b = FastLEDMath::scale8(config.b(), brightness);
+            }
+            segment->setPixel(pos, r, g, b);
+        }
+    }
+
+    // ── Mode 2: Confetti ─────────────────────────────────────────────────
+    void updateConfetti(Segment* segment, uint32_t deltaTime)
+    {
+        auto& state = segment->getState();
+        const auto& config = segment->getConfig();
+        uint16_t length = segment->getLength();
+
+        const uint8_t speed = config.speed;         // FadeSpeed
+        const uint8_t intensity = config.intensity; // Brightness/Value
+        const uint8_t saturation = config.option1;  // Saturation
+        const bool yellowBoost = config.feature2;
+        const bool greenCorr = config.feature3;
+
+        uint8_t fadeSpeed = speed;
+        if (fadeSpeed == 0) fadeSpeed = 10;
+        if (fadeSpeed > 50) fadeSpeed = 50;
+
+        const uint8_t sat = saturation == 0 ? 200 : saturation;
+        uint8_t gHue = state.position & 0xFF;
+
+        for (uint16_t i = 0; i < length; i++)
+        {
+            uint8_t r, g, b;
+            if (segment->getPixel(i, r, g, b))
+            {
+                r = FastLEDMath::fadeToBlackBy(r, fadeSpeed);
+                g = FastLEDMath::fadeToBlackBy(g, fadeSpeed);
+                b = FastLEDMath::fadeToBlackBy(b, fadeSpeed);
+                segment->setPixel(i, r, g, b);
+            }
+        }
+
+        uint16_t pos = FastLEDMath::random16(length);
+        uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(gHue + FastLEDMath::random8(64), sat, intensity, yellowBoost, greenCorr);
+        uint8_t r, g, b;
+        if (segment->getPixel(pos, r, g, b))
+        {
+            r = FastLEDMath::qadd8(r, (rgb >> 16) & 0xFF);
+            g = FastLEDMath::qadd8(g, (rgb >> 8) & 0xFF);
+            b = FastLEDMath::qadd8(b, rgb & 0xFF);
+            segment->setPixel(pos, r, g, b);
+        }
+
+        if (deltaTime > 0) gHue++;
+        state.position = (state.position & 0xFF00) | gHue;
     }
 
     void reset() override
@@ -134,11 +235,13 @@ class SparkleEffect : public Effect
 
     const char* getDescription(const char* lang = nullptr) override
     {
-        return "Fast random sparkles with party vibe";
+        return EFFECT_DESC_DE_EN(
+            "Zufällige Funkeln: Sparkle, Twinkle oder Confetti je nach Modus",
+            "Random sparkles: Sparkle, Twinkle or Confetti depending on mode");
     }
 
     // Parameter API
-    uint8_t getParameterCount() const override { return 6; }
+    uint8_t getParameterCount() const override { return 7; }
 
     const char* getParameterName(uint8_t index) const override
     {
@@ -150,6 +253,7 @@ class SparkleEffect : public Effect
             case 3: return "Probability";
             case 4: return "WhiteOnly";
             case 5: return "BurstMode";
+            case 6: return "Mode";
             default: return "";
         }
     }
@@ -158,12 +262,13 @@ class SparkleEffect : public Effect
     {
         switch (index)
         {
-            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Basis-Geschwindigkeit der Sparkles", "Speed: Base speed of sparkles");
-            case 1: return PARAM_DESC_DE_EN("Ausblendrate: Wie schnell Sparkles verblassen (0-220)", "Fade rate: How fast sparkles fade (0-220)");
-            case 2: return PARAM_DESC_DE_EN("Anzahl: Wie viele Sparkles pro Frame (1-8)", "Count: How many sparkles per frame (1-8)");
+            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Basis-Geschwindigkeit / Spawnrate", "Speed: Base speed / spawn rate");
+            case 1: return PARAM_DESC_DE_EN("Ausblendrate / Confetti-Sättigung", "Fade rate / Confetti saturation");
+            case 2: return PARAM_DESC_DE_EN("Anzahl (Sparkle) / Dichte (Twinkle)", "Count (Sparkle) / Density (Twinkle)");
             case 3: return PARAM_DESC_DE_EN("Wahrscheinlichkeit: Sparkle-Chance (50-200)", "Probability: Sparkle chance (50-200)");
-            case 4: return PARAM_DESC_DE_EN("Nur Weiß: Nur weiße Sparkles", "White only: Only white sparkles");
-            case 5: return PARAM_DESC_DE_EN("Burst-Modus: Zufällige Explosionen", "Burst mode: Random bursts");
+            case 4: return PARAM_DESC_DE_EN("Nur Weiß (Sparkle) / Regenbogen (Twinkle)", "White only (Sparkle) / Rainbow (Twinkle)");
+            case 5: return PARAM_DESC_DE_EN("Burst (Sparkle) / Variable Helligkeit (Twinkle)", "Burst (Sparkle) / Variable brightness (Twinkle)");
+            case 6: return PARAM_DESC_DE_EN("Modus: 0=Sparkle, 1=Twinkle, 2=Confetti", "Mode: 0=Sparkle, 1=Twinkle, 2=Confetti");
             default: return "";
         }
     }
@@ -178,8 +283,26 @@ class SparkleEffect : public Effect
             case 3: return ParameterType::PARAM_UINT8;
             case 4: return ParameterType::PARAM_BOOL;
             case 5: return ParameterType::PARAM_BOOL;
+            case 6: return ParameterType::PARAM_ENUM; // Mode
             default: return ParameterType::PARAM_UINT8;
         }
+    }
+
+    const char* getEnumValueName(uint8_t paramIndex, uint8_t enumValue) const override
+    {
+        if (paramIndex != 6) return nullptr;
+        switch (enumValue)
+        {
+            case 0: return "Sparkle";
+            case 1: return "Twinkle";
+            case 2: return "Konfetti";
+            default: return nullptr;
+        }
+    }
+
+    uint8_t getEnumValueCount(uint8_t paramIndex) const override
+    {
+        return (paramIndex == 6) ? 3 : 0;
     }
 
     uint32_t getParameterDefault(uint8_t index) const override
@@ -187,11 +310,12 @@ class SparkleEffect : public Effect
         switch (index)
         {
             case 0: return 128; // Speed
-            case 1: return 120; // FadeRate (maps to ~200)
-            case 2: return 64;  // SparkleCount (maps to ~3)
+            case 1: return 120; // FadeRate
+            case 2: return 64;  // SparkleCount
             case 3: return 100; // Probability
             case 4: return 0;   // WhiteOnly off
             case 5: return 0;   // BurstMode off
+            case 6: return 0;   // Mode (Sparkle)
             default: return 0;
         }
     }
@@ -200,12 +324,13 @@ class SparkleEffect : public Effect
     {
         switch (index)
         {
-            case 0: return 1;  // Speed min
-            case 1: return 0;  // FadeRate min
-            case 2: return 0;  // SparkleCount min (maps to 1)
-            case 3: return 50; // Probability min
-            case 4: return 0;  // WhiteOnly false
-            case 5: return 0;  // BurstMode false
+            case 0: return 1;
+            case 1: return 0;
+            case 2: return 0;
+            case 3: return 50;
+            case 4: return 0;
+            case 5: return 0;
+            case 6: return 0; // Mode min
             default: return 0;
         }
     }
@@ -214,12 +339,13 @@ class SparkleEffect : public Effect
     {
         switch (index)
         {
-            case 0: return 255; // Speed max
-            case 1: return 220; // FadeRate max
-            case 2: return 255; // SparkleCount max (maps to 8)
-            case 3: return 200; // Probability max
-            case 4: return 1;   // WhiteOnly true
-            case 5: return 1;   // BurstMode true
+            case 0: return 255;
+            case 1: return 220;
+            case 2: return 255;
+            case 3: return 200;
+            case 4: return 1;
+            case 5: return 1;
+            case 6: return 2; // Mode max (0..2)
             default: return 255;
         }
     }
@@ -231,11 +357,12 @@ class SparkleEffect : public Effect
         switch (index)
         {
             case 0: return config.speed;    // Speed
-            case 1: return config.option1;  // FadeRate
-            case 2: return config.option2;  // SparkleCount
+            case 1: return config.option1;  // FadeRate / Saturation
+            case 2: return config.option2;  // SparkleCount / Density
             case 3: return config.option3;  // Probability
-            case 4: return config.feature1; // WhiteOnly
-            case 5: return config.feature2; // BurstMode
+            case 4: return config.feature1; // WhiteOnly / Rainbow
+            case 5: return config.feature2; // BurstMode / VariableBrightness
+            case 6: return config.mode;     // Mode
             default: return 0;
         }
     }
@@ -246,12 +373,13 @@ class SparkleEffect : public Effect
         auto& config = segment->getConfig();
         switch (index)
         {
-            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed (base speed)
-            case 1: config.option1 = static_cast<uint8_t>(value); break; // FadeRate (0-220)
-            case 2: config.option2 = static_cast<uint8_t>(value); break; // SparkleCount (density)
-            case 3: config.option3 = static_cast<uint8_t>(value); break; // Probability (50-200)
-            case 4: config.feature1 = static_cast<bool>(value); break;   // WhiteOnly
-            case 5: config.feature2 = static_cast<bool>(value); break;   // BurstMode
+            case 0: config.speed = static_cast<uint8_t>(value); break;
+            case 1: config.option1 = static_cast<uint8_t>(value); break;
+            case 2: config.option2 = static_cast<uint8_t>(value); break;
+            case 3: config.option3 = static_cast<uint8_t>(value); break;
+            case 4: config.feature1 = static_cast<bool>(value); break;
+            case 5: config.feature2 = static_cast<bool>(value); break;
+            case 6: config.mode = static_cast<uint8_t>(value); break;
             default: break;
         }
     }

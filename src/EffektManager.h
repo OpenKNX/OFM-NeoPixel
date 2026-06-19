@@ -60,7 +60,7 @@ struct EffektManagerHeader
     uint8_t  loop : 1;       ///< Byte 17, Bit 0: Loop
     uint8_t  _pad : 7;
     uint8_t  nextEmId;       ///< Byte 18:    Folgeziel (0=Stop, 1–16)
-    uint8_t  enabled;        ///< Byte 19:    Aktiv (0=Aus, 1=Ein)
+    uint8_t  enabled;        ///< Byte 19:    Zustand (0=Inaktiv, 1=Aktiv, 2=Pausiert)
 
     EffektManagerHeader()
         : cueCount(1), loop(0), _pad(0), nextEmId(EM_NONE), enabled(0)
@@ -68,7 +68,11 @@ struct EffektManagerHeader
         memset(name, 0, sizeof(name));
     }
 
-    bool isEnabled() const { return enabled != 0 && cueCount > 0; }
+    // Runnable only when ACTIVE (1). Paused (2) keeps full config + KOs but does
+    // NOT render; Inactive (0) is fully off (ETS also removes its KOs).
+    bool isEnabled() const { return enabled == 1 && cueCount > 0; }
+    bool isPaused() const { return enabled == 2; }
+    bool isConfigured() const { return enabled != 0; }
 };
 
 // ============================================================================
@@ -96,6 +100,7 @@ struct EffektManagerRuntime
     bool     fadeIn        = false;    ///< false = fade-out phase, true = fade-in phase
     uint16_t fadeMs        = 300;      ///< total fade duration (from cue.fadeMs)
     uint8_t  fadeFromBri   = 255;      ///< brightness reference for current ramp
+    uint8_t  cueBri        = 255;      ///< current cue's RELATIVE brightness (scaled against segment master) — kept so a runtime master change can be re-applied without a cue switch
     uint8_t  lastEmId      = EM_NONE;  ///< EM active before power-off (for restore)
     uint8_t  lastCueIdx    = 0;        ///< Cue active before power-off
 
@@ -146,6 +151,14 @@ class EffektManagerController
 
     /** @brief Returns true if an EM is currently running on this segment. */
     bool isRunning() const { return _rt.isRunning(); }
+
+    /**
+     * @brief Re-apply the segment's master brightness to the active cue.
+     * Call after a KO/global/console brightness change while an EM is running, so the
+     * new master takes effect immediately instead of only at the next cue switch.
+     * No-op if no EM is running. Cue brightness is RELATIVE: render = master*cueBri/255.
+     */
+    void reapplyMasterBrightness(Segment* segment);
 
     /**
      * @brief Trigger a specific cue of the currently active EM immediately.

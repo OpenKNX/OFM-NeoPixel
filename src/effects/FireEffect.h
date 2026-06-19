@@ -1,9 +1,14 @@
 /**
  * @file FireEffect.h
- * @brief Fire2012 effect ported from FastLED - Realistic fire simulation
+ * @brief Fire2012 effect ported from FastLED - Realistic fire simulation (1D + 2D)
  *
  * Port of Mark Kriegsman's Fire2012 effect from FastLED.
  * Based on FastLED Fire2012.ino (MIT License) - https://github.com/FastLED/FastLED
+ *
+ * Consolidated effect: the former "Fire 2D" effect is now the 2D render path of
+ * this effect (getCapabilities() advertises DIM_1D|DIM_2D, update2D()). On a
+ * matrix each column simulates an independent fire column, heat rises from the
+ * bottom row upward.
  *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
@@ -38,6 +43,12 @@ class FireEffect : public Effect
     uint8_t _sparking;      // Chance of new sparks (50-200, default 120)
     bool _reverseDirection; // Whether fire goes up or down
 
+    // 2D heat field (per-column fire simulation)
+    static const uint8_t MAX_DIM_2D = 64;
+    uint8_t _heat2D[MAX_DIM_2D][MAX_DIM_2D];
+    uint8_t _lastWidth2D = 0;
+    uint8_t _lastHeight2D = 0;
+
   public:
     FireEffect() : _numCells(0), _cooling(55), _sparking(120), _reverseDirection(false)
     {
@@ -46,7 +57,12 @@ class FireEffect : public Effect
         {
             _heat[i] = 0;
         }
+        for (uint8_t x = 0; x < MAX_DIM_2D; x++)
+            for (uint8_t y = 0; y < MAX_DIM_2D; y++)
+                _heat2D[x][y] = 0;
     }
+
+    uint8_t getCapabilities() const override { return DIM_1D | DIM_2D; }
 
     void update(Segment* segment, uint32_t deltaTime) override
     {
@@ -282,7 +298,70 @@ class FireEffect : public Effect
         }
     }
 
+    // ====================================================================
+    // 2D rendering — per-column fire simulation
+    // ====================================================================
+    void update2D(Segment* segment, uint32_t deltaTime) override
+    {
+        if (!segment) return;
+        const auto& geo = segment->getGeometry();
+        if (geo.is1D()) { update(segment, deltaTime); return; }
+
+        uint8_t w = geo.width < MAX_DIM_2D ? geo.width : MAX_DIM_2D;
+        uint8_t h = geo.height < MAX_DIM_2D ? geo.height : MAX_DIM_2D;
+        if (w == 0 || h == 0) return;
+        if (w != _lastWidth2D || h != _lastHeight2D)
+        {
+            for (uint8_t x = 0; x < MAX_DIM_2D; x++)
+                for (uint8_t y = 0; y < MAX_DIM_2D; y++)
+                    _heat2D[x][y] = 0;
+            _lastWidth2D = w;
+            _lastHeight2D = h;
+        }
+
+        auto& cfg = segment->getConfig();
+        uint8_t coolingIn = cfg.option1 ? cfg.option1 : 90;
+        uint8_t sparkingIn = cfg.option2 ? cfg.option2 : 120;
+        bool blue = cfg.feature2;
+        bool reverse = (cfg.reverse != 0);
+        uint8_t intensity = cfg.intensity;
+
+        for (uint8_t x = 0; x < w; x++)
+        {
+            simulateColumn2D(x, h, coolingIn, sparkingIn);
+            for (uint8_t y = 0; y < h; y++)
+            {
+                uint8_t row = reverse ? y : (h - 1 - y);
+                uint32_t color = blue ? blueFire(_heat2D[x][row]) : heatColor(_heat2D[x][row]);
+                uint8_t r = FastLEDMath::scale8((color >> 16) & 0xFF, intensity);
+                uint8_t g = FastLEDMath::scale8((color >> 8) & 0xFF, intensity);
+                uint8_t b = FastLEDMath::scale8(color & 0xFF, intensity);
+                segment->setPixelXY(x, y, r, g, b);
+            }
+        }
+    }
+
   private:
+    void simulateColumn2D(uint8_t x, uint8_t h, uint8_t cooling, uint8_t sparking)
+    {
+        if (h == 0) return;
+        // Step 1: cool down
+        for (uint8_t y = 0; y < h; y++)
+        {
+            uint8_t cool = (uint8_t)((cooling * 10) / h) + 2;
+            _heat2D[x][y] = FastLEDMath::qsub8(_heat2D[x][y], FastLEDMath::random8(0, cool));
+        }
+        // Step 2: heat drifts up
+        for (int y = h - 1; y >= 2; y--)
+            _heat2D[x][y] = (_heat2D[x][y - 1] + _heat2D[x][y - 2] + _heat2D[x][y - 2]) / 3;
+        // Step 3: random sparks at the bottom
+        if (FastLEDMath::random8() < sparking)
+        {
+            uint8_t y = FastLEDMath::random8() % (h < 3 ? h : 3);
+            _heat2D[x][y] = FastLEDMath::qadd8(_heat2D[x][y], FastLEDMath::random8(160, 255));
+        }
+    }
+
     /**
      * Convert heat value to fire color (black->red->yellow->white)
      * Based on FastLED's HeatColor function

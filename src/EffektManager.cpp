@@ -7,6 +7,12 @@
 #include "EffektManager.h"
 #include <Arduino.h>
 
+// Debug/test: per-applyCue breadcrumb. Gated so production builds stay clean —
+// comment out to disable. Fires at the START of each cue switch (before
+// setParameter/setEffect), so a crash *during* a transition leaves a trail
+// naming the cue/effect that was being applied.
+#define NEOPIXEL_EM_TRACE
+
 // ============================================================================
 // Start / Stop
 // ============================================================================
@@ -23,6 +29,11 @@ void EffektManagerController::start(uint8_t emId, Segment* segment, const Effekt
 
     uint8_t emIdx = emId - 1; // 0-based index
     if (emIdx >= EM_COUNT) return;
+
+    // Guard the EM data pointer. _emData is new(nothrow) in OAM and may be null on a
+    // low-memory boot; the flash-restore path (restoreState→start) is the one caller
+    // that doesn't pre-check it, so guard here to cover every caller (incl. chain start).
+    if (!emData) return;
 
     const EffektManagerData& em = emData[emIdx];
     if (!em.header.isEnabled()) return;
@@ -98,6 +109,15 @@ void EffektManagerController::tick(Segment* segment, const EffektManagerData* em
 
     if (elapsed >= durationMs)
     {
+#ifdef NEOPIXEL_EM_TRACE
+        // Transition breadcrumb: printed the instant a cue's duration expires, BEFORE
+        // touching fade/effect state. If a crash log shows this line but no following
+        // "applyCue ENTER", the wedge is in the cue TRANSITION (fade/setEffect), not the
+        // effect render. If it's absent, the wedge happened mid-render of the active cue.
+        Serial.printf("[EM-TRACE] cue=%u duration done (elapsed=%lums) -> %s\n",
+                      (unsigned)(_rt.activeCueIdx + 1), (unsigned long)elapsed,
+                      (cue.fadeMs > 0) ? "fade-out" : "advance");
+#endif
         // Start fade-out if configured
         if (cue.fadeMs > 0)
             startFade(segment, cue.fadeMs);
@@ -114,9 +134,22 @@ void EffektManagerController::applyCue(const EffektCue& cue, Segment* segment)
 {
     if (!segment) return;
 
+#ifdef NEOPIXEL_EM_TRACE
+    // Breadcrumb BEFORE touching the effect — last line printed if the switch crashes.
+    Serial.printf("[EM-TRACE] applyCue ENTER em=%u cue=%u effectId=%u dur=%us fade=%ums\n",
+                  (unsigned)_rt.activeEmId, (unsigned)(_rt.activeCueIdx + 1),
+                  (unsigned)cue.effectId, (unsigned)cue.durationSec, (unsigned)cue.fadeMs);
+#endif
+
     // Set colour
     segment->setPrimaryColor(cue.r, cue.g, cue.b, cue.w);
-    segment->setBrightness(cue.brightness);
+
+    // Cue brightness is RELATIVE to the segment's master (KO/global/console) brightness:
+    // render = master * cue / 255. This way a runtime dim (brightness KO) stays authoritative
+    // and is NOT yanked back to the cue value on every cue switch. master defaults to 255,
+    // so an unconfigured segment renders cues at their own brightness (backward compatible).
+    _rt.cueBri = cue.brightness;
+    segment->setBrightness((uint8_t)(((uint16_t)segment->getMasterBrightness() * (uint16_t)cue.brightness + 127) / 255));
 
     // Set effect parameters
     Effect* effect = EffectPool::getEffectByIndex(cue.effectId);
@@ -157,9 +190,23 @@ void EffektManagerController::applyCue(const EffektCue& cue, Segment* segment)
     }
 
     _rt.cueStartMs = millis();
-#ifdef OPENKNX_DEBUG
-    Serial.printf("[EM] Applied cue %d (effect=%d, dur=%ds)\n", _rt.activeCueIdx + 1, cue.effectId, cue.durationSec);
+#if defined(OPENKNX_DEBUG) || defined(NEOPIXEL_EM_TRACE)
+    // DONE marker: ENTER without a following DONE => the switch itself crashed.
+    Serial.printf("[EM-TRACE] applyCue DONE  cue=%d (effect=%d, dur=%ds)\n", _rt.activeCueIdx + 1, cue.effectId, cue.durationSec);
 #endif
+}
+
+// ============================================================================
+// Re-apply master brightness to the active cue (after a runtime KO/global change)
+// ============================================================================
+
+void EffektManagerController::reapplyMasterBrightness(Segment* segment)
+{
+    if (!segment || !_rt.isRunning()) return;
+    // Don't fight an in-flight crossfade — tickFade owns the brightness register
+    // during a transition and will pick up the new master on the next cue anyway.
+    if (_rt.fading) return;
+    segment->setBrightness((uint8_t)(((uint16_t)segment->getMasterBrightness() * (uint16_t)_rt.cueBri + 127) / 255));
 }
 
 // ============================================================================

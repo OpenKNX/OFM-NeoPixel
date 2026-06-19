@@ -9,8 +9,22 @@ A high-performance, hardware-optimized LED control library for addressable RGB/R
 
 ---
 
+## Documentation
+
+| Document | What's inside |
+|----------|---------------|
+| [Quickstart](doc/Quickstart.md) | Get a strip running in minutes |
+| [Effects](doc/Effects.md) | Catalogue of all 33 effects and their parameters |
+| [Effektmanager & Effektkette](doc/EM-Cue-Effektkette.md) | Cue sequencer + distributed cross-device rendering |
+| [Developer Guide](doc/Developer.md) | API reference + full console-command reference |
+| [Architecture](doc/Architecture.md) | System design & data-flow diagrams |
+| [Effects Porting](doc/Effects-Porting.md) | Write or port your own effects |
+
+---
+
 ## Table of Contents
 
+- [Documentation](#documentation)
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [Quick Start](#quick-start)
@@ -176,11 +190,11 @@ This design enables complex LED configurations with minimal CPU overhead through
 - **8 Wiring Topologies**: Serpentine/linear rows & columns, 3D volumes, and tiled panel chains
 - **Coordinate API**: `setPixelXY(x, y)` / `setPixelXYZ(x, y, z)` with automatic index mapping
 - **Automatic Effect Routing**: `update2D()` / `update3D()` dispatch; 1D effects fall back gracefully line-by-line
-- **Built-in 2D Effects**: Fire2D, Noise2D, Cylon2D, ScrollText (5×7 font), Clock2D
+- **Built-in 2D Effects**: ScrollText (5×7 font), Clock 2D, Snake 2D, Matrix 2D, Tetris 2D, TRON, Starfield Warp, Plasma Nebula, UFO Swarm, Game of Life 2D, DNA 2D, Aurora 2D, Lissajous 2D, Metaballs 2D — plus geometry-aware Fire, Noise & Cylon (render in 1D *or* 2D)
 
 ### Effektmanager (Cue Sequencer)
 
-- **16 Effektmanager Instances**: Each a timed sequence of up to 99 effect cues, stored in KNX flash via ETS
+- **16 Effektmanager Instances**: Each a timed sequence of up to 10 effect cues, stored in KNX flash via ETS
 - **Self-Contained Cues**: Every cue carries effect ID, up to 10 parameters, primary colour, brightness, duration, fade and text
 - **Per-Segment Playback**: Any segment can run any EM via KO; automatic cue advance with configurable fade transitions
 - **Chaining & Loop**: An EM can loop or chain into a follow-up EM for endless show sequences
@@ -216,7 +230,7 @@ This design enables complex LED configurations with minimal CPU overhead through
 
 - Virtual strip abstraction with automatic offset calculation
 - Segment-based effect system
-- Integrated effects: Solid, Rainbow, Pride2015, Confetti, Juggle, BPM, Cylon, Wipe
+- 33 integrated effects (1D + 2D): Solid, Wipe, Rainbow, Pride2015, Juggle, BPM, Cylon, Fire, … (full list via `neo effects`)
 - Per-segment brightness control
 - Color order abstraction (RGB, GRB, BGR, RGBW, GRBW, RGBCCT, GRBCCT, RGBCTW, GRBCTW)
 - Performance tracking and statistics
@@ -500,7 +514,7 @@ neo phys config 0 skipmask clear
 ```
 ┌──────────────────────────────────────────────────────┐
 │          Effect Pool (Singletons, ~80 bytes)         │
-│  Solid │ Rainbow │ BPM │ Pride │ ... (10 effects)    │
+│  Solid │ Rainbow │ BPM │ Pride │ ... (33 effects)    │
 └────┬─────────┬──────┬─────┬──────────────────────────┘
      │         │      │     │
      └─────────┴──────┴─────┴────► Shared by 100 segments
@@ -1362,23 +1376,20 @@ neo seg offset <segIndex> <value>
 neo effects
     # List all available effects with IDs and parameter counts
 
-neo effect <segIndex> <effectId>
+neo effect set <segIndex> <effectId|name>
     # Assign effect to segment (with default parameters)
-    # Effect IDs:
-    #   0 = Solid Color
-    #   1 = Wipe (Direction)
-    #   2 = Rainbow (Speed, Delta)
-    #   3 = Pride2015 (no parameters)
-    #   4 = Confetti (FadeSpeed, Saturation)
-    #   5 = Juggle (NumDots, FadeSpeed)
-    #   6 = BPM (BPM, Hue)
-    #   7 = Cylon (Speed, Hue, EyeSize, FadeAmount)
-    # │ 8 = RGBW Test ( Rotating RGBW test pattern)
-    #   9 = GarageDoor (special effect)
+    # Effect IDs (full list via `neo effects`):
+    #   0=Solid  1=Wipe  2=Rainbow  3=Pride2015  4=Juggle  5=BPM
+    #   6=Cylon  7=Test  8=Fire  9=Theater Chase  10=Sparkle
+    #   11=Breathing  12=Strobe  13=Comet  14=Noise  15=Palette
+    #   16=Lightning  17=Gradient  18=Candle  19=Scroll Text
+    #   20=Clock 2D  21=Snake 2D  22=Matrix 2D  23=Tetris 2D  24=TRON
+    #   25=Starfield Warp  26=Plasma Nebula  27=UFO Swarm
+    #   28=Game of Life 2D  29=DNA 2D  30=Aurora 2D  31=Lissajous 2D  32=Metaballs 2D
     # Examples:
-    neo effect 0 0                 # Solid color on Segment 0
-    neo effect 1 2                 # Rainbow on Segment 1
-    neo effect 2 7                 # Cylon on Segment 2
+    neo effect set 0 0             # Solid color on Segment 0
+    neo effect set 1 2             # Rainbow on Segment 1
+    neo effect set 2 6             # Cylon on Segment 2
 
 neo effect config <segIndex>
     # Show all effect parameters for segment
@@ -1396,14 +1407,6 @@ neo effect config <segIndex> set <paramIndex> <value>
     neo effect config 0 set 0 150  # Set Speed to 150
     neo effect config 1 set 1 128  # Set Hue to 128
     neo effect config 2 set 2 8    # Set EyeSize to 8
-
-neo garage <segIndex> <phase>
-    # Control GarageDoor effect (ID 8)
-    # Phases: 0=OPENING, 1=RUNWAY, 2=COMPLETED, 3=STOPPED
-    neo garage 0 0                 # Start opening animation
-    neo garage 0 1                 # Runway lights
-    neo garage 0 2                 # Completed (green)
-    neo garage 0 3                 # Stop/pause
 
 neo color <segIndex> <r> <g> <b> [w]
     neo color <segIndex> <r> <g> <b> <ww> <cw>     # RGBCCT (RGB+WW+CW)
@@ -1875,18 +1878,16 @@ public:
     virtual bool isDone(const Segment* segment) const;
 };
 
-// Built-in Effects (in EffectPool namespace)
+// Built-in effects are pooled singletons accessed via EffectPool getters.
 namespace EffectPool {
-    extern EffectSolid solidEffect;      // ID: 0
-    extern EffectRainbow rainbowEffect;  // ID: 1
-    extern EffectPride pridEffect;       // ID: 2
-    extern EffectConfetti confettiEffect;// ID: 3
-    extern EffectJuggle juggleEffect;    // ID: 4
-    extern EffectBPM bpmEffect;          // ID: 5
-    extern EffectCylon cylonEffect;      // ID: 6
-    extern EffectWipe wipeEffect;        // ID: 7
-    
-    Effect* getEffect(uint8_t id);
+    Effect*  getEffectByIndex(uint8_t id); // id 0..32 (see `neo effects` for the full map)
+    uint8_t  getEffectCount();             // 33
+
+    // Per-effect getters also exist, e.g.:
+    Effect* getSolid();    // ID 0
+    Effect* getWipe();     // ID 1
+    Effect* getRainbow();  // ID 2
+    // ... getCylon() ID 6, getFire() ID 8, getTetris2D() ID 23, getMetaballs2D() ID 32
 }
 ```
 
@@ -1977,7 +1978,7 @@ void loop() {
     if (millis() - lastChange > 10000) {
         auto segment = neoPixelModule.getManager()->getSegment(0);
         if (segment) {
-            currentEffect = (currentEffect + 1) % 8;  // Cycle through 8 effects
+            currentEffect = (currentEffect + 1) % EffectPool::getEffectCount();  // Cycle through all effects
             segment->setEffect(currentEffect);
             
             // Random brightness
@@ -2221,20 +2222,24 @@ uint16_t idx = seg->xyzToIndex(x, y, z); // 3D → linear
 
 | Effect | Description |
 |--------|-------------|
-| `Fire2DEffect` | Independent fire column per matrix column |
-| `Noise2DEffect` | Bilinear XY noise field |
-| `Cylon2DEffect` | Sweeping row or column (direction via `feature1`) |
-| `ScrollTextEffect` | Horizontal scrolling 5×7 font; set text via `ScrollTextEffect::setText()` |
+| `ScrollTextEffect` | Horizontal scrolling 5×7 font; per-segment text (default "OpenKNX NeoPixel") |
 | `Clock2DEffect` | Digital HH:MM or HH:MM:SS using `openknx.time.getLocalTime()` |
 | `Snake2DEffect` | Auto-playing snake across the matrix |
 | `Matrix2DEffect` | "Digital rain" falling-code columns |
-| `Tetris2DEffect` | Auto-playing Tetris with stacking blocks |
+| `Tetris2DEffect` | Auto-playing Tetris with stacking blocks & line clears |
 | `Tron2DEffect` | Light-cycle trails |
 | `StarfieldWarp2DEffect` | Warp-speed starfield |
 | `PlasmaNebula2DEffect` | Animated plasma / nebula field |
 | `UfoSwarm2DEffect` | Swarming UFO sprites |
+| `GameOfLife2DEffect` | Conway's Game of Life (cellular automaton) |
+| `DNA2DEffect` | Rotating DNA double helix (two anti-phase sine strands) |
+| `Aurora2DEffect` | Aurora / northern lights — soft flowing light curtains |
+| `Lissajous2DEffect` | Animated Lissajous figure with drifting phase + afterglow |
+| `Metaballs2DEffect` | Organic metaballs — drifting blobs summed into a field |
 
-Access any of them via `EffectPool::getFire2D()`, `EffectPool::getTetris2D()`, etc.
+`Fire`, `Noise` and `Cylon` are **geometry-aware**: the same effect renders in 1D or 2D depending on the segment's geometry (no separate `*2D` class).
+
+Access any of them via `EffectPool::getEffectByIndex(<id>)` or the per-effect getter (e.g. `EffectPool::getTetris2D()`).
 
 ### Writing a custom 2D effect
 
@@ -2263,7 +2268,7 @@ The **Effektmanager (EM)** turns a single segment into a self-running light show
 
 ```
 EffektManager (16 instances, stored in KNX flash via ETS)
-  └── Cue 1 ─► Cue 2 ─► Cue 3 ─► … ─► Cue N   (up to 99 cues)
+  └── Cue 1 ─► Cue 2 ─► Cue 3 ─► … ─► Cue N   (up to 10 cues)
         │
         └── applyTo(Segment)  →  effect + parameters + colour + brightness + text
 
@@ -2278,8 +2283,8 @@ Any segment can activate any EM via KO or console. The EM runs its cues in order
 |---------|------|-------------|
 | `EffektManagerHeader` | 20 bytes | Name, active cue count, loop flag, next-EM target, enabled flag |
 | `EffektCue` | 48 bytes | Effect ID, 10 parameters, RGBW colour, brightness, duration (s), fade (ms), cue name (14), effect text (14) |
-| `EffektManagerData` | ~4.3 KB | One header + up to 99 cues |
-| **Total** | **~68 KB** | 16 EMs in enlarged KNX flash |
+| `EffektManagerData` | ~500 B | One header + up to 10 cues |
+| **Total** | **~8 KB** | 16 EMs in KNX flash |
 
 Runtime state (active EM, current cue, fade phase, last EM/cue for restore) lives in RAM only and is **not** persisted — except the *last active EM/cue*, which is saved for power-off restore.
 

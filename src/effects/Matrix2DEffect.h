@@ -136,9 +136,9 @@ class Matrix2DEffect : public Effect
         if (paramIndex != 2) return nullptr;
         switch (enumValue)
         {
-            case 0: return "Green";
+            case 0: return "Gruen";
             case 1: return "Gold";
-            case 2: return "Mixed";
+            case 2: return "Gemischt";
             default: return nullptr;
         }
     }

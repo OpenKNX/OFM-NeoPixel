@@ -83,7 +83,11 @@ class PerformanceTracker
      */
     float getCurrentFPS(uint32_t updateIntervalMs) const
     {
-        return (updateIntervalMs > 0) ? (1000.0f / updateIntervalMs) : 0.0f;
+        if (updateIntervalMs > 0) return 1000.0f / updateIntervalMs;
+        // FTL / unlimited (interval = 0): the loop runs flat out, so the achievable
+        // rate is bounded by the measured average frame time, not by an interval.
+        uint32_t avgUs = getAverageTime();
+        return (avgUs > 0) ? (1000000.0f / avgUs) : 0.0f;
     }
 
     /**

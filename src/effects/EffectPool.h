@@ -26,33 +26,21 @@ class EffectSolid;
 class EffectWipe;
 class RainbowEffect;
 class PrideEffect;
-class ConfettiEffect;
 class JuggleEffect;
 class BPMEffect;
 class CylonEffect;
 class RGBWTestEffect;
-class RGBCCTTestEffect;
-class GarageDoorEffect;
 class FireEffect;
 class TheaterChaseEffect;
-class TheaterChaseRainbowEffect;
-class SinelonEffect;
-class TwinkleEffect;
 class SparkleEffect;
 class BreathingEffect;
 class StrobeEffect;
-class PulseEffect;
 class CometEffect;
-class MeteorEffect;
 class NoiseEffect;
 class PaletteEffect;
 class LightningEffect;
 class GradientEffect;
 class CandleEffect;
-class CandleMultiEffect;
-class Fire2DEffect;
-class Noise2DEffect;
-class Cylon2DEffect;
 class ScrollTextEffect;
 class Clock2DEffect;
 class Snake2DEffect;
@@ -61,6 +49,11 @@ class Tron2DEffect;
 class StarfieldWarp2DEffect;
 class PlasmaNebula2DEffect;
 class UfoSwarm2DEffect;
+class GameOfLife2DEffect;
+class DNA2DEffect;
+class Aurora2DEffect;
+class Lissajous2DEffect;
+class Metaballs2DEffect;
 
 /**
  * EffectPool - Singleton Pool for all Effect Instances
@@ -73,36 +66,23 @@ class EffectPool
     static Effect* getSolid();
     static Effect* getWipe();
     static Effect* getRainbow();
-    static Effect* getRainbowCycle();
     static Effect* getPride();
-    static Effect* getConfetti();
     static Effect* getJuggle();
     static Effect* getBPM();
     static Effect* getCylon();
     static Effect* getRGBWTest();
-    static Effect* getRGBCCTTest();
-    static Effect* getGarageDoor();
     static Effect* getFire();
     static Effect* getTheaterChase();
-    static Effect* getTheaterChaseRainbow();
-    static Effect* getSinelon();
-    static Effect* getTwinkle();
     static Effect* getSparkle();
     static Effect* getBreathing();
     static Effect* getStrobe();
-    static Effect* getPulse();
     static Effect* getComet();
-    static Effect* getMeteor();
     static Effect* getNoise();
     static Effect* getPalette();
     static Effect* getLightning();
     static Effect* getGradient();
     static Effect* getCandle();
-    static Effect* getCandleMulti();
     // 2D effects
-    static Effect* getFire2D();
-    static Effect* getNoise2D();
-    static Effect* getCylon2D();
     static Effect* getScrollText();
     static Effect* getClock2D();
     static Effect* getSnake2D();
@@ -112,6 +92,11 @@ class EffectPool
     static Effect* getStarfieldWarp2D();
     static Effect* getPlasmaNebula2D();
     static Effect* getUfoSwarm2D();
+    static Effect* getGameOfLife2D();
+    static Effect* getDNA2D();
+    static Effect* getAurora2D();
+    static Effect* getLissajous2D();
+    static Effect* getMetaballs2D();
     //
     // -----------------------------------------------------------
 

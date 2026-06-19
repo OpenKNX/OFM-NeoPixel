@@ -307,6 +307,12 @@ PIO_NeoPixel_Serial::~PIO_NeoPixel_Serial()
             // Free DMA (IRQ is shared, don't release it)
             if (_inst->dmaChannel >= 0)
             {
+                // Stop any in-flight transfer FIRST so the engine can't keep reading the
+                // buffers we free below, and no completion IRQ fires into a freed/
+                // unregistered handler (use-after-free → reboot).
+                dma_channel_set_irq0_enabled(_inst->dmaChannel, false); // Serial strips use DMA_IRQ_0
+                dma_channel_abort(_inst->dmaChannel);
+                while (dma_channel_is_busy(_inst->dmaChannel)) { tight_loop_contents(); }
                 unregisterDMAHandler(_inst->dmaChannel);
                 dma_channel_unclaim(_inst->dmaChannel);
             }
@@ -1007,13 +1013,42 @@ bool PIO_NeoPixel_Serial::show()
 {
     if (!_inst || !_inst->initialized || !_inst->buffer) return false;
 
-    // Wait for previous transfer to complete including latch time
-    // busy-wait ensures proper reset pulse
-    // isBusy() checks: DMA in progress + FIFO drain time + reset time
+    // Wait for previous transfer to complete including latch time.
+    // busy-wait ensures proper reset pulse; isBusy() checks DMA in progress +
+    // FIFO drain time + reset time. A normal frame finishes in well under 1 ms.
+    //
+    // SAFETY: bound the wait with a timeout. If a DMA/PIO transfer ever wedges
+    // (channel stuck busy / SM stalled), an unbounded spin here would block the
+    // main loop, starve openknx.watchdog.loop() and trigger a 16 s watchdog
+    // reboot. Instead we force-recover and log, so the device keeps running and
+    // the wedge becomes diagnosable (USB stays connected because we don't reboot).
+    static constexpr uint32_t kShowWaitTimeoutUs = 50000; // 50 ms (>> any real frame)
+    const uint32_t waitStartUs = micros();
     while (isBusy())
     {
-        // Could add yield() here for RTOS compatibility
-        // For now, tight loop is fine for LED timing
+        if ((uint32_t)(micros() - waitStartUs) > kShowWaitTimeoutUs)
+        {
+            // Wedge recovery: abort any in-flight DMA and clear the transfer
+            // state so the next show() can re-arm cleanly.
+            if (_inst->useDMA && _inst->dmaChannel >= 0)
+                dma_channel_abort(_inst->dmaChannel);
+            _inst->busy = false;
+            _inst->waitingForReset = false;
+
+            // Throttle the log (shared across strips) to ~1/s so a persistent
+            // wedge doesn't flood the console/bus.
+            static uint32_t lastWedgeLogMs = 0;
+            const uint32_t nowMs = millis();
+            if (nowMs - lastWedgeLogMs > 1000)
+            {
+                lastWedgeLogMs = nowMs;
+                openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial",
+                    "show() WEDGE recovered: GPIO%u SM%u DMA%d stuck >%lums (no reboot)",
+                    _inst->pin, _inst->sm, _inst->dmaChannel,
+                    (unsigned long)(kShowWaitTimeoutUs / 1000));
+            }
+            break;
+        }
     }
 
     // Reset state for new transfer
@@ -1050,9 +1085,26 @@ bool PIO_NeoPixel_Serial::show()
  * NOTE: Buffer order is determined by ColorOrder setting (via rgbToBuffer).
  *       This function is ColorOrder-agnostic and just sends bytes in buffer order.
  */
+// Bounded replacement for pio_sm_put_blocking(): waits for TX-FIFO space but gives up
+// after timeoutUs. A wedged SM (FIFO never drains) would otherwise spin forever here,
+// starve the main loop and trigger the 16 s watchdog reboot. Returns false on timeout
+// so the caller abandons the frame instead of hanging. (No-DMA fallback path only.)
+static inline bool neoSerialPutGuarded(PIO pio, uint sm, uint32_t value, uint32_t timeoutUs)
+{
+    const uint32_t start = micros();
+    while (pio_sm_is_tx_fifo_full(pio, sm))
+    {
+        if ((uint32_t)(micros() - start) > timeoutUs) return false;
+    }
+    pio_sm_put(pio, sm, value);
+    return true;
+}
+
 void PIO_NeoPixel_Serial::sendDataPIO()
 {
     if (!_inst) return;
+
+    static constexpr uint32_t kPutTimeoutUs = 20000; // 20 ms >> any real FIFO wait
 
     // Send data to PIO FIFO in 32-bit chunks
     // PIO autopull LSB-first (shift_right=false means shift LEFT, output from LSB!)
@@ -1076,7 +1128,7 @@ void PIO_NeoPixel_Serial::sendDataPIO()
             uint32_t value = ((uint32_t)buf[idx + 2] << 24) | // Byte2 → bits 31-24
                              ((uint32_t)buf[idx + 1] << 16) | // Byte1 → bits 23-16
                              ((uint32_t)buf[idx] << 8);       // Byte0 → bits 15-8 (sent 1st!)
-            pio_sm_put_blocking(_inst->pio, _inst->sm, value);
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
         }
     }
     else if (bytesPerTransfer == 4)
@@ -1089,7 +1141,7 @@ void PIO_NeoPixel_Serial::sendDataPIO()
                              ((uint32_t)buf[idx + 2] << 16) | // Byte2 → bits 23-16
                              ((uint32_t)buf[idx + 1] << 8) |  // Byte1 → bits 15-8
                              (uint32_t)buf[idx];              // Byte0 → bits 7-0 (sent 1st!)
-            pio_sm_put_blocking(_inst->pio, _inst->sm, value);
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
         }
     }
     else if (bytesPerTransfer == 5)
@@ -1110,7 +1162,7 @@ void PIO_NeoPixel_Serial::sendDataPIO()
                              ((uint32_t)buf[idx + 1] << 16) |
                              ((uint32_t)buf[idx + 2] << 8) |
                              (uint32_t)buf[idx + 3];
-            pio_sm_put_blocking(_inst->pio, _inst->sm, value);
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
         }
 
         // Send remaining bytes (1-3 bytes) padded to 32-bit
@@ -1121,7 +1173,7 @@ void PIO_NeoPixel_Serial::sendDataPIO()
             if (remainingBytes >= 1) value |= ((uint32_t)buf[idx] << 24);
             if (remainingBytes >= 2) value |= ((uint32_t)buf[idx + 1] << 16);
             if (remainingBytes >= 3) value |= ((uint32_t)buf[idx + 2] << 8);
-            pio_sm_put_blocking(_inst->pio, _inst->sm, value);
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
         }
     }
 }
@@ -1337,7 +1389,7 @@ DriverCapabilities PIO_NeoPixel_Serial::getCapabilities() const
  */
 void PIO_NeoPixel_Serial::registerDMAHandler(int channel, PIO_NeoPixel_Serial* instance)
 {
-    if (channel >= 0 && channel < 12)
+    if (channel >= 0 && channel < MAX_DMA_CHANNELS)
     {
         g_serialHandlers[channel] = instance; // Use global registry
     }
@@ -1349,7 +1401,7 @@ void PIO_NeoPixel_Serial::registerDMAHandler(int channel, PIO_NeoPixel_Serial* i
  */
 void PIO_NeoPixel_Serial::unregisterDMAHandler(int channel)
 {
-    if (channel >= 0 && channel < 12)
+    if (channel >= 0 && channel < MAX_DMA_CHANNELS)
     {
         g_serialHandlers[channel] = nullptr; // Use global registry
     }

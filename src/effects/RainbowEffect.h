@@ -1,13 +1,13 @@
 /**
  * @file RainbowEffect.h
- * @brief Classic Rainbow effect - STATELESS
+ * @brief Classic Rainbow effect - STATELESS (Rainbow / Rainbow Cycle)
  *
- * Smooth rainbow gradient that cycles across the strip. Based on FastLED's classic rainbow pattern.
- * Based on FastLED library (MIT License) - https://github.com/FastLED/FastLED
+ * Smooth rainbow gradient that cycles across the strip. Based on FastLED's
+ * classic rainbow pattern.
  *
- * Parameters:
- *   [0] Speed (0-255) - Rotation speed
- *   [1] Delta (1-255) - Hue spacing between LEDs
+ * Consolidated effect: the former "Rainbow Cycle" effect is now the Mode=1
+ * variant. Mode 0 spaces hues by Delta (hue step per LED); Mode 1 distributes
+ * Density full rainbow cycles evenly across the strip.
  *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
@@ -19,15 +19,17 @@
 #include "FastLEDMath.h"
 
 /**
- * @brief Rainbow effect
+ * @brief Rainbow effect (Rainbow / Rainbow Cycle)
  *
  * Uses config parameters:
  *  - config.speed     : animation speed (time-based)
  *  - config.intensity : brightness (HSV V)
- *  - config.option1   : hue spacing / wavelength (0 => auto)
+ *  - config.option1   : hue spacing / Delta (0 => auto)
  *  - config.option2   : saturation (0 => 255)
  *  - config.option3   : phase / start hue offset
+ *  - config.count     : density (number of rainbow cycles) for Mode 1
  *  - config.reverse   : reverse direction
+ *  - config.mode      : 0=Rainbow (Delta), 1=Cycle (Density)
  *  - config.feature1  : mirror
  *  - config.feature2  : enable yellow brightness compensation (hsv2rgb_rainbow)
  *  - config.feature3  : enable green correction hooks (hsv2rgb_rainbow)
@@ -43,7 +45,7 @@ class RainbowEffect : public Effect
     // ====================================================================
     // Parameter API
     // ====================================================================
-    uint8_t getParameterCount() const override { return 2; }
+    uint8_t getParameterCount() const override { return 5; }
 
     const char* getParameterName(uint8_t index) const override
     {
@@ -51,6 +53,9 @@ class RainbowEffect : public Effect
         {
             case 0: return "Speed";
             case 1: return "Delta";
+            case 2: return "Saturation";
+            case 3: return "Density";
+            case 4: return "Mode";
             default: return nullptr;
         }
     }
@@ -60,14 +65,34 @@ class RainbowEffect : public Effect
         switch (index)
         {
             case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Rotationsgeschwindigkeit (0-255)", "Speed: Rotation speed (0-255)");
-            case 1: return PARAM_DESC_DE_EN("Delta: Farbabstand zwischen LEDs (1-255)", "Delta: Hue spacing between LEDs (1-255)");
+            case 1: return PARAM_DESC_DE_EN("Delta: Farbabstand zwischen LEDs (Modus 0, 1-255)", "Delta: Hue spacing between LEDs (Mode 0, 1-255)");
+            case 2: return PARAM_DESC_DE_EN("Sättigung: Farbintensität (0=weiß, 255=volle Farbe)", "Saturation: Color intensity (0=white, 255=full color)");
+            case 3: return PARAM_DESC_DE_EN("Dichte: Anzahl Regenbogenzyklen (Modus 1, 1-10)", "Density: Number of rainbow cycles (Mode 1, 1-10)");
+            case 4: return PARAM_DESC_DE_EN("Modus: 0=Rainbow (Delta), 1=Cycle (Dichte)", "Mode: 0=Rainbow (Delta), 1=Cycle (Density)");
             default: return "";
         }
     }
 
     ParameterType getParameterType(uint8_t index) const override
     {
+        if (index == 4) return ParameterType::PARAM_ENUM; // Mode
         return ParameterType::PARAM_UINT8;
+    }
+
+    const char* getEnumValueName(uint8_t paramIndex, uint8_t enumValue) const override
+    {
+        if (paramIndex != 4) return nullptr;
+        switch (enumValue)
+        {
+            case 0: return "Rainbow (Delta)";
+            case 1: return "Cycle (Dichte)";
+            default: return nullptr;
+        }
+    }
+
+    uint8_t getEnumValueCount(uint8_t paramIndex) const override
+    {
+        return (paramIndex == 4) ? 2 : 0;
     }
 
     uint32_t getParameterDefault(uint8_t index) const override
@@ -76,7 +101,36 @@ class RainbowEffect : public Effect
         {
             case 0: return 1; // Speed
             case 1: return 7; // Delta (hue spacing)
+            case 2: return 255; // Saturation
+            case 3: return 1; // Density
+            case 4: return 0; // Mode (Rainbow)
             default: return 0;
+        }
+    }
+
+    uint32_t getParameterMin(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 0; // Speed
+            case 1: return 0; // Delta (0=auto)
+            case 2: return 0; // Saturation
+            case 3: return 1; // Density min
+            case 4: return 0; // Mode min
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMax(uint8_t index) const override
+    {
+        switch (index)
+        {
+            case 0: return 255; // Speed
+            case 1: return 255; // Delta
+            case 2: return 255; // Saturation
+            case 3: return 10;  // Density max
+            case 4: return 1;   // Mode max (0=Rainbow,1=Cycle)
+            default: return 255;
         }
     }
 
@@ -88,6 +142,9 @@ class RainbowEffect : public Effect
         {
             case 0: return cfg.speed;   // Speed
             case 1: return cfg.option1; // Delta
+            case 2: return cfg.option2; // Saturation
+            case 3: return cfg.count;   // Density
+            case 4: return cfg.mode;    // Mode
             default: return 0;
         }
     }
@@ -98,8 +155,11 @@ class RainbowEffect : public Effect
         auto& config = segment->getConfig();
         switch (index)
         {
-            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed (animation speed)
-            case 1: config.option1 = static_cast<uint8_t>(value); break; // Delta (color spread)
+            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed
+            case 1: config.option1 = static_cast<uint8_t>(value); break; // Delta
+            case 2: config.option2 = static_cast<uint8_t>(value); break; // Saturation
+            case 3: config.count = static_cast<uint8_t>(value); break;   // Density
+            case 4: config.mode = static_cast<uint8_t>(value); break;    // Mode
             default: break;
         }
     }
@@ -123,6 +183,7 @@ class RainbowEffect : public Effect
         uint8_t s = config.option2;           // Option2: saturation (0=255)
         const uint8_t phase = config.option3; // Option3: start hue offset
 
+        const bool cycleMode = (config.mode == 1);
         const bool reverse = (config.reverse != 0);
         const bool mirror = config.feature1;      // Feature1: Mirror
         const bool yellowBoost = config.feature2; // Feature2: Yellow brightness comp
@@ -130,9 +191,18 @@ class RainbowEffect : public Effect
 
         if (s == 0) s = 255;
 
-        // auto delta: one full rainbow across segment
-        if (delta == 0)
+        if (cycleMode)
         {
+            // Density: number of full rainbow cycles across the strip
+            uint8_t density = config.count > 0 ? config.count : 1;
+            if (density > 10) density = 10;
+            // delta = (256 * density) / length, ensuring 'density' cycles fit
+            uint16_t d = (uint16_t)((256u * density) / length);
+            delta = (d == 0) ? 1 : (uint8_t)d;
+        }
+        else if (delta == 0)
+        {
+            // auto delta: one full rainbow across segment
             uint16_t d = 256 / length;
             delta = (d == 0) ? 1 : (uint8_t)d;
         }

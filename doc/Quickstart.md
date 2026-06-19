@@ -244,7 +244,7 @@ void setup() {
     auto segment = mgr->addSegment(vstrip, 0, 63);
     
     // Attach rainbow effect
-    mgr->attachEffect(segment, EffectPool::getEffect(1));  // 1 = Rainbow
+    mgr->attachEffect(segment, EffectPool::getEffect(2));  // 2 = Rainbow
     
     // Enable auto-update
     neoPixelModule.setUpdateSpeed(UpdateSpeed::FAST);
@@ -276,7 +276,7 @@ void setup() {
     auto seg2 = mgr->addSegment(vstrip, 32, 63);   // Second half
     
     // Different effects
-    mgr->attachEffect(seg1, EffectPool::getEffect(1));  // Rainbow
+    mgr->attachEffect(seg1, EffectPool::getEffect(2));  // Rainbow
     mgr->attachEffect(seg2, EffectPool::getEffect(6));  // Cylon
     
     // Configure effects
@@ -299,13 +299,15 @@ void loop() {
 | ID | Effect | Description |
 |----|--------|-------------|
 | 0 | Solid | Solid color |
-| 1 | Rainbow | Rainbow cycle |
-| 2 | Pride2015 | Pride colors |
-| 3 | Confetti | Random colored pixels |
+| 1 | Wipe | Color wipe |
+| 2 | Rainbow | Rainbow cycle |
+| 3 | Pride2015 | Pride colors |
 | 4 | Juggle | Moving dots |
 | 5 | BPM | Pulsing to BPM |
 | 6 | Cylon | Bouncing pixel |
-| 7 | Wipe | Color wipe |
+| 7 | Test | Channel test |
+
+The IDs above are the first eight of 33 effects (IDs 0–32). See the [Effects Reference](Effects.md) for the complete list.
 
 ---
 
@@ -335,8 +337,8 @@ void setup() {
     seg->setPixelXY(0, 0, 0, 255, 0);     // top-left = green
     seg->setPixelXY(3, 7, 255, 0, 0);     // (col=3,row=7) = red
 
-    // Or assign a 2D-aware effect (Fire2D, Noise2D, Cylon2D, ScrollText, Clock2D)
-    mgr->attachEffect(seg, EffectPool::getFire2D());
+    // Or assign a 2D-aware effect (Fire, Noise, Cylon are geometry-aware; ScrollText, Clock2D are 2D-only)
+    mgr->attachEffect(seg, EffectPool::getFire());
 
     neoPixelModule.setUpdateSpeed(UpdateSpeed::FAST);
     neoPixelModule.setAutoUpdate(true);
@@ -366,7 +368,7 @@ neo em stop 0
 ```
 
 Key points:
-- Each EM holds up to 99 cues; every cue carries effect ID, parameters, colour, brightness, duration, fade and text.
+- Each EM holds up to 10 cues; every cue carries effect ID, parameters, colour, brightness, duration, fade and text.
 - `durationSec = 0` holds a cue until the next trigger; otherwise the EM auto-advances.
 - An EM can **loop** or **chain** into a follow-up EM, and the active EM is restored after a reboot.
 
@@ -496,7 +498,7 @@ neo seg add 0 36 71             # Segment[1]: LEDs 36-71
 neo seg list                    # Verify
 
 # Add effects
-neo effect 0 1                  # Rainbow on Segment[0]
+neo effect 0 2                  # Rainbow on Segment[0]
 neo effect 1 6                  # Cylon on Segment[1]
 neo color 1 255 0 0             # Red for Cylon
 neo brightness 0 200            # Dim rainbow slightly
@@ -523,7 +525,7 @@ neo virt attach 0 0             # VirtStrip[0] <- PhysStrip[0]
 neo seg add 0 0 49              # Segment[0]: All LEDs
 
 # Assign effect
-neo effect 0 1                  # Rainbow effect
+neo effect 0 2                  # Rainbow effect
 
 # Enable auto-update
 neo auto on
@@ -742,7 +744,7 @@ void setup() {
     auto seg2 = mgr->addSegment(vAPA, 0, 39);   // APA102 segment
     
     // Different effects for different protocols
-    mgr->attachEffect(seg1, EffectPool::getEffect(1));  // Rainbow on WS2812B
+    mgr->attachEffect(seg1, EffectPool::getEffect(2));  // Rainbow on WS2812B
     mgr->attachEffect(seg2, EffectPool::getEffect(6));  // Cylon on APA102
     
     // Configure

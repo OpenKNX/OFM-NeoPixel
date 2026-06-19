@@ -24,11 +24,21 @@
  */
 class NoiseEffect : public Effect
 {
+  private:
+    uint32_t _timeAcc = 0; // for 2D timing
+
   public:
     const char* getName(const char* lang = nullptr) override { return "Noise"; }
-    const char* getDescription(const char* lang = nullptr) override { return "Smooth noise along strip (inoise8-inspired)"; }
+    const char* getDescription(const char* lang = nullptr) override
+    {
+        return EFFECT_DESC_DE_EN(
+            "Sanftes Rauschen entlang Streifen oder als 2D-Feld (inoise8-inspiriert)",
+            "Smooth noise along strip or as a 2D field (inoise8-inspired)");
+    }
 
-    uint8_t getParameterCount() const override { return 4; }
+    uint8_t getCapabilities() const override { return DIM_1D | DIM_2D; }
+
+    uint8_t getParameterCount() const override { return 5; }
     const char* getParameterName(uint8_t idx) const override
     {
         switch (idx)
@@ -37,6 +47,7 @@ class NoiseEffect : public Effect
             case 1: return "Scale";
             case 2: return "Saturation";
             case 3: return "HueOffset";
+            case 4: return "Palette";
             default: return nullptr;
         }
     }
@@ -49,11 +60,35 @@ class NoiseEffect : public Effect
             case 1: return PARAM_DESC_DE_EN("Maßstab: Räumliche Rauschskalierung (0-255)", "Scale: Spatial noise scaling (0-255)");
             case 2: return PARAM_DESC_DE_EN("Sättigung: Farbsättigung (0-255)", "Saturation: Color saturation (0-255)");
             case 3: return PARAM_DESC_DE_EN("Farbton-Versatz: Basis-Farbverschiebung (0-255)", "Hue offset: Base color shift (0-255)");
+            case 4: return PARAM_DESC_DE_EN("Farbmodus: 0=HSV-Farbrad, 1=Primärfarbe (Helligkeit aus Rauschen)", "Color mode: 0=HSV color wheel, 1=primary color (brightness from noise)");
             default: return "";
         }
     }
 
-    ParameterType getParameterType(uint8_t) const override { return ParameterType::PARAM_UINT8; }
+    ParameterType getParameterType(uint8_t idx) const override
+    {
+        switch (idx)
+        {
+            case 4: return ParameterType::PARAM_ENUM; // Palette (color mode)
+            default: return ParameterType::PARAM_UINT8;
+        }
+    }
+
+    const char* getEnumValueName(uint8_t paramIndex, uint8_t enumValue) const override
+    {
+        if (paramIndex != 4) return nullptr;
+        switch (enumValue)
+        {
+            case 0: return "HSV-Farbrad";
+            case 1: return "Primaerfarbe";
+            default: return nullptr;
+        }
+    }
+
+    uint8_t getEnumValueCount(uint8_t paramIndex) const override
+    {
+        return (paramIndex == 4) ? 2 : 0;
+    }
     uint32_t getParameterDefault(uint8_t idx) const override
     {
         switch (idx)
@@ -62,7 +97,26 @@ class NoiseEffect : public Effect
             case 1: return 48;
             case 2: return 255;
             case 3: return 0;
+            case 4: return 0; // Palette (HSV)
             default: return 0;
+        }
+    }
+
+    uint32_t getParameterMin(uint8_t idx) const override
+    {
+        switch (idx)
+        {
+            case 4: return 0; // Palette false
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMax(uint8_t idx) const override
+    {
+        switch (idx)
+        {
+            case 4: return 1; // Palette true
+            default: return 255;
         }
     }
 
@@ -76,6 +130,7 @@ class NoiseEffect : public Effect
             case 1: return c.option1;
             case 2: return c.option2;
             case 3: return c.option3;
+            case 4: return c.feature1;
             default: return 0;
         }
     }
@@ -90,8 +145,27 @@ class NoiseEffect : public Effect
             case 1: config.option1 = static_cast<uint8_t>(value); break; // Scale (noise scale)
             case 2: config.option2 = static_cast<uint8_t>(value); break; // Saturation
             case 3: config.option3 = static_cast<uint8_t>(value); break; // HueOffset (color shift)
+            case 4: config.feature1 = static_cast<bool>(value); break;   // Palette (fixed color mode)
             default: break;
         }
+    }
+
+  private:
+    static uint8_t smoothNoise2D(uint8_t x, uint8_t y, uint16_t tx, uint16_t ty, uint8_t scale)
+    {
+        uint16_t nx = (uint16_t)x * scale + tx;
+        uint16_t ny = (uint16_t)y * scale + ty;
+        uint8_t ix = (uint8_t)(nx >> 8), iy = (uint8_t)(ny >> 8);
+        uint8_t fx = (uint8_t)(nx & 0xFF), fy = (uint8_t)(ny & 0xFF);
+        auto hh = [](uint8_t a, uint8_t b) -> uint8_t {
+            uint16_t v = (uint16_t)a * 0x9E ^ (uint16_t)b * 0x6C;
+            v ^= v >> 5; v *= 0xD3; v ^= v >> 8;
+            return (uint8_t)(v & 0xFF);
+        };
+        uint8_t aa = hh(ix, iy), ba = hh(ix + 1, iy), ab = hh(ix, iy + 1), bb = hh(ix + 1, iy + 1);
+        uint8_t lA = (uint8_t)(((uint16_t)aa * (255 - fx) + (uint16_t)ba * fx) >> 8);
+        uint8_t lB = (uint8_t)(((uint16_t)ab * (255 - fx) + (uint16_t)bb * fx) >> 8);
+        return (uint8_t)(((uint16_t)lA * (255 - fy) + (uint16_t)lB * fy) >> 8);
     }
 
   private:
@@ -190,6 +264,53 @@ class NoiseEffect : public Effect
                 const uint8_t g = FastLEDMath::scale8(cfgG, v);
                 const uint8_t b = FastLEDMath::scale8(cfgB, v);
                 segment->setPixel(i, r, g, b);
+            }
+        }
+    }
+
+    // ====================================================================
+    // 2D rendering — smooth XY noise field
+    // ====================================================================
+    void update2D(Segment* segment, uint32_t deltaTime) override
+    {
+        if (!segment) return;
+        const auto& geo = segment->getGeometry();
+        if (geo.is1D()) { update(segment, deltaTime); return; }
+
+        uint16_t renderW = segment->getRenderWidth();
+        uint16_t renderH = segment->getRenderHeight();
+        if (renderW == 0 || renderH == 0) return;
+
+        _timeAcc += deltaTime;
+        auto& cfg = segment->getConfig();
+        uint8_t scale = cfg.option1 ? cfg.option1 : 64;
+        uint8_t sat = cfg.option2 ? cfg.option2 : 240;
+        uint8_t hueOff = cfg.option3;
+        uint16_t speed = (uint16_t)cfg.speed;
+        uint16_t tx = (uint16_t)((_timeAcc * speed) >> 7);
+        uint16_t ty = (uint16_t)((_timeAcc * speed) >> 9);
+        bool palMode = cfg.feature1;
+
+        for (uint16_t y = 0; y < renderH; y++)
+        {
+            for (uint16_t x = 0; x < renderW; x++)
+            {
+                uint8_t n = smoothNoise2D((uint8_t)(x & 0xFF), (uint8_t)(y & 0xFF), tx, ty, scale);
+                uint8_t r, g, b;
+                if (palMode)
+                {
+                    r = FastLEDMath::scale8(cfg.r(), n);
+                    g = FastLEDMath::scale8(cfg.g(), n);
+                    b = FastLEDMath::scale8(cfg.b(), n);
+                }
+                else
+                {
+                    uint32_t rgb = FastLEDMath::hsv2rgb_rainbow((uint8_t)(hueOff + n), sat, n);
+                    r = (rgb >> 16) & 0xFF;
+                    g = (rgb >> 8) & 0xFF;
+                    b = rgb & 0xFF;
+                }
+                segment->setPixelGlobalXY(x, y, r, g, b);
             }
         }
     }

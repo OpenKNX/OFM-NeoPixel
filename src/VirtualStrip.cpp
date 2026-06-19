@@ -626,6 +626,9 @@ bool VirtualStrip::show()
  */
 bool VirtualStrip::waitForCompletion(uint32_t timeoutMs)
 {
+    // Never wait unbounded: 0 ("unlimited") becomes a sane absolute ceiling so a wedged
+    // DMA/PIO can't hang the main loop forever → 16 s watchdog reboot.
+    if (timeoutMs == 0) timeoutMs = 1000;
     uint32_t startTime = millis();
 
     while (true)

@@ -127,35 +127,35 @@ RainbowEffect rainbowEffect;
 
 ## Ported Effects
 
-### Currently Ported (5 Effects)
+The effect catalog currently contains **33 effects (IDs 0–32)**. The table below
+lists the FastLED-inspired 1D effects; the 2D effects (IDs 19–32) are documented
+in the [Effects Reference](Effects.md).
 
-| Effect | FastLED Original | Status | Complexity | Notes |
-|--------|------------------|--------|------------|-------|
-| **Rainbow** | `fill_rainbow()` | Complete | Simple | Classic rainbow gradient |
-| **Pride2015** | Mark Kriegsman | Complete | Complex | Brightness waves |
-| **Confetti** | ColorWavesWithPalettes | Complete | Medium | Random sparkles |
-| **Juggle** | juggle() | Complete | Medium | Sine wave dots |
-| **BPM** | bpm() | Complete | Medium | Pulsing colors |
+| ID | Effect | FastLED / Inspiration | Notes |
+|----|--------|-----------------------|-------|
+| 0 | **Solid** | N/A | Static color |
+| 1 | **Wipe** | Fill animation | Color wipe |
+| 2 | **Rainbow** | `fill_rainbow()` | Classic rainbow gradient |
+| 3 | **Pride2015** | Mark Kriegsman | Brightness waves |
+| 4 | **Juggle** | `juggle()` | Sine wave dots |
+| 5 | **BPM** | `bpm()` | Pulsing colors |
+| 6 | **Cylon** | Knight Rider | Bouncing dot (geometry-aware 1D/2D) |
+| 7 | **Test** | N/A | RGBW / RGB+CCT channel test |
+| 8 | **Fire** | Fire2012 | Geometry-aware 1D/2D fire |
+| 9 | **Theater Chase** | Theater chase | Running dots, optional ColorMode rainbow |
+| 10 | **Sparkle** | `addGlitter()` | Sparkle / Twinkle / Confetti modes |
+| 11 | **Breathing** | N/A | Brightness in/out |
+| 12 | **Strobe** | N/A | Hard flashes |
+| 13 | **Comet** | `meteorRain()` | Comet / Meteor / Sinelon modes |
+| 14 | **Noise** | `inoise8()` | Geometry-aware 1D/2D Perlin noise |
+| 15 | **Palette** | `ColorFromPalette` | Scrolling palettes |
+| 16 | **Lightning** | `lightning()` | Random strikes |
+| 17 | **Gradient** | `fill_gradient()` | Start→end color gradient |
+| 18 | **Candle** | N/A | Flickering candlelight (multi-zone) |
 
-### Additional OFM-NeoPixel Effects (3 Effects)
-
-| Effect | Inspired By | Status | Notes |
-|--------|-------------|--------|-------|
-| **Solid** | N/A | Complete | Static color |
-| **Cylon** | Knight Rider | Complete | Bouncing dot |
-| **Wipe** | Theater chase | Complete | Fill animation |
-
-### Planned Ports (Not Yet Implemented)
-
-| Effect | FastLED Name | Difficulty | Priority |
-|--------|--------------|------------|----------|
-| **Fire** | Fire2012 | High | High |
-| **Noise** | inoise8() | High | Medium |
-| **Palette** | ColorFromPalette | Medium | High |
-| **Lightning** | lightning() | Medium | Medium |
-| **Meteor** | meteorRain() | Low | Low |
-| **Twinkle** | addGlitter() | Low | Medium |
-| **Gradient** | fill_gradient() | Low | High |
+> **Note:** Several formerly standalone effects were consolidated into modes of a
+> surviving effect: Twinkle/Confetti are modes of **Sparkle (10)**, and
+> Meteor/Sinelon are modes of **Comet (13)**.
 
 ---
 
@@ -342,8 +342,8 @@ namespace EffectPool {
     Effect* getEffect(uint8_t id) {
         switch (id) {
             case 0: return &solidEffect;
-            case 1: return &rainbowEffect;  // Add here
-            case 2: return &prideEffect;
+            case 2: return &rainbowEffect;  // Add here
+            case 3: return &prideEffect;
             // ...
         }
         return nullptr;
@@ -361,7 +361,7 @@ neo phys add 9 64
 neo virt add 64
 neo virt attach 0 0
 neo seg add 0 0 63
-neo effect 0 1          // Rainbow (ID 1)
+neo effect 0 2          // Rainbow (ID 2)
 neo brightness 0 255    // Full brightness
 neo auto on
 ```
@@ -700,9 +700,9 @@ void testPortedEffects() {
     // Test each effect for 5 seconds
     Effect* effects[] = {
         EffectPool::getEffect(0),  // Solid
-        EffectPool::getEffect(1),  // Rainbow
-        EffectPool::getEffect(2),  // Pride
-        EffectPool::getEffect(3),  // Confetti
+        EffectPool::getEffect(1),  // Wipe
+        EffectPool::getEffect(2),  // Rainbow
+        EffectPool::getEffect(3),  // Pride
         EffectPool::getEffect(4),  // Juggle
         EffectPool::getEffect(5),  // BPM
     };

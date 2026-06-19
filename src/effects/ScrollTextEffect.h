@@ -33,6 +33,10 @@
 class ScrollTextEffect : public Effect
 {
   private:
+    // Default text shown when no text is configured (cue/segment/KO all empty).
+    // Single source of truth: render fallback AND getParameterDefaultText() use this.
+    static constexpr const char* DEFAULT_TEXT = "OpenKNX NeoPixel";
+
     // Per-render state stored in EffectState:
     //   position = current scroll offset in pixels (0 = start at right edge)
     //   lastUpdate = millis of last pixel advance
@@ -138,7 +142,7 @@ class ScrollTextEffect : public Effect
         auto& cfg = seg->getConfig();
 
         // Per-segment text (fallback keeps old demo behaviour when unset)
-        const char* text = cfg.effectText[0] ? cfg.effectText : "OpenKNX NeoPixel";
+        const char* text = cfg.effectText[0] ? cfg.effectText : DEFAULT_TEXT;
         if (!text[0]) return;
 
         const ScrollFontDesc& font = fontFor(cfg.option2);
@@ -241,10 +245,15 @@ class ScrollTextEffect : public Effect
             case 0: return 32; // Speed default (32 = halbe Geschwindigkeit)
             case 1: return 1;  // Gap default
             case 2: return 1;  // Loop default (true)
-            case 3: return 0;  // Text default (empty)
+            case 3: return 0;  // Text default — the string default lives in getParameterDefaultText()
             case 4: return 0;  // Font default (0 = 5×7)
             default: return 0;
         }
+    }
+
+    const char* getParameterDefaultText(uint8_t index) const override
+    {
+        return (index == 3) ? DEFAULT_TEXT : nullptr;
     }
 
     // Font enum: 0=5×7, 1=4×6, 2=3×5

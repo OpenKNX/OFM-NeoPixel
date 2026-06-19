@@ -25,6 +25,10 @@ enum : uint8_t
     NEO_CHAIN_SET,    ///< arg1=segment, arg2=mode (0=off, 1=master, 2=slave)
     NEO_CHAIN_OVERRIDE, ///< arg1=segment, arg2=flag (0|1)
     NEO_CHAIN_TRIGGER,  ///< arg1=segment
+    // ── Local-test EM/cue authoring (build a cycling EM from the console) ──────
+    NEO_EM_CONFIG,    ///< arg1=EM id (1-based), arg2=(loop & 0xFF) | (nextEm << 8); sets enabled=1
+    NEO_EM_BIND,      ///< arg1=manager segment index → wrap into OAM _segments (test mode)
+    NEO_CUE_CLEAR,    ///< arg1=EM id (1-based) → cueCount=0
 };
 
 // ============================================================================
@@ -69,6 +73,17 @@ bool openknxNeoPixelGetChainStatus(uint8_t seg, NeoChainSegStatus& out);
 /** @brief Execute a mutating action (NEO_EM_xxx / NEO_CHAIN_xxx). Returns true on success;
  *         on failure the backend prints the reason via openknxNeoPixelConsolePrintf. */
 bool openknxNeoPixelHandleEmChainAction(uint8_t action, int arg1, int arg2);
+
+/** @brief Define/overwrite one cue (local-test authoring). emId & cueNum are 1-based;
+ *         params keep effect defaults. Auto-bumps the EM's cueCount. Returns true on success. */
+bool openknxNeoPixelHandleCueSet(uint8_t emId, uint8_t cueNum, uint8_t effectId,
+                                 uint16_t durSec, uint16_t fadeMs,
+                                 uint8_t bri, uint8_t r, uint8_t g, uint8_t b);
+
+/** @brief Override one effect parameter of an existing cue (local-test authoring).
+ *         emId & cueNum are 1-based; paramIdx is 0-based (0..EM_PARAM_COUNT-1).
+ *         The cue must already exist (via cue set). Returns true on success. */
+bool openknxNeoPixelHandleCueParam(uint8_t emId, uint8_t cueNum, uint8_t paramIdx, uint8_t value);
 
 /** @brief Plain console output bridge for OAM backend messages (errors etc.). */
 void openknxNeoPixelConsolePrintf(const char* fmt, ...);

@@ -113,9 +113,9 @@ class StarfieldWarp2DEffect : public Effect
         if (paramIndex != 2) return nullptr;
         switch (enumValue)
         {
-            case 0: return "White";
+            case 0: return "Weiss";
             case 1: return "Cyan";
-            case 2: return "Rainbow";
+            case 2: return "Regenbogen";
             default: return nullptr;
         }
     }

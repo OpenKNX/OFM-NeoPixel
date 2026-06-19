@@ -1,9 +1,15 @@
 /**
  * @file BreathingEffect.h
- * @brief Breathing effect - Smooth fade in and out like breathing
+ * @brief Breathing effect - smooth fade in/out with selectable waveform
  *
- * Creates a breathing effect where the entire strip fades in and out smoothly.
- * Uses sine wave for natural breathing rhythm.
+ * Creates a breathing effect where the entire strip fades in and out.
+ *
+ * Consolidated effect: the former "Pulse" effect is now the Waveform=2/3
+ * (Pulse / Sharp Pulse) variant of this effect.
+ *   Waveform 0 (Soft):       smooth sine breathing
+ *   Waveform 1 (HoldAtPeak): breathing with a pause at the peak
+ *   Waveform 2 (Pulse):      dramatic pulse with adjustable width
+ *   Waveform 3 (SharpPulse): pulse with a sharp/dramatic start
  *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
@@ -14,19 +20,16 @@
 #include "FastLEDMath.h"
 
 /**
- * Breathing Effect
+ * Breathing Effect (Breathing / Pulse)
  *
- * The entire strip fades in and out smoothly like breathing.
- */
-/**
  * Config usage:
- *   - config.speed     : breathing rate (higher=faster, 0-255 maps to 5-60 BPM)
- *   - config.option1   : minimum brightness (0-255, default 0) - breathing depth
- *   - config.option2   : curve adjustment (0-255) - 0=linear, 255=exponential
- *   - config.feature1  : hold at peak (0=smooth, 1=pause at top)
- *   - config.feature2  : rainbow breathing (0=set color, 1=rainbow cycle)
+ *   - config.speed     : breathing/pulse rate
+ *   - config.option1   : breathing min brightness / pulse width
+ *   - config.option2   : curve (breathing) / gamma (pulse)
+ *   - config.feature2  : rainbow color cycle
+ *   - config.mode      : waveform 0=Soft, 1=HoldAtPeak, 2=Pulse, 3=SharpPulse
  *   - config.intensity : master brightness (0-255)
- *   - config.r/g/b     : breathing color (unless rainbow mode)
+ *   - config.r/g/b     : color (unless rainbow mode)
  */
 class BreathingEffect : public Effect
 {
@@ -47,59 +50,74 @@ class BreathingEffect : public Effect
 
         _time += deltaTime;
 
-        // Use option1 for breathing depth (50-255, default full range)
-        uint8_t minBrightness = config.option1 > 0 ? config.option1 : 0;
-        uint8_t maxBrightness = 255;
+        const uint8_t waveform = config.mode; // 0=Soft,1=HoldAtPeak,2=Pulse,3=SharpPulse
+        const bool pulseStyle = (waveform >= 2);
+        const bool rainbowMode = config.feature2;
 
-        // Use option2 for breathing curve (0=linear, 255=exponential)
-        uint8_t curve = config.option2;
+        uint8_t value; // 0..255 brightness envelope
 
-        // Use feature1 for hold at peak (0=smooth, 1=hold)
-        bool holdAtPeak = config.feature1;
-
-        // Use feature2 for rainbow breathing (0=set color, 1=rainbow)
-        bool rainbowBreathing = config.feature2;
-
-        // Calculate BPM from speed (map 0-255 to 5-60 breaths per minute)
-        uint16_t bpm = 5 + ((config.speed * 55) / 255);
-
-        // Use beatsin8 to get smooth breathing pattern
-        uint8_t breath;
-        if (holdAtPeak)
+        if (!pulseStyle)
         {
-            // Modified breathing with pause at peak
-            uint8_t rawBreath = FastLEDMath::beatsin8(bpm, 0, 255);
-            if (rawBreath > 200)
+            // ── Breathing waveforms ──
+            uint8_t minBrightness = config.option1 > 0 ? config.option1 : 0;
+            uint8_t maxBrightness = 255;
+            uint8_t curve = config.option2;
+            bool holdAtPeak = (waveform == 1);
+
+            uint16_t bpm = 5 + ((config.speed * 55) / 255);
+
+            uint8_t breath;
+            if (holdAtPeak)
             {
-                breath = 255; // Hold at peak
+                uint8_t rawBreath = FastLEDMath::beatsin8(bpm, 0, 255);
+                if (rawBreath > 200)
+                    breath = 255;
+                else
+                    breath = FastLEDMath::scale8(rawBreath, 200);
             }
             else
             {
-                breath = FastLEDMath::scale8(rawBreath, 200); // Scale normal breathing
+                breath = FastLEDMath::beatsin8(bpm, minBrightness, maxBrightness);
             }
+
+            if (curve > 0)
+            {
+                uint8_t curved = FastLEDMath::scale8(breath, breath);
+                breath = FastLEDMath::lerp8by8(breath, curved, curve);
+            }
+            value = breath;
         }
         else
         {
-            breath = FastLEDMath::beatsin8(bpm, minBrightness, maxBrightness);
+            // ── Pulse waveforms ──
+            uint8_t pulseWidth = config.option1 > 0 ? config.option1 : 100;
+            pulseWidth = pulseWidth < 10 ? 10 : (pulseWidth > 200 ? 200 : pulseWidth);
+            uint8_t gamma = config.option2 > 0 ? config.option2 : 128;
+            bool sharpPulse = (waveform == 3);
+
+            uint16_t bpm = 10 + ((config.speed * 110) / 255);
+
+            uint8_t minVal = sharpPulse ? 0 : (255 - pulseWidth) / 2;
+            uint8_t maxVal = sharpPulse ? pulseWidth : 255;
+
+            uint8_t pulse = FastLEDMath::beatsin8(bpm, minVal, maxVal);
+
+            if (gamma > 0)
+            {
+                uint8_t squared = FastLEDMath::scale8(pulse, pulse);
+                pulse = FastLEDMath::lerp8by8(pulse, squared, gamma);
+            }
+            value = pulse;
         }
 
-        // Apply curve adjustment
-        if (curve > 0)
-        {
-            // Apply exponential curve for more natural breathing
-            uint8_t curved = FastLEDMath::scale8(breath, breath);
-            breath = FastLEDMath::lerp8by8(breath, curved, curve);
-        }
+        // Scale the configured brightness by the envelope
+        uint8_t currentBrightness = FastLEDMath::scale8(config.intensity, value);
 
-        // Scale the configured brightness by the breathing pattern
-        uint8_t currentBrightness = FastLEDMath::scale8(config.intensity, breath);
-
-        // Apply to all pixels
         uint8_t r, g, b, ww, cw;
-        if (rainbowBreathing)
+        if (rainbowMode)
         {
-            // Rainbow breathing mode (no white channels)
-            uint8_t hue = (_time / 50) % 256; // Slow hue cycle
+            uint8_t hueDiv = pulseStyle ? 30 : 50;
+            uint8_t hue = (_time / hueDiv) % 256;
             uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, currentBrightness);
             r = (rgb >> 16) & 0xFF;
             g = (rgb >> 8) & 0xFF;
@@ -109,7 +127,6 @@ class BreathingEffect : public Effect
         }
         else
         {
-            // Use configured color with 5-channel support
             r = FastLEDMath::scale8(config.r(), currentBrightness);
             g = FastLEDMath::scale8(config.g(), currentBrightness);
             b = FastLEDMath::scale8(config.b(), currentBrightness);
@@ -135,7 +152,9 @@ class BreathingEffect : public Effect
 
     const char* getDescription(const char* lang = nullptr) override
     {
-        return "Smooth breathing effect - fade in and out";
+        return EFFECT_DESC_DE_EN(
+            "Sanftes Ein-/Ausatmen mit wählbarer Wellenform (weich, Halt, Puls, scharfer Puls)",
+            "Smooth fade in/out with selectable waveform (soft, hold, pulse, sharp pulse)");
     }
 
     // Parameter API
@@ -148,8 +167,8 @@ class BreathingEffect : public Effect
             case 0: return "Speed";
             case 1: return "MinBrightness";
             case 2: return "Curve";
-            case 3: return "HoldAtPeak";
-            case 4: return "RainbowBreathing";
+            case 3: return "RainbowMode";
+            case 4: return "Waveform";
             default: return "";
         }
     }
@@ -158,11 +177,11 @@ class BreathingEffect : public Effect
     {
         switch (index)
         {
-            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Atemgeschwindigkeit (höher=schneller)", "Speed: Breathing rate (higher=faster)");
-            case 1: return PARAM_DESC_DE_EN("Minimale Helligkeit beim Ausatmen (0-255)", "Minimum brightness when breathing out (0-255)");
-            case 2: return PARAM_DESC_DE_EN("Atemkurve: 0=linear, 255=exponentiell", "Breathing curve: 0=linear, 255=exponential");
-            case 3: return PARAM_DESC_DE_EN("Pause am Höhepunkt", "Hold at peak");
-            case 4: return PARAM_DESC_DE_EN("Regenbogen-Atmen: Farbe wechselt", "Rainbow breathing: Color cycles");
+            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Atem-/Pulsgeschwindigkeit (höher=schneller)", "Speed: Breathing/pulse rate (higher=faster)");
+            case 1: return PARAM_DESC_DE_EN("Min. Helligkeit (Atmen) / Pulsbreite (Puls)", "Min brightness (breathing) / pulse width (pulse)");
+            case 2: return PARAM_DESC_DE_EN("Kurve (Atmen) / Gamma (Puls): 0=linear, 255=stark", "Curve (breathing) / gamma (pulse): 0=linear, 255=strong");
+            case 3: return PARAM_DESC_DE_EN("Regenbogen: Farbe wechselt", "Rainbow: color cycles");
+            case 4: return PARAM_DESC_DE_EN("Wellenform: 0=Weich, 1=Halt am Höhepunkt, 2=Puls, 3=Scharfer Puls", "Waveform: 0=Soft, 1=Hold at peak, 2=Pulse, 3=Sharp pulse");
             default: return "";
         }
     }
@@ -173,10 +192,29 @@ class BreathingEffect : public Effect
         {
             case 0: return ParameterType::PARAM_UINT8;
             case 1: return ParameterType::PARAM_UINT8;
-            case 2: return ParameterType::PARAM_BOOL;
-            case 3: return ParameterType::PARAM_BOOL;
+            case 2: return ParameterType::PARAM_UINT8;
+            case 3: return ParameterType::PARAM_BOOL;  // RainbowMode
+            case 4: return ParameterType::PARAM_ENUM;  // Waveform
             default: return ParameterType::PARAM_UINT8;
         }
+    }
+
+    const char* getEnumValueName(uint8_t paramIndex, uint8_t enumValue) const override
+    {
+        if (paramIndex != 4) return nullptr;
+        switch (enumValue)
+        {
+            case 0: return "Weich";
+            case 1: return "Halt am Hoehepunkt";
+            case 2: return "Puls";
+            case 3: return "Scharfer Puls";
+            default: return nullptr;
+        }
+    }
+
+    uint8_t getEnumValueCount(uint8_t paramIndex) const override
+    {
+        return (paramIndex == 4) ? 4 : 0;
     }
 
     uint32_t getParameterDefault(uint8_t index) const override
@@ -186,8 +224,8 @@ class BreathingEffect : public Effect
             case 0: return 128; // Speed
             case 1: return 0;   // MinBrightness
             case 2: return 0;   // Curve (linear)
-            case 3: return 0;   // HoldAtPeak off
-            case 4: return 0;   // RainbowBreathing off
+            case 3: return 0;   // RainbowMode off
+            case 4: return 0;   // Waveform (Soft)
             default: return 0;
         }
     }
@@ -199,8 +237,8 @@ class BreathingEffect : public Effect
             case 0: return 1; // Speed min
             case 1: return 0; // MinBrightness min
             case 2: return 0; // Curve min
-            case 3: return 0; // HoldAtPeak false
-            case 4: return 0; // RainbowBreathing false
+            case 3: return 0; // RainbowMode false
+            case 4: return 0; // Waveform min
             default: return 0;
         }
     }
@@ -212,8 +250,8 @@ class BreathingEffect : public Effect
             case 0: return 255; // Speed max
             case 1: return 255; // MinBrightness max
             case 2: return 255; // Curve max
-            case 3: return 1;   // HoldAtPeak true
-            case 4: return 1;   // RainbowBreathing true
+            case 3: return 1;   // RainbowMode true
+            case 4: return 3;   // Waveform max (0..3)
             default: return 255;
         }
     }
@@ -225,10 +263,10 @@ class BreathingEffect : public Effect
         switch (index)
         {
             case 0: return config.speed;    // Speed
-            case 1: return config.option1;  // MinBrightness
-            case 2: return config.option2;  // Curve
-            case 3: return config.feature1; // HoldAtPeak
-            case 4: return config.feature2; // RainbowBreathing
+            case 1: return config.option1;  // MinBrightness / PulseWidth
+            case 2: return config.option2;  // Curve / Gamma
+            case 3: return config.feature2; // RainbowMode
+            case 4: return config.mode;     // Waveform
             default: return 0;
         }
     }
@@ -239,11 +277,11 @@ class BreathingEffect : public Effect
         auto& config = segment->getConfig();
         switch (index)
         {
-            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed (breathing rate)
-            case 1: config.option1 = static_cast<uint8_t>(value); break; // MinBrightness (0-255)
-            case 2: config.option2 = static_cast<uint8_t>(value); break; // Curve (0=linear, 1=smooth)
-            case 3: config.feature1 = static_cast<bool>(value); break;   // HoldAtPeak
-            case 4: config.feature2 = static_cast<bool>(value); break;   // RainbowBreathing
+            case 0: config.speed = static_cast<uint8_t>(value); break;
+            case 1: config.option1 = static_cast<uint8_t>(value); break;
+            case 2: config.option2 = static_cast<uint8_t>(value); break;
+            case 3: config.feature2 = static_cast<bool>(value); break;
+            case 4: config.mode = static_cast<uint8_t>(value); break;
             default: break;
         }
     }

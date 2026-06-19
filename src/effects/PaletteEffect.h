@@ -51,7 +51,54 @@ class PaletteEffect : public Effect
         }
     }
 
-    ParameterType getParameterType(uint8_t) const override { return ParameterType::PARAM_UINT8; }
+    ParameterType getParameterType(uint8_t idx) const override
+    {
+        switch (idx)
+        {
+            case 1: return ParameterType::PARAM_ENUM; // Palette
+            case 2: return ParameterType::PARAM_BOOL; // Blend
+            default: return ParameterType::PARAM_UINT8;
+        }
+    }
+
+    const char* getEnumValueName(uint8_t paramIndex, uint8_t enumValue) const override
+    {
+        if (paramIndex != 1) return nullptr;
+        switch (enumValue)
+        {
+            case 0: return "Regenbogen";
+            case 1: return "Hitze";
+            case 2: return "Ozean";
+            case 3: return "Wald";
+            default: return nullptr;
+        }
+    }
+
+    uint8_t getEnumValueCount(uint8_t paramIndex) const override
+    {
+        return (paramIndex == 1) ? 4 : 0;
+    }
+
+    uint32_t getParameterMin(uint8_t idx) const override
+    {
+        switch (idx)
+        {
+            case 1: return 0; // Palette
+            case 2: return 0; // Blend
+            default: return 0;
+        }
+    }
+
+    uint32_t getParameterMax(uint8_t idx) const override
+    {
+        switch (idx)
+        {
+            case 1: return 3; // Palette (Rainbow/Heat/Ocean/Forest)
+            case 2: return 1; // Blend
+            default: return 255;
+        }
+    }
+
     uint32_t getParameterDefault(uint8_t idx) const override
     {
         switch (idx)

@@ -152,6 +152,16 @@ class Effect
     virtual uint32_t getParameterDefault(uint8_t index) const { return 0; }
 
     /**
+     * @brief Default text for a PARAM_STRING parameter (nullptr/empty = no default).
+     * getParameterDefault() can't carry a string, so string effects expose their
+     * default here. Cue authoring seeds the cue's text with this when none is set,
+     * so "no text configured" shows the effect's intended text instead of nothing.
+     * @param index Parameter index
+     * @return Default text, or nullptr if none
+     */
+    virtual const char* getParameterDefaultText(uint8_t index) const { return nullptr; }
+
+    /**
      * @brief Get parameter description (multi-language)
      * @param index Parameter index (0..count-1)
      * @param lang Language code ("de" or "en"), default: "de"

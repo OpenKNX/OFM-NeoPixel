@@ -375,12 +375,29 @@ class Snake2DEffect : public Effect
     {
         switch (index)
         {
-            case 2: return ParameterType::PARAM_UINT8;
+            case 2: return ParameterType::PARAM_ENUM; // BodyMode
             case 0:
             case 1:
             case 3:
             default: return ParameterType::PARAM_UINT8;
         }
+    }
+
+    const char* getEnumValueName(uint8_t paramIndex, uint8_t enumValue) const override
+    {
+        if (paramIndex != 2) return nullptr;
+        switch (enumValue)
+        {
+            case 0: return "Einfarbig";
+            case 1: return "Regenbogen";
+            case 2: return "Verlauf";
+            default: return nullptr;
+        }
+    }
+
+    uint8_t getEnumValueCount(uint8_t paramIndex) const override
+    {
+        return (paramIndex == 2) ? 3 : 0;
     }
 
     uint32_t getParameterMin(uint8_t index) const override

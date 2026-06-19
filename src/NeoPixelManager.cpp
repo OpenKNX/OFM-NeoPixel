@@ -413,6 +413,15 @@ bool NeoPixelManager::removeStrip(PhysicalStrip* strip)
     {
         if (*it == strip)
         {
+            // Detach from every consumer BEFORE freeing, or their cached raw pointers
+            // dangle and the next show()/syncToPhysical()/power-stat read dereferences
+            // freed heap (silent reboot on RP2350).
+            for (VirtualStrip* vs : _virtualStrips)
+                if (vs) vs->detachPhysicalStrip(strip);
+            _stripPowerCache.erase(strip);
+            _physToVirtualMap.erase(strip);
+            _mappingDirty = true; // force phys→virtual map rebuild on next sync
+
             delete *it;
             _strips.erase(it);
             return true;
@@ -1264,6 +1273,8 @@ void NeoPixelManager::update(uint32_t deltaTime)
  */
 bool NeoPixelManager::waitForAll(uint32_t timeoutMs)
 {
+    // 0 ("unlimited") → absolute ceiling, so a wedged strip can't hang the loop forever.
+    if (timeoutMs == 0) timeoutMs = 1000;
     uint32_t startTime = millis();
 
     while (isAnyBusy())
@@ -1289,6 +1300,8 @@ bool NeoPixelManager::waitForStrip(PhysicalStrip* strip, uint32_t timeoutMs)
 {
     if (!strip) return false;
 
+    // 0 ("unlimited") → absolute ceiling, so a wedged strip can't hang the loop forever.
+    if (timeoutMs == 0) timeoutMs = 1000;
     uint32_t startTime = millis();
 
     while (strip->isBusy())

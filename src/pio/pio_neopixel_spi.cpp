@@ -315,6 +315,13 @@ PIO_NeoPixel_SPI::~PIO_NeoPixel_SPI()
             // Unregister DMA handlers (IRQ is shared, don't release it)
             if (_inst->dmaChannel >= 0)
             {
+                // Stop any in-flight transfer FIRST: disable this channel's IRQ, abort
+                // the DMA and wait for it to settle. Otherwise the engine keeps reading
+                // _inst->buffer after we free it, and a completion IRQ can fire into a
+                // freed/unregistered handler (use-after-free → reboot).
+                dma_channel_set_irq1_enabled(_inst->dmaChannel, false); // SPI strips use DMA_IRQ_1
+                dma_channel_abort(_inst->dmaChannel);
+                while (dma_channel_is_busy(_inst->dmaChannel)) { tight_loop_contents(); }
                 unregisterDMAHandler(_inst->dmaChannel);
                 dma_channel_unclaim(_inst->dmaChannel);
             }
@@ -854,11 +861,23 @@ void PIO_NeoPixel_SPI::sendDataPIO()
     // CRITICAL: Must use bufferWordCount, NOT bufferSize/4 (can cause rounding errors)
     uint32_t* wordBuffer = (uint32_t*)_inst->buffer;
 
-    // Send data as 32-bit words to PIO TX FIFO
-    // pio_sm_put_blocking() waits for FIFO space (max 8 words deep)
+    // Send data as 32-bit words to PIO TX FIFO. Use a bounded wait for FIFO space
+    // instead of pio_sm_put_blocking(): if the SM ever wedges (FIFO never drains) an
+    // unbounded spin here would starve the main loop → 16 s watchdog reboot. This is
+    // the no-DMA fallback path only (DMA strips never get here).
     for (size_t i = 0; i < _inst->bufferWordCount; i++)
     {
-        pio_sm_put_blocking(_inst->pio, _inst->sm, wordBuffer[i]); // Blocks if FIFO full
+        const uint32_t startUs = micros();
+        while (pio_sm_is_tx_fifo_full(_inst->pio, _inst->sm))
+        {
+            if ((uint32_t)(micros() - startUs) > 20000) // 20 ms >> any real FIFO wait
+            {
+                if (_inst->csPin >= 0) digitalWrite(_inst->csPin, HIGH);
+                _inst->busy = false;
+                return; // abandon the frame; next show() re-arms
+            }
+        }
+        pio_sm_put(_inst->pio, _inst->sm, wordBuffer[i]);
     }
 
     if (_inst->csPin >= 0)
@@ -883,7 +902,8 @@ void PIO_NeoPixel_SPI::sendDataPIO()
  */
 void PIO_NeoPixel_SPI::sendDataDMA()
 {
-    if (!_inst || _inst->dmaChannel < 0)
+    if (!_inst) return; // can't clear busy on a null instance — must check first
+    if (_inst->dmaChannel < 0)
     {
         _inst->busy = false;
         return;
@@ -989,7 +1009,7 @@ DriverCapabilities PIO_NeoPixel_SPI::getCapabilities() const
  */
 void PIO_NeoPixel_SPI::registerDMAHandler(int channel, PIO_NeoPixel_SPI* instance)
 {
-    if (channel >= 0 && channel < 12)
+    if (channel >= 0 && channel < MAX_DMA_CHANNELS)
     {
         g_spiHandlers[channel] = instance; // Use global registry
     }
@@ -1001,7 +1021,7 @@ void PIO_NeoPixel_SPI::registerDMAHandler(int channel, PIO_NeoPixel_SPI* instanc
  */
 void PIO_NeoPixel_SPI::unregisterDMAHandler(int channel)
 {
-    if (channel >= 0 && channel < 12)
+    if (channel >= 0 && channel < MAX_DMA_CHANNELS)
     {
         g_spiHandlers[channel] = nullptr; // Use global registry
     }

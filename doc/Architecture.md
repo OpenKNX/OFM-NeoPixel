@@ -573,14 +573,14 @@ Segment Object
 ```
 Effect Objects (Stateless Singletons)
 ├─ EffectSolid          (~8 bytes)
+├─ EffectWipe           (~8 bytes)
 ├─ RainbowEffect        (~8 bytes)
 ├─ PrideEffect          (~8 bytes)
-├─ ConfettiEffect       (~8 bytes)
 ├─ JuggleEffect         (~8 bytes)
 ├─ BPMEffect            (~8 bytes)
 ├─ CylonEffect          (~8 bytes)
-├─ EffectWipe           (~8 bytes)
-└─ Total: ~64 bytes
+├─ ... (33 effects total)
+└─ Total: ~264 bytes
 
 EffectPool
 ├─ Static effect instances (64 bytes)
@@ -643,7 +643,7 @@ Without DMA (LED buffer only):
 │  Effect* getEffect(uint8_t id) {                            │
 │      switch (id) {                                          │
 │          case 0: return &solidEffect;                       │
-│          case 1: return &rainbowEffect;                     │
+│          case 2: return &rainbowEffect;                     │
 │          case 6: return &cylonEffect;                       │
 │      }                                                       │
 │  }                                                           │
@@ -746,12 +746,12 @@ The Effektmanager (EM) is a per-segment sequencer that applies a chain of effect
 │                                                               │
 │  EffektManagerHeader (20 B)                                   │
 │    ├─ name[16]      ETS description                           │
-│    ├─ cueCount      active cues (1..99)                       │
+│    ├─ cueCount      active cues (1..10)                       │
 │    ├─ loop:1        restart at cue 1 when done                │
 │    ├─ nextEmId      chain target (0=stop, 1..16)              │
 │    └─ enabled       0=off, 1=on                               │
 │                                                               │
-│  EffektCue cues[99]  (48 B each)                              │
+│  EffektCue cues[10]  (48 B each)                              │
 │    ├─ effectId            which effect                        │
 │    ├─ params[10]          effect parameters                  │
 │    ├─ r,g,b,w             primary colour                     │
@@ -830,7 +830,7 @@ The LED chain is always 1D on the wire. `Segment` adds a pure-software geometry 
    COLS_SERP_TILED      tiled panel chain, columns serpentine per block
 ```
 
-Existing 1D effects work unchanged on a 2D segment — they are rendered line by line. 2D-aware effects (Fire2D, Noise2D, Cylon2D, ScrollText, Clock2D) advertise `DIM_2D` capability and receive `update2D()`.
+Existing 1D effects work unchanged on a 2D segment — they are rendered line by line. 2D-aware effects (Fire, Noise, Cylon are geometry-aware; ScrollText, Clock2D and the other `*2D` effects are 2D-only) advertise `DIM_2D` capability and receive `update2D()`.
 
 ---
 
@@ -1127,7 +1127,7 @@ Serial Strips (WS2812B/SK6812):
 │  │    RP2040  @ 125 MHz → clkdiv = 78.125                    │  │
 │  │    RP2350  @ 150 MHz → clkdiv = 93.750                    │  │
 │  │    RP2350  @ 300 MHz → clkdiv = 187.500                   │  │
-│  │    (Output frequency constant: 800 kHz)                    │  │
+│  │    (Output frequency default:  800 kHz)                    │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
 │  Implementation: clock_get_hz(clk_sys) at runtime               │

@@ -91,8 +91,9 @@ struct EffectConfig
 {
     uint8_t speed;              // Speed 1-255
     uint8_t intensity;          // Intensity 1-255
-    uint8_t brightness;         // Software brightness 0-255 (255 = no dimming, ALL LED types)
+    uint8_t brightness;         // Software brightness 0-255 (255 = no dimming, ALL LED types) — the EFFECTIVE render value (what scales pixels; fade/EM drive it)
     uint8_t hardwareBrightness; // Hardware brightness 0-255 (255 = max, only for APA102/SK9822)
+    uint8_t masterBrightness;   // User/KO/global intent 0-255 (255 = full). EM cues render at master*cue/255, so a runtime dim survives cue switches.
     uint32_t primaryRGBW;       // Primary color (RGBW packed: R<<24 | G<<16 | B<<8 | W)
     uint32_t secondaryRGBW;     // Secondary color (RGBW packed)
     uint8_t reverse;            // Reverse direction (0/1)
@@ -140,7 +141,7 @@ struct EffectConfig
 
     // Default Constructor
     EffectConfig()
-        : speed(128), intensity(128), brightness(255), hardwareBrightness(255),
+        : speed(128), intensity(128), brightness(255), hardwareBrightness(255), masterBrightness(255),
           primaryRGBW(0xFFFFFFFF), secondaryRGBW(0x00000000),
           reverse(0), count(1), fade(128), mode(0), effectType(0),
           primaryCW(0), secondaryCW(0),
@@ -412,6 +413,15 @@ class Segment
      */
     inline void setBrightness(uint8_t brightness) { _config.brightness = brightness; }
     uint8_t getBrightness() const { return _config.brightness; }
+
+    /**
+     * @brief Master (user/KO/global) brightness — the intent the Effektmanager scales cues against.
+     * Set by the brightness KOs, global brightness and the console `neo brightness` command.
+     * The EM renders each cue at master*cue/255, so dimming via KO is NOT reset on cue switch.
+     * Default 255 means "no master dimming" → cues render at their own brightness (backward compatible).
+     */
+    inline void setMasterBrightness(uint8_t brightness) { _config.masterBrightness = brightness; }
+    uint8_t getMasterBrightness() const { return _config.masterBrightness; }
 
     /**
      * @brief Set hardware brightness (0-255, default 255 = max)

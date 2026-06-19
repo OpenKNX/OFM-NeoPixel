@@ -506,6 +506,8 @@ bool PhysicalStrip::waitForTransfer(uint32_t timeoutMs)
 {
     if (!_driver || !isInitialized()) return false;
 
+    // 0 ("unlimited") → absolute ceiling, so a wedged transfer can't spin forever.
+    if (timeoutMs == 0) timeoutMs = 1000;
     uint32_t startTime = millis();
 
     while (_driver->isBusy())

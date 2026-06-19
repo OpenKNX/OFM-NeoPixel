@@ -18,7 +18,6 @@
 // Effect system includes
 #include "effects/Effect.h"
 #include "effects/EffectPool.h"
-#include "effects/GarageDoorEffect.h"
 
 // Performance tracking
 #include "test/PerformanceTracker.h"
@@ -367,9 +366,12 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("resume <i>", "Resume segment effect");
         openknx.console.printHelpLine("stop <i>", "Stop segment (pause + clear pixels)");
         openknx.console.printHelpLine("clear effect <i>", "Remove effect from segment");
+        openknx.console.printHelpLine("geo <i> <w> <h> [topo]", "Set 2D geometry (topo 1=rows-serp..7=cols-serp-tiled, 0=1D)");
+        openknx.console.printHelpLine("geo <i> <w> <h> <tile> <topo>", "Tiled panel (tile = tile height)");
         printDetailHelpSeparator();
         printDetailHelpParameter("<i>=Segment ID, <v>=Virtual Strip ID, <start>/<end>=LED Position");
         printDetailHelpExample("neo seg add 0 0 35       Create segment on virtual strip 0, LEDs 0-35");
+        printDetailHelpExample("neo seg geo 0 32 16 8 7  32x16 tiled panel (tile=8, cols-serpentine)");
         printDetailHelpExample("neo seg pause 0          Pause segment 0 (freeze animation)");
         printDetailHelpEnd();
         return true;
@@ -713,8 +715,36 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
                 printEmStatusTable(seg);
             return true;
         }
+        if (sub.compare(0, 7, "config ") == 0)
+        {
+            int em = 0, loop = 0, nextEm = 0;
+            int n = sscanf(sub.c_str() + 7, "%d %d %d", &em, &loop, &nextEm);
+            if (n < 2 || em < 1)
+            {
+                openknx.logger.log("Usage: neo em config <em> <loop 0|1> [nextEm]");
+                return true;
+            }
+            int packed = (loop & 0xFF) | ((nextEm & 0xFF) << 8);
+            if (openknxNeoPixelHandleEmChainAction(NEO_EM_CONFIG, em, packed))
+                openknx.logger.logWithValues("EM %d configured (loop=%d, nextEm=%d, enabled)", em, loop, nextEm);
+            else
+                openknx.logger.log("ERROR: invalid EM id (1..16) or no cues defined yet");
+            return true;
+        }
+        if (sub.compare(0, 5, "bind ") == 0)
+        {
+            int mgrSeg = atoi(sub.c_str() + 5);
+            if (mgrSeg < 0)
+            {
+                openknx.logger.log("Usage: neo em bind <managerSeg>   (wraps a console segment into the EM system)");
+                return true;
+            }
+            openknxNeoPixelHandleEmChainAction(NEO_EM_BIND, mgrSeg, 0);
+            return true;
+        }
 
-        openknx.logger.log("Usage: neo em status [seg] | dump <seg> | start <seg> <em> | stop <seg> | cue <seg> <cue>  (seg=0-based)");
+        openknx.logger.log("Usage: neo em status [seg] | dump <seg> | start <seg> <em> | stop <seg> | cue <seg> <cue>");
+        openknx.logger.log("       | config <em> <loop> [nextEm] | bind <managerSeg>   (seg/0-based)");
         return true;
     }
 
@@ -745,11 +775,56 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
             printEmCueTable(seg);
             return true;
         }
+        if (sub.compare(0, 4, "set ") == 0)
+        {
+            int em = 0, cue = 0, eff = 0, dur = 0, fade = 0, bri = 255, r = 255, g = 255, b = 255;
+            int n = sscanf(sub.c_str() + 4, "%d %d %d %d %d %d %d %d %d",
+                           &em, &cue, &eff, &dur, &fade, &bri, &r, &g, &b);
+            if (n < 5 || em < 1 || cue < 1)
+            {
+                openknx.logger.log("Usage: neo cue set <em> <cue> <effectId> <durSec> <fadeMs> [bri] [r g b]");
+                return true;
+            }
+            if (openknxNeoPixelHandleCueSet((uint8_t)em, (uint8_t)cue, (uint8_t)eff,
+                                            (uint16_t)dur, (uint16_t)fade,
+                                            (uint8_t)bri, (uint8_t)r, (uint8_t)g, (uint8_t)b))
+                openknx.logger.logWithValues("EM %d cue %d set: effect=%d dur=%ds fade=%dms", em, cue, eff, dur, fade);
+            else
+                openknx.logger.log("ERROR: invalid EM/cue (em 1..16, cue 1..10)");
+            return true;
+        }
+        if (sub.compare(0, 6, "param ") == 0)
+        {
+            int em = 0, cue = 0, idx = -1, val = 0;
+            int n = sscanf(sub.c_str() + 6, "%d %d %d %d", &em, &cue, &idx, &val);
+            if (n != 4 || em < 1 || cue < 1 || idx < 0)
+            {
+                openknx.logger.log("Usage: neo cue param <em> <cue> <paramIdx> <value>   (override one effect param; cue must exist)");
+                return true;
+            }
+            if (openknxNeoPixelHandleCueParam((uint8_t)em, (uint8_t)cue, (uint8_t)idx, (uint8_t)val))
+                openknx.logger.logWithValues("EM %d cue %d param[%d] = %d (clamped to effect range)", em, cue, idx, val);
+            else
+                openknx.logger.log("ERROR: invalid EM/cue/param (em 1..16, cue 1..10, idx in range, cue must be set first)");
+            return true;
+        }
+        if (sub.compare(0, 6, "clear ") == 0)
+        {
+            int em = atoi(sub.c_str() + 6);
+            if (em < 1)
+            {
+                openknx.logger.log("Usage: neo cue clear <em>");
+                return true;
+            }
+            if (openknxNeoPixelHandleEmChainAction(NEO_CUE_CLEAR, em, 0))
+                openknx.logger.logWithValues("EM %d cues cleared", em);
+            return true;
+        }
 
         int seg = 0, cue = 0;
         if (sscanf(sub.c_str(), "%d %d", &seg, &cue) != 2 || seg < 0)
         {
-            openknx.logger.log("Usage: neo cue | neo cue <seg> <cue> | neo cue list [seg]  (seg=0-based)");
+            openknx.logger.log("Usage: neo cue [<seg> <cue>] | list [seg] | set <em> <cue> <eff> <dur> <fade> [bri r g b] | param <em> <cue> <idx> <val> | clear <em>");
             return true;
         }
         if (openknxNeoPixelHandleEmChainAction(NEO_EM_CUE, seg, cue))
@@ -1444,15 +1519,20 @@ bool NeoPixel::processInfoCommand()
     openknx.logger.logWithValues("  Auto Update:     %s", _autoUpdate ? "Enabled" : "Disabled");
     if (_autoUpdate)
     {
-        uint32_t targetFPS = 1000 / _updateInterval;
-        openknx.logger.logWithValues("  Target FPS:      %d Hz (%d ms)", targetFPS, _updateInterval);
+        // FTL mode (_updateInterval == 0) runs flat out — avoid /0, derive from frame time.
+        const bool ftl = (_updateInterval == 0);
+        if (ftl)
+            openknx.logger.log("  Target FPS:      unlimited (FTL)");
+        else
+            openknx.logger.logWithValues("  Target FPS:      %d Hz (%d ms)", (1000 / _updateInterval), _updateInterval);
 
         // Show actual FPS if performance data available
         if (g_perfTracker.hasData())
         {
-            float actualFPS = g_perfTracker.getCurrentFPS(_updateInterval);
+            float actualFPS = g_perfTracker.getCurrentFPS(_updateInterval); // FTL-aware
             uint32_t avgUpdateTime = g_perfTracker.getAverageTime();
-            float cpuLoad = (avgUpdateTime * targetFPS / 1000000.0f) * 100.0f;
+            uint32_t targetFPS = ftl ? 0 : (1000 / _updateInterval);
+            float cpuLoad = ftl ? 100.0f : (avgUpdateTime * targetFPS / 1000000.0f) * 100.0f;
 
             openknx.logger.logWithValues("  Actual FPS:      %.1f Hz", actualFPS);
             openknx.logger.logWithValues("  Avg Update:      %d µs", avgUpdateTime);
@@ -1985,12 +2065,15 @@ bool NeoPixel::processPerformanceCommand()
     printSectionSeparator();
     openknx.logger.log("");
 
-    // Calculate statistics
+    // Calculate statistics. In FTL mode (_updateInterval == 0) the loop runs flat out,
+    // so derive rate/budget from the measured frame time instead of dividing by zero.
+    const bool ftl = (_updateInterval == 0);
     uint32_t avgUpdateTime = g_perfTracker.getAverageTime();
-    float currentFPS = g_perfTracker.getCurrentFPS(_updateInterval);
+    float currentFPS = g_perfTracker.getCurrentFPS(_updateInterval); // FTL: 1e6 / avg frame time
     uint32_t uptime = g_perfTracker.getUptimeSeconds();
-    uint32_t targetFPS = 1000 / _updateInterval;
-    float cpuLoad = (avgUpdateTime * targetFPS / 1000000.0f) * 100.0f;
+    uint32_t targetFPS = ftl ? 0 : (1000 / _updateInterval);
+    // CPU: throttled = avgFrame / period; FTL = continuous rendering -> ~100%
+    float cpuLoad = ftl ? 100.0f : (avgUpdateTime * targetFPS / 1000000.0f) * 100.0f;
 
     // Calculate total LED count and memory
     uint32_t totalLEDs = 0;
@@ -2011,16 +2094,26 @@ bool NeoPixel::processPerformanceCommand()
     openknx.logger.color(0);
     openknx.logger.logWithValues("  Total Frames:    %lu", g_perfTracker.frameCount);
     openknx.logger.logWithValues("  Current FPS:     %.1f Hz", currentFPS);
-    openknx.logger.logWithValues("  Target FPS:      %lu Hz", targetFPS);
+    if (ftl)
+        openknx.logger.log("  Target FPS:      unlimited (FTL)");
+    else
+        openknx.logger.logWithValues("  Target FPS:      %lu Hz", targetFPS);
     openknx.logger.logWithValues("  Min Update:      %lu µs",
                                  g_perfTracker.minUpdateTime == UINT32_MAX ? 0 : g_perfTracker.minUpdateTime);
     openknx.logger.logWithValues("  Max Update:      %lu µs", g_perfTracker.maxUpdateTime);
     openknx.logger.logWithValues("  Avg Update:      %lu µs", avgUpdateTime);
 
-    // Calculate time budget
-    uint32_t frameBudget = _updateInterval * 1000; // µs per frame
-    float budgetUsed = (avgUpdateTime * 100.0f) / frameBudget;
-    openknx.logger.logWithValues("  Frame Budget:    %lu µs (%.1f%% used)", frameBudget, budgetUsed);
+    // Calculate time budget (FTL has no fixed budget — the frame period IS the render time)
+    if (ftl)
+    {
+        openknx.logger.logWithValues("  Frame Budget:    none (FTL) - avg frame %lu µs", avgUpdateTime);
+    }
+    else
+    {
+        uint32_t frameBudget = _updateInterval * 1000; // µs per frame
+        float budgetUsed = (avgUpdateTime * 100.0f) / frameBudget;
+        openknx.logger.logWithValues("  Frame Budget:    %lu µs (%.1f%% used)", frameBudget, budgetUsed);
+    }
     openknx.logger.log("");
 
     // CPU Load Analysis
@@ -2035,25 +2128,25 @@ bool NeoPixel::processPerformanceCommand()
     uint32_t throughput = totalLEDs * currentFPS;
     openknx.logger.logWithValues("  Throughput:      %lu LEDs/sec", throughput);
 
-    if (avgUpdateTime < 500)
+    // Status judged against the ACTUAL frame budget — not a fixed µs threshold.
+    // (28 ms is perfectly fine for a big 2D matrix as long as it fits the interval;
+    //  the old `< 500 µs` test wrongly flagged every non-trivial config as "To Slow".)
+    if (ftl)
     {
-        openknx.logger.log("  Status:          DMA working perfectly!");
-    }
-    else if (avgUpdateTime < 1000)
-    {
-        openknx.logger.log("  Status:          OK - Highly optimized.");
-    }
-    else if (avgUpdateTime < 2000)
-    {
-        openknx.logger.log("  Status:          OK - PIO mode optimized.");
-    }
-    else if (avgUpdateTime < 5000)
-    {
-        openknx.logger.log("  Status:          NOK - Check for blocking calls.");
+        openknx.logger.logWithValues("  Status:          FTL - running flat out (%.1f FPS)", currentFPS);
     }
     else
     {
-        openknx.logger.log("  Status:          To Slow! Check configuration!");
+        uint32_t frameBudgetUs = _updateInterval * 1000;
+        float used = (frameBudgetUs > 0) ? (avgUpdateTime * 100.0f / frameBudgetUs) : 0.0f;
+        if (frameBudgetUs > 0 && avgUpdateTime >= frameBudgetUs)
+            openknx.logger.log("  Status:          TOO SLOW - frame exceeds budget! Raise interval or reduce load.");
+        else if (used < 70.0f)
+            openknx.logger.log("  Status:          Healthy - comfortable budget headroom.");
+        else if (used < 90.0f)
+            openknx.logger.log("  Status:          OK - getting tight (>70% of budget).");
+        else
+            openknx.logger.log("  Status:          TIGHT - near frame budget (>90%).");
     }
     openknx.logger.log("");
 
@@ -2888,6 +2981,56 @@ bool NeoPixel::processSegCommand(const std::string& args)
     {
         return processSegClearEffectCommand(args.substr(13));
     }
+    else if (args.compare(0, 4, "geo ") == 0)
+    {
+        // neo seg geo <id> <w> <h> [topology]            -> 2D matrix
+        // neo seg geo <id> <w> <h> <tileDepth> <topology> -> tiled panel (depth = tile height)
+        // Lets you set 2D geometry from the console (normally only ETS does this).
+        if (!_initialized || !_manager)
+        {
+            openknx.logger.log("ERROR: NeoPixel module not initialized!");
+            return true;
+        }
+        int id = -1, w = 0, h = 0, a4 = -1, a5 = -1;
+        int n = sscanf(args.c_str() + 4, "%d %d %d %d %d", &id, &w, &h, &a4, &a5);
+        if (n < 3 || id < 0 || (uint32_t)id >= _manager->getSegmentCount() || w < 1 || h < 1)
+        {
+            openknx.logger.log("Usage: neo seg geo <id> <w> <h> [topology]");
+            openknx.logger.log("       neo seg geo <id> <w> <h> <tileDepth> <topology>   (tiled panels)");
+            openknx.logger.log("  topology: 1=ROWS_SERP 2=ROWS_LIN 3=COLS_SERP 4=COLS_LIN 6=COLS_LIN_TILED 7=COLS_SERP_TILED (0=back to 1D)");
+            return true;
+        }
+        Segment* seg = _manager->getSegment(id);
+        if (!seg)
+        {
+            openknx.logger.logWithValues("ERROR: segment %d not found", id);
+            return true;
+        }
+        uint8_t topo = (n == 3) ? (uint8_t)LedTopology::ROWS_SERPENTINE : (uint8_t)((n == 4) ? a4 : a5);
+        if (topo > (uint8_t)LedTopology::COLS_SERP_TILED)
+        {
+            openknx.logger.logWithValues("ERROR: topology %d out of range (0-7)", (int)topo);
+            return true;
+        }
+        if (topo == (uint8_t)LedTopology::LINEAR_1D)
+        {
+            seg->clearGeometry();
+            openknx.logger.logWithValues("Segment %d geometry cleared (back to 1D)", id);
+            return true;
+        }
+        if (n >= 5)
+            seg->setGeometry((uint8_t)w, (uint8_t)h, (uint8_t)a4, static_cast<LedTopology>(topo));
+        else
+            seg->setGeometry((uint8_t)w, (uint8_t)h, static_cast<LedTopology>(topo));
+
+        const uint16_t need = (uint16_t)w * (uint16_t)h;
+        if (need > seg->getLength())
+            openknx.logger.logWithValues("WARN: %dx%d=%d exceeds segment length %d (out-of-range pixels are clipped)",
+                                         w, h, (int)need, (int)seg->getLength());
+        openknx.logger.logWithValues("Segment %d geometry set: %dx%d topology=%d%s",
+                                     id, w, h, (int)topo, (n >= 5) ? " (tiled, depth set)" : "");
+        return true;
+    }
     else
     {
         openknx.logger.log("ERROR: Unknown seg command. Use 'neo ?' for help.");
@@ -2919,8 +3062,8 @@ bool NeoPixel::processSegListCommand()
     }
     else
     {
-        openknx.logger.log("ID │ Range     │ State   │ Effect │ Effect Name      │ Color R:G:B (W)");
-        openknx.logger.log("───┼───────────┼─────────┼────────┼──────────────────┼───────────────────");
+        openknx.logger.log("ID │ Range     │ State   │ Effect │ Effect Name      │ Color R:G:B (W)    │ Geo");
+        openknx.logger.log("───┼───────────┼─────────┼────────┼──────────────────┼────────────────────┼───────────");
         for (uint32_t i = 0; i < count; i++)
         {
             auto seg = _manager->getSegment(i);
@@ -2931,7 +3074,15 @@ bool NeoPixel::processSegListCommand()
                 auto& config = seg->getConfig();
                 const char* state = seg->isPaused() ? "Paused" : "Running";
 
-                openknx.logger.logWithValues("%2d │ %3d - %3d │ %-7s │ %-6s │ %-16s │ %3d:%3d:%3d (%3d)",
+                // Geometry summary: "1D" or "WxH tN" (N = topology id)
+                const auto& geo = seg->getGeometry();
+                char geoBuf[12];
+                if (geo.is1D())
+                    snprintf(geoBuf, sizeof(geoBuf), "1D");
+                else
+                    snprintf(geoBuf, sizeof(geoBuf), "%dx%d t%d", geo.width, geo.height, (int)geo.topology);
+
+                openknx.logger.logWithValues("%2d │ %3d - %3d │ %-7s │ %-6s │ %-16s │ %3d:%3d:%3d (%3d) │ %-9s",
                                              i,
                                              seg->getStartLed(),
                                              seg->getEndLed(),
@@ -2941,7 +3092,8 @@ bool NeoPixel::processSegListCommand()
                                              (config.primaryRGBW >> 24) & 0xFF, // Red from RGBW
                                              (config.primaryRGBW >> 16) & 0xFF, // Green from RGBW
                                              (config.primaryRGBW >> 8) & 0xFF,  // Blue from RGBW
-                                             config.primaryRGBW & 0xFF          // White from RGBW
+                                             config.primaryRGBW & 0xFF,         // White from RGBW
+                                             geoBuf
                 );
             }
         }
@@ -3260,7 +3412,7 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
     // Get single parameter
     if (strcmp(cmd, "get") == 0 && parsed >= 3)
     {
-        if (paramIdx >= count)
+        if (paramIdx < 0 || paramIdx >= count)
         {
             openknx.logger.logWithValues("ERROR: Index %d out of range (0-%d)", paramIdx, count - 1);
             return true;
@@ -3289,7 +3441,7 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
     // Set parameter - handle strings specially
     if (strcmp(cmd, "set") == 0)
     {
-        if (paramIdx >= count)
+        if (paramIdx < 0 || paramIdx >= count)
         {
             openknx.logger.logWithValues("ERROR: Index %d out of range (0-%d)", paramIdx, count - 1);
             return true;
@@ -3563,62 +3715,12 @@ bool NeoPixel::processEffectCommand(const std::string& args)
  */
 bool NeoPixel::processGarageCommand(const std::string& args)
 {
-    if (!_initialized || !_manager)
-    {
-        openknx.logger.log("ERROR: NeoPixel module not initialized!");
-        return true;
-    }
-
-    // Parse arguments: <seg_id> <phase>
-    int segId, phase;
-    if (sscanf(args.c_str(), "%d %d", &segId, &phase) != 2)
-    {
-        openknx.logger.log("ERROR: Usage: neo garage <seg_id> <phase>");
-        openknx.logger.log("       Phases: 0=OPENING, 1=RUNWAY, 2=COMPLETED, 3=STOPPED");
-        return true;
-    }
-
-    // Validate phase
-    if (phase < 0 || phase > 3)
-    {
-        openknx.logger.log("ERROR: Phase must be 0-3 (OPENING/RUNWAY/COMPLETED/STOPPED)");
-        return true;
-    }
-
-    // Get segment
-    auto seg = _manager->getSegment(segId);
-    if (!seg)
-    {
-        openknx.logger.logWithValues("ERROR: Segment [%d] not found!", segId);
-        return true;
-    }
-
-    // Get GarageDoorEffect from segment
-    auto effect = seg->getEffect();
-    if (!effect)
-    {
-        openknx.logger.logWithValues("ERROR: Segment [%d] has no effect assigned!", segId);
-        openknx.logger.log("       Use 'neo effect set <seg> garagedoor' to assign GarageDoor effect");
-        return true;
-    }
-
-    // Check if it's GarageDoorEffect (no RTTI, check by name)
-    GarageDoorEffect* garageEffect = (strcmp(effect->getName(), "GarageDoor") == 0) ? static_cast<GarageDoorEffect*>(effect) : nullptr;
-    if (!garageEffect)
-    {
-        openknx.logger.logWithValues("ERROR: Segment [%d] does not have GarageDoor effect!", segId);
-        openknx.logger.logWithValues("       Current effect: %s", effect->getName());
-        openknx.logger.log("       Use 'neo effect set <seg> garagedoor' to assign GarageDoor effect");
-        return true;
-    }
-
-    // Set phase for this segment
-    GaragePhase newPhase = (GaragePhase)phase;
-    garageEffect->setSegmentPhase(seg, newPhase);
-
-    const char* phaseNames[] = {"OPENING", "RUNWAY", "COMPLETED", "STOPPED"};
-    openknx.logger.logWithValues("Segment [%d] GarageDoor phase set to: %s", segId, phaseNames[phase]);
-
+    (void)args;
+    // GarageDoor effect was removed during effect consolidation. Its behaviour is
+    // covered by Cylon (center mode), Theater Chase and Breathing, and by the
+    // Effektmanager Sequencer.
+    openknx.logger.log("INFO: GarageDoor effect has been removed.");
+    openknx.logger.log("      Use Cylon (center mode), Theater Chase or the Effektmanager instead.");
     return true;
 }
 
@@ -3761,7 +3863,9 @@ bool NeoPixel::processBrightnessCommand(const std::string& args)
         return true;
     }
 
-    // Set software brightness
+    // Set software brightness. This is a USER-intent change, so also update the master:
+    // an EM cue then renders at master*cue/255 and won't reset this on the next cue switch.
+    seg->setMasterBrightness((uint8_t)brightness);
     seg->setBrightness((uint8_t)brightness);
 
     openknx.logger.logWithValues("Segment [%d] SOFTWARE brightness set to %d (%.1f%%)",

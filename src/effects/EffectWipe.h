@@ -149,12 +149,12 @@ class EffectWipe : public Effect
         if (paramIndex != 1) return nullptr;
         switch (enumValue)
         {
-            case WIPE_LEFT_TO_RIGHT: return "Left->Right";
-            case WIPE_RIGHT_TO_LEFT: return "Right->Left";
-            case WIPE_TOP_TO_BOTTOM: return "Top->Bottom";
-            case WIPE_BOTTOM_TO_TOP: return "Bottom->Top";
-            case WIPE_CENTER_OUT: return "Center->Out";
-            case WIPE_EDGES_IN: return "Edges->In";
+            case WIPE_LEFT_TO_RIGHT: return "Links nach rechts";
+            case WIPE_RIGHT_TO_LEFT: return "Rechts nach links";
+            case WIPE_TOP_TO_BOTTOM: return "Oben nach unten";
+            case WIPE_BOTTOM_TO_TOP: return "Unten nach oben";
+            case WIPE_CENTER_OUT: return "Mitte nach aussen";
+            case WIPE_EDGES_IN: return "Aussen nach Mitte";
             default: return nullptr;
         }
     }

@@ -867,7 +867,7 @@ seg->setPixelXY(0, 0, 0, 255, 0);   // top-left = green
 seg->setPixelXY(3, 7, 255, 0, 0);   // (col=3, row=7) = red
 
 // Assign a 2D-aware effect
-seg->setEffect(EffectPool::getFire2D());
+seg->setEffect(EffectPool::getFire());
 ```
 
 #### Writing a 2D-aware effect
@@ -985,17 +985,17 @@ Pre-registered effects accessible by ID.
 #include "effects/EffectPool.h"
 
 // Get effect by ID
-Effect* effect = EffectPool::getEffect(1);  // Rainbow
+Effect* effect = EffectPool::getEffect(2);  // Rainbow
 
-// Available effects:
+// First eight of 33 effects (IDs 0-32, see doc/Effects.md):
 // 0 = Solid
-// 1 = Rainbow
-// 2 = Pride2015
-// 3 = Confetti
+// 1 = Wipe
+// 2 = Rainbow
+// 3 = Pride2015
 // 4 = Juggle
 // 5 = BPM
 // 6 = Cylon
-// 7 = Wipe
+// 7 = Test
 ```
 
 ---
@@ -1014,7 +1014,7 @@ The Effektmanager (EM) is a per-segment sequencer that applies a chain of effect
 
 ```cpp
 constexpr uint8_t EM_COUNT      = 16;  // Number of Effektmanager instances
-constexpr uint8_t EM_CUE_COUNT  = 99;  // Max cues per EM
+constexpr uint8_t EM_CUE_COUNT  = 10;  // Max cues per EM (ETS: Cue 1..10)
 constexpr uint8_t EM_PARAM_COUNT = 10; // Max effect parameters per cue
 constexpr uint8_t EM_TEXT_LEN   = 14;  // Cue/effect text length (DPT 16)
 constexpr uint8_t EM_NONE       = 0;   // EM id 0 = "no EM / stop"
@@ -1038,14 +1038,16 @@ struct EffektCue                  // 48 bytes
 struct EffektManagerHeader        // 20 bytes
 {
     char     name[16];            // ETS description
-    uint8_t  cueCount;            // Active cues (1-99)
+    uint8_t  cueCount;            // Active cues (1-10)
     uint8_t  loop : 1;            // Restart at cue 1 when finished
     uint8_t  nextEmId;            // Chain target (0 = stop, 1-16)
-    uint8_t  enabled;             // 0 = off, 1 = on
-    bool isEnabled() const;
+    uint8_t  enabled;             // 0 = inactive, 1 = active, 2 = paused
+    bool isEnabled() const;       // runnable: active (1) AND cueCount > 0
+    bool isPaused() const;        // paused (2): keeps config + KOs, does not render
+    bool isConfigured() const;    // active or paused (enabled != 0)
 };
 
-struct EffektManagerData          // header + cues[99]
+struct EffektManagerData          // header + cues[10]
 {
     EffektManagerHeader header;
     EffektCue           cues[EM_CUE_COUNT];
@@ -1121,6 +1123,18 @@ neo <category> <action> [parameters]
 | `neo phys add <pin> <leds> [protocol]` | Add physical strip | `neo phys add 9 64 WS2812B` |
 | `neo phys del <index>` | Delete strip | `neo phys del 0` |
 | `neo phys list` | List strips | `neo phys list` |
+| `neo phys timings` | List all 11 timing modes + clone profiles | `neo phys timings` |
+| `neo phys timing <i>` | Show current timing mode for strip | `neo phys timing 0` |
+| `neo phys timing <i> <mode>` | Set timing mode | `neo phys timing 0 legacy` |
+| `neo phys timing <i> info` | Detailed timing info | `neo phys timing 0 info` |
+| `neo phys timing <i> custom <t0h> <t0l> <t1h> <t1l>` | Custom bit timing (ns) | `neo phys timing 0 custom 350 900 900 350` |
+| `neo phys timing <i> reset` | Revert to AUTO | `neo phys timing 0 reset` |
+| `neo phys timing <i> qualify` | Interactive clone-qualify scan (next/apply/stop) | `neo phys timing 0 qualify` |
+
+**Timing Modes (11):** `auto` (AUTO ≈ 800 kHz), `legacy` (AUTO_LEGACY ≈ 960 kHz, WS2812C/D onboard LEDs),
+`slow5`/`slow10`/`slow15`/`slow20` (SLOW_5PCT … SLOW_20PCT, down to ~640 kHz for weak/long chains),
+`fast5`/`fast10`/`fast15`/`fast20`/`fast25` (FAST_5PCT … FAST_25PCT, up to ~1000 kHz).
+Replaces the old raw-frequency setting — the mode picks the PIO clock divider for you.
 
 **Supported Protocols:**
 - WS2812, WS2812B, WS2813, WS2815
@@ -1152,14 +1166,23 @@ neo <category> <action> [parameters]
 | `neo seg pause <index>` | Pause effect | `neo seg pause 0` |
 | `neo seg resume <index>` | Resume effect | `neo seg resume 0` |
 | `neo seg stop <index>` | Stop effect | `neo seg stop 0` |
+| `neo seg geo <id> <w> <h> [topo]` | Set 2D geometry (topo 1=rows-serp … 7=cols-serp-tiled, 0=back to 1D) | `neo seg geo 0 32 16 1` |
+| `neo seg geo <id> <w> <h> <tile> <topo>` | Tiled panel (tile = tile height) | `neo seg geo 0 32 16 8 7` |
 
 ### Effect Commands
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `neo effect <seg> <id>` | Assign effect | `neo effect 0 1` |
-| `neo color <seg> <r> <g> <b>` | Set color | `neo color 0 255 0 0` |
-| `neo brightness <seg> <value>` | Set brightness | `neo brightness 0 128` |
+| `neo effect set <seg> <id\|name>` | Assign effect by ID or name | `neo effect set 0 23` |
+| `neo effect stop <seg>` | Stop effect on segment | `neo effect stop 0` |
+| `neo effect clear <seg>` | Remove effect from segment | `neo effect clear 0` |
+| `neo effect pause <seg>` / `resume <seg>` | Freeze / resume effect | `neo effect pause 0` |
+| `neo effect config <seg>` | Show effect parameters (index/name/value/default) | `neo effect config 0` |
+| `neo effect config <seg> get <i>` | Read one parameter | `neo effect config 0 get 0` |
+| `neo effect config <seg> set <i> <v>` | Set one parameter live | `neo effect config 0 set 0 255` |
+| `neo color <seg> <r> <g> <b> [w] [cw]` | Set color (0-255) | `neo color 0 255 0 0` |
+| `neo brightness <seg> <value>` | Software brightness 0-255 — also sets the segment **master** brightness that EM cues scale against (cue stays relative to it across switches) | `neo brightness 0 128` |
+| `neo hwbrightness <seg> <value>` | Hardware brightness (APA102/SK9822 only) | `neo hwbrightness 0 31` |
 
 ### Effektmanager & Cue Commands
 
@@ -1174,6 +1197,19 @@ Segment indices are 0-based.
 | `neo em cue <seg> <cue>` | Trigger cue of active EM | `neo em cue 0 2` |
 | `neo cue` / `neo cue list [seg]` | Cue table | `neo cue list 0` |
 | `neo cue <seg> <cue>` | Trigger cue (alias) | `neo cue 0 2` |
+
+#### Local-test authoring (no ETS)
+
+Build EMs/cues entirely from the console (gated by `NEOPIXEL_LOCAL_TEST`). EM id is **1-based**; edits take effect on the running EM at the next cycle.
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `neo init` | Bring the module up without an ETS download (test mode; OAM) | `neo init` |
+| `neo em bind <managerSeg>` | Wrap a console segment into the EM system | `neo em bind 0` |
+| `neo em config <em> <loop 0\|1> [nextEm]` | Configure + enable an EM | `neo em config 1 1` |
+| `neo cue set <em> <cue> <effectId> <durSec> <fadeMs> [bri] [r g b]` | Define/overwrite a cue (params auto-seeded with the effect's defaults; string effects get their default text) | `neo cue set 1 1 23 5 300` |
+| `neo cue param <em> <cue> <paramIdx> <value>` | Override one effect parameter of an existing cue (clamped to the effect's range) | `neo cue param 1 1 0 255` |
+| `neo cue clear <em>` | Clear all cues of an EM | `neo cue clear 1` |
 
 ### Effektkette (Chain) Commands
 

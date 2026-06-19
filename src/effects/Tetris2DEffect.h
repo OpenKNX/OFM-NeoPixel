@@ -142,15 +142,25 @@ class Tetris2DEffect : public Effect
 
     void clearFullLines()
     {
-        for (int8_t y = _ph - 1; y >= 0; y--)
+        // Compact the board downward: copy every NON-cleared row to the bottom, then
+        // blank the rows left at the top. Single bottom-up pass, guaranteed to
+        // terminate.
+        //
+        // NOTE: the previous in-place version shifted rows with a `y++` re-check but
+        // never cleared/shifted _flashMask[y] — so a flagged row kept matching and the
+        // loop span forever. On a wide (e.g. 32-col) board a full line is rare, so the
+        // hang only surfaced after minutes of play → looked like a random watchdog reboot
+        // mid-Tetris. (See clearFullLines infinite-loop bug.)
+        int8_t dst = _ph - 1;
+        for (int8_t src = _ph - 1; src >= 0; src--)
         {
-            if (!_flashMask[y]) continue;
-            for (int8_t row = y; row > 0; row--)
-                for (uint8_t x = 0; x < _pw; x++)
-                    _grid[x][row] = _grid[x][row - 1];
-            for (uint8_t x = 0; x < _pw; x++) _grid[x][0] = 0;
-            y++;
+            if (_flashMask[src]) continue; // drop cleared rows
+            if (dst != src)
+                for (uint8_t x = 0; x < _pw; x++) _grid[x][dst] = _grid[x][src];
+            dst--;
         }
+        for (; dst >= 0; dst--)
+            for (uint8_t x = 0; x < _pw; x++) _grid[x][dst] = 0;
         memset(_flashMask, 0, sizeof(_flashMask));
     }
 
@@ -417,11 +427,44 @@ class Tetris2DEffect : public Effect
         switch (index)
         {
             case 2: return ParameterType::PARAM_BOOL;
-            case 3: return ParameterType::PARAM_UINT8;
+            case 3: return ParameterType::PARAM_ENUM; // ColorMode
             case 4: return ParameterType::PARAM_BOOL;
-            case 5: return ParameterType::PARAM_UINT8;
+            case 5: return ParameterType::PARAM_ENUM; // AutoPlay
             default: return ParameterType::PARAM_UINT8; // 0: Speed, 1: BgBrightness are uint8
         }
+    }
+
+    const char* getEnumValueName(uint8_t paramIndex, uint8_t enumValue) const override
+    {
+        if (paramIndex == 3)
+        {
+            switch (enumValue)
+            {
+                case 0: return "Form-Farbe";
+                case 1: return "Zufall";
+                case 2: return "Regenbogen";
+                default: return nullptr;
+            }
+        }
+        if (paramIndex == 5)
+        {
+            switch (enumValue)
+            {
+                case 0: return "Aus (manuell)";
+                case 1: return "Anfaenger";
+                case 2: return "Normal";
+                case 3: return "Profi";
+                default: return nullptr;
+            }
+        }
+        return nullptr;
+    }
+
+    uint8_t getEnumValueCount(uint8_t paramIndex) const override
+    {
+        if (paramIndex == 3) return 3;
+        if (paramIndex == 5) return 4;
+        return 0;
     }
 
     uint32_t getParameterMin(uint8_t index) const override {
