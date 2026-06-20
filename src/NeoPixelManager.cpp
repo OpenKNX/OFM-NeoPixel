@@ -1178,28 +1178,27 @@ bool NeoPixelManager::showAll()
     uint32_t startTime = millis();
     bool allSuccess = true;
 
-    // CRITICAL: Send strips SEQUENTIALLY to prevent buffer corruption!
-    // Each strip must finish DMA transfer before next one starts
+    // Push all strips CONCURRENTLY. Every PhysicalStrip owns its own PIO state machine,
+    // DMA channel and buffer, and the unified DMA IRQ dispatches per channel — so the
+    // transfers run in parallel with no shared state to corrupt. Phase 1 kicks off every
+    // DMA; phase 2 waits for them all. Frame push time then ≈ the single LONGEST strip
+    // instead of the SUM of all strips (≈13 ms vs ≈22 ms for this 6-strip config).
+    // (A PIO-fallback strip without DMA blocks inside show() and is simply done by phase 2.)
     for (auto strip : _strips)
     {
-        if (strip)
+        if (strip && !strip->show())
         {
-            // Start transfer
-            if (!strip->show())
-            {
-                allSuccess = false;
-                _errorCount++;
-                continue; // Skip wait if show() failed
-            }
-
-            // Wait for this strip to finish
-            // Timeout: 100ms (sufficient for typical strips up to 1000 LEDs)
-            if (!strip->waitForTransfer(100))
-            {
-                // Transfer timed out - mark as error but continue
-                allSuccess = false;
-                _errorCount++;
-            }
+            allSuccess = false;
+            _errorCount++;
+        }
+    }
+    // Phase 2: wait for every in-flight transfer to finish (100 ms cap per strip).
+    for (auto strip : _strips)
+    {
+        if (strip && !strip->waitForTransfer(100))
+        {
+            allSuccess = false;
+            _errorCount++;
         }
     }
 

@@ -83,11 +83,19 @@ class PerformanceTracker
      */
     float getCurrentFPS(uint32_t updateIntervalMs) const
     {
-        if (updateIntervalMs > 0) return 1000.0f / updateIntervalMs;
-        // FTL / unlimited (interval = 0): the loop runs flat out, so the achievable
-        // rate is bounded by the measured average frame time, not by an interval.
+        // Achievable rate from the measured average frame (render) time.
         uint32_t avgUs = getAverageTime();
-        return (avgUs > 0) ? (1000000.0f / avgUs) : 0.0f;
+        const float achievable = (avgUs > 0) ? (1000000.0f / avgUs) : 0.0f;
+
+        // FTL / unlimited (interval = 0): the loop runs flat out → the measured rate.
+        if (updateIntervalMs == 0) return achievable;
+
+        // Throttled: the real rate is the target, but capped by what the frame work
+        // actually allows. So when the render exceeds the interval (e.g. ludicrous/max
+        // overload) this reports the true ~achievable FPS instead of the unreachable
+        // target — and Throughput (= LEDs × thisFPS) stays honest too.
+        const float target = 1000.0f / updateIntervalMs;
+        return (achievable > 0.0f && achievable < target) ? achievable : target;
     }
 
     /**

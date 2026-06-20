@@ -55,7 +55,7 @@ static_assert(sizeof(EffektCue) == 48, "EffektCue size mismatch — check layout
 struct EffektManagerHeader
 {
     // Layout muss exakt dem ETS-XML entsprechen (NeoPixel.EM.templ.xml):
-    char     name[16];       ///< Byte  0–15: Beschreibung (ETS-Name)
+    uint8_t  reserved[16];   ///< Byte  0–15: frei/reserviert (EM-Beschreibung ist ETS-only, nicht gespeichert)
     uint8_t  cueCount;       ///< Byte 16:    Anzahl aktiver Cues (1–10)
     uint8_t  loop : 1;       ///< Byte 17, Bit 0: Loop
     uint8_t  _pad : 7;
@@ -65,7 +65,7 @@ struct EffektManagerHeader
     EffektManagerHeader()
         : cueCount(1), loop(0), _pad(0), nextEmId(EM_NONE), enabled(0)
     {
-        memset(name, 0, sizeof(name));
+        memset(reserved, 0, sizeof(reserved));
     }
 
     // Runnable only when ACTIVE (1). Paused (2) keeps full config + KOs but does

@@ -982,8 +982,8 @@ void NeoPixel::printEmStatusTable(int onlySeg)
     }
     else
     {
-        openknx.logger.log("Seg │ EM │ Name            │ Cue   │ Running │ Startup │ Last │ Cues │ Loop │ Next");
-        openknx.logger.log("────┼────┼─────────────────┼───────┼─────────┼─────────┼──────┼──────┼──────┼──────");
+        openknx.logger.log("Seg │ EM │ Cue   │ Running │ Startup │ Last │ Cues │ Loop │ Next");
+        openknx.logger.log("────┼────┼───────┼─────────┼─────────┼──────┼──────┼──────┼──────");
 
         for (int i = 0; i < segCount; i++)
         {
@@ -994,13 +994,12 @@ void NeoPixel::printEmStatusTable(int onlySeg)
 
             if (!st.hasSegment)
             {
-                openknx.logger.logWithValues("%3d │ -- │ %-15s │ %-5s │ %-7s │ %7s │ %4s │ %4s │ %4s │ %4s",
-                                             i, "<no segment>", "-", "-", "-", "-", "-", "-", "-");
+                openknx.logger.logWithValues("%3d │ -- │ %-5s │ %-7s │ %7s │ %4s │ %4s │ %4s │ %4s",
+                                             i, "-", "-", "-", "-", "-", "-", "-");
                 continue;
             }
 
             const EffektManagerData* em = openknxNeoPixelGetEmData(st.activeEmId);
-            const char* name = em ? em->header.name : "-";
             const int cueCount = em ? (int)em->header.cueCount : 0;
             const int loop = (em && em->header.loop) ? 1 : 0;
             const int next = em ? (int)em->header.nextEmId : 0;
@@ -1009,10 +1008,9 @@ void NeoPixel::printEmStatusTable(int onlySeg)
             if (em && cueCount > 0)
                 snprintf(cueBuf, sizeof(cueBuf), "%d/%d", (int)st.activeCueNum, cueCount);
 
-            openknx.logger.logWithValues("%3d │ %2d │ %-15.15s │ %-5s │ %-7s │ %7d │ %4d │ %4d │ %4d │ %4d",
+            openknx.logger.logWithValues("%3d │ %2d │ %-5s │ %-7s │ %7d │ %4d │ %4d │ %4d │ %4d",
                                          i,
                                          (int)st.activeEmId,
-                                         name,
                                          cueBuf,
                                          st.running ? "yes" : "no",
                                          (int)st.startupEm,
@@ -1191,10 +1189,9 @@ void NeoPixel::printEmChainInfoCompact()
         const EffektManagerData* em = openknxNeoPixelGetEmData(st.activeEmId);
         if (em)
         {
-            openknx.logger.logWithValues("  [%d] EM %d '%s' -> %s, Cue %d/%d%s",
+            openknx.logger.logWithValues("  [%d] EM %d -> %s, Cue %d/%d%s",
                                          i,
                                          (int)st.activeEmId,
-                                         em->header.name,
                                          st.running ? "Running" : "Stopped",
                                          (int)st.activeCueNum,
                                          (int)em->header.cueCount,
@@ -2176,9 +2173,11 @@ bool NeoPixel::processPerformanceCommand()
     openknx.logger.color(0);
 
     openknx.logger.logWithValues("  CPU Usage:       %.2f%%", cpuLoad);
-    openknx.logger.logWithValues("  Free CPU:        %.2f%%", 100.0f - cpuLoad);
+    // Free CPU can't be negative — when overloaded (cpuLoad > 100% = frame work exceeds
+    // the requested budget) there is simply 0% headroom; the overload size shows in CPU Usage.
+    openknx.logger.logWithValues("  Free CPU:        %.2f%%", cpuLoad < 100.0f ? (100.0f - cpuLoad) : 0.0f);
 
-    // Throughput calculation (LEDs updated per second)
+    // Throughput calculation (LEDs updated per second) — uses the capped real FPS.
     uint32_t throughput = totalLEDs * currentFPS;
     openknx.logger.logWithValues("  Throughput:      %lu LEDs/sec", throughput);
 
