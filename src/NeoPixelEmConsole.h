@@ -85,5 +85,9 @@ bool openknxNeoPixelHandleCueSet(uint8_t emId, uint8_t cueNum, uint8_t effectId,
  *         The cue must already exist (via cue set). Returns true on success. */
 bool openknxNeoPixelHandleCueParam(uint8_t emId, uint8_t cueNum, uint8_t paramIdx, uint8_t value);
 
+/** @brief Set a cue's text (for string-param effects like Scroll Text). emId & cueNum are
+ *         1-based; text is truncated to the cue's text buffer (EM_TEXT_LEN-1). Returns true. */
+bool openknxNeoPixelHandleCueText(uint8_t emId, uint8_t cueNum, const char* text);
+
 /** @brief Plain console output bridge for OAM backend messages (errors etc.). */
 void openknxNeoPixelConsolePrintf(const char* fmt, ...);

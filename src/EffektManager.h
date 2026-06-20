@@ -60,7 +60,7 @@ struct EffektManagerHeader
     uint8_t  loop : 1;       ///< Byte 17, Bit 0: Loop
     uint8_t  _pad : 7;
     uint8_t  nextEmId;       ///< Byte 18:    Folgeziel (0=Stop, 1–16)
-    uint8_t  enabled;        ///< Byte 19:    Zustand (0=Inaktiv, 1=Aktiv, 2=Pausiert)
+    uint8_t  enabled;        ///< Byte 19:    Zustand (0=Deaktiviert, 1=Aktiv, 2=Suspendiert)
 
     EffektManagerHeader()
         : cueCount(1), loop(0), _pad(0), nextEmId(EM_NONE), enabled(0)

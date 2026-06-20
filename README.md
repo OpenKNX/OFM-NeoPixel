@@ -1441,7 +1441,7 @@ neo em ?                        # Detailed Effektmanager help
 
 # Cue shortcuts (alias for the em cue / em dump actions)
 neo cue                         # Cue table for all segments
-neo cue list [seg]              # Cue table for all segments or one
+neo cue list [all|seg]         # Cue table: active EMs (default), all configured EMs ('all'), or one segment
 neo cue <seg> <cue>             # Trigger cue <cue> of the active EM on segment <seg>
 neo cue ?                       # Detailed cue help
 

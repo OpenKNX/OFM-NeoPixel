@@ -1195,12 +1195,12 @@ Segment indices are 0-based.
 | `neo em start <seg> <em>` | Start EM (1-16) on segment | `neo em start 0 3` |
 | `neo em stop <seg>` | Stop EM on segment | `neo em stop 0` |
 | `neo em cue <seg> <cue>` | Trigger cue of active EM | `neo em cue 0 2` |
-| `neo cue` / `neo cue list [seg]` | Cue table | `neo cue list 0` |
+| `neo cue` / `neo cue list [all\|seg]` | Cue table: active EMs (default), all configured EMs (`all`), or one segment | `neo cue list all` |
 | `neo cue <seg> <cue>` | Trigger cue (alias) | `neo cue 0 2` |
 
-#### Local-test authoring (no ETS)
+#### Console authoring (no ETS)
 
-Build EMs/cues entirely from the console (gated by `NEOPIXEL_LOCAL_TEST`). EM id is **1-based**; edits take effect on the running EM at the next cycle.
+Build EMs/cues entirely from the console — handy for bench tests and commissioning. EM id is **1-based**; edits take effect on the running EM at the next cycle. Runtime-only: not persisted, lost on reboot — ETS remains the permanent config source.
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -1209,6 +1209,7 @@ Build EMs/cues entirely from the console (gated by `NEOPIXEL_LOCAL_TEST`). EM id
 | `neo em config <em> <loop 0\|1> [nextEm]` | Configure + enable an EM | `neo em config 1 1` |
 | `neo cue set <em> <cue> <effectId> <durSec> <fadeMs> [bri] [r g b]` | Define/overwrite a cue (params auto-seeded with the effect's defaults; string effects get their default text) | `neo cue set 1 1 23 5 300` |
 | `neo cue param <em> <cue> <paramIdx> <value>` | Override one effect parameter of an existing cue (clamped to the effect's range) | `neo cue param 1 1 0 255` |
+| `neo cue text <em> <cue> <text>` | Set a cue's text for string effects (e.g. Scroll Text). Full ASCII + ISO-8859-1 umlauts; quotes optional, `\"` = literal quote. ≤13 chars are stored in the cue; longer text is kept in a RAM side-store and applied when the cue activates (Scroll Text up to ~240 chars; runtime-only, lost on reboot). | `neo cue text 1 7 "Hallo \"Welt\" äöü"` |
 | `neo cue clear <em>` | Clear all cues of an EM | `neo cue clear 1` |
 
 ### Effektkette (Chain) Commands

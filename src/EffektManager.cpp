@@ -7,12 +7,6 @@
 #include "EffektManager.h"
 #include <Arduino.h>
 
-// Debug/test: per-applyCue breadcrumb. Gated so production builds stay clean —
-// comment out to disable. Fires at the START of each cue switch (before
-// setParameter/setEffect), so a crash *during* a transition leaves a trail
-// naming the cue/effect that was being applied.
-#define NEOPIXEL_EM_TRACE
-
 // ============================================================================
 // Start / Stop
 // ============================================================================
@@ -109,15 +103,6 @@ void EffektManagerController::tick(Segment* segment, const EffektManagerData* em
 
     if (elapsed >= durationMs)
     {
-#ifdef NEOPIXEL_EM_TRACE
-        // Transition breadcrumb: printed the instant a cue's duration expires, BEFORE
-        // touching fade/effect state. If a crash log shows this line but no following
-        // "applyCue ENTER", the wedge is in the cue TRANSITION (fade/setEffect), not the
-        // effect render. If it's absent, the wedge happened mid-render of the active cue.
-        Serial.printf("[EM-TRACE] cue=%u duration done (elapsed=%lums) -> %s\n",
-                      (unsigned)(_rt.activeCueIdx + 1), (unsigned long)elapsed,
-                      (cue.fadeMs > 0) ? "fade-out" : "advance");
-#endif
         // Start fade-out if configured
         if (cue.fadeMs > 0)
             startFade(segment, cue.fadeMs);
@@ -133,13 +118,6 @@ void EffektManagerController::tick(Segment* segment, const EffektManagerData* em
 void EffektManagerController::applyCue(const EffektCue& cue, Segment* segment)
 {
     if (!segment) return;
-
-#ifdef NEOPIXEL_EM_TRACE
-    // Breadcrumb BEFORE touching the effect — last line printed if the switch crashes.
-    Serial.printf("[EM-TRACE] applyCue ENTER em=%u cue=%u effectId=%u dur=%us fade=%ums\n",
-                  (unsigned)_rt.activeEmId, (unsigned)(_rt.activeCueIdx + 1),
-                  (unsigned)cue.effectId, (unsigned)cue.durationSec, (unsigned)cue.fadeMs);
-#endif
 
     // Set colour
     segment->setPrimaryColor(cue.r, cue.g, cue.b, cue.w);
@@ -190,9 +168,8 @@ void EffektManagerController::applyCue(const EffektCue& cue, Segment* segment)
     }
 
     _rt.cueStartMs = millis();
-#if defined(OPENKNX_DEBUG) || defined(NEOPIXEL_EM_TRACE)
-    // DONE marker: ENTER without a following DONE => the switch itself crashed.
-    Serial.printf("[EM-TRACE] applyCue DONE  cue=%d (effect=%d, dur=%ds)\n", _rt.activeCueIdx + 1, cue.effectId, cue.durationSec);
+#ifdef OPENKNX_DEBUG
+    Serial.printf("[EM] Applied cue %d (effect=%d, dur=%ds)\n", _rt.activeCueIdx + 1, cue.effectId, cue.durationSec);
 #endif
 }
 
