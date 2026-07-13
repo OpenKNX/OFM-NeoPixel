@@ -240,6 +240,10 @@ bool PhysicalStrip::init()
         return false;
     }
 
+    // Apply config now that the driver is up (CUSTOM-timing in applyConfig is gated on
+    // initialized; a setCustomTiming() before init() only lands in _config until here).
+    if (_config) _driver->applyConfig(_config);
+
     _initialized = true;
     return true;
 }
@@ -715,6 +719,9 @@ bool PhysicalStrip::setTimingMode(TimingMode mode)
             _initialized = false;
             return false;
         }
+
+        // Factory doesn't get _colorOrder; restore it (else mode change swaps R/G on non-default orders).
+        _driver->setColorOrder(_colorOrder);
 
         _initialized = true;
         return true;

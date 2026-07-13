@@ -32,6 +32,16 @@ static constexpr uint8_t  EM_PARAM_COUNT = 10;  ///< Max effect parameters per c
 // EM ID 0 = "no EM / stop"
 static constexpr uint8_t  EM_NONE       = 0;
 
+// P6 — what the segment does after an EM stops / a chain finishes.
+// Values 0..2 map 1:1 to the ETS "EM-Stop-Rückkehr" enum; LEAVE is internal (interrupt).
+enum EmStopMode : uint8_t
+{
+    EM_STOP_LAST    = 0,  ///< restore the pre-EM DIRECT snapshot (keeps live dim, conflict#1=b) — ETS "Letzter Zustand"
+    EM_STOP_DEFAULT = 1,  ///< apply the segment's ETS default config — handled in OAM — ETS "Default"
+    EM_STOP_OFF     = 2,  ///< blank the segment — ETS "Aus"
+    EM_STOP_LEAVE   = 3,  ///< leave the segment as-is (a direct KO sets the new visual) — interrupt only
+};
+
 // ============================================================================
 // EffektCue — one effect preset (48 bytes)
 // ============================================================================
@@ -103,8 +113,11 @@ struct EffektManagerRuntime
     uint8_t  cueBri        = 255;      ///< current cue's RELATIVE brightness (scaled against segment master) — kept so a runtime master change can be re-applied without a cue switch
     uint8_t  lastEmId      = EM_NONE;  ///< EM active before power-off (for restore)
     uint8_t  lastCueIdx    = 0;        ///< Cue active before power-off
+    bool     paused        = false;    ///< true = EM frozen on current cue (Pause), still showing it
+    uint32_t pauseElapsed  = 0;        ///< cue elapsed time captured at pause, to continue on resume
 
     bool isRunning() const { return activeEmId != EM_NONE; }
+    bool isPaused()  const { return paused && activeEmId != EM_NONE; }
 };
 
 // ============================================================================
@@ -127,10 +140,27 @@ class EffektManagerController
     void start(uint8_t emId, Segment* segment, const EffektManagerData* emData);
 
     /**
-     * @brief Stop the running EM and restore normal operation.
+     * @brief Stop the running EM.
+     * @param mode  EmStopMode — what the segment does afterwards:
+     *              EM_STOP_LAST   → restore the DIRECT snapshot (keeps live dim) / blank if none
+     *              EM_STOP_OFF    → blank the segment
+     *              EM_STOP_LEAVE  → leave as-is (interrupt: the direct KO sets the new visual)
+     *              EM_STOP_DEFAULT→ OAM intercepts (applies ETS config); OFM falls back to LAST.
      * Effektkette (if active) resumes after stop.
      */
-    void stop(Segment* segment);
+    void stop(Segment* segment, uint8_t mode = EM_STOP_LAST);
+
+    /**
+     * @brief Pause the running EM: freeze the current cue (keeps it shown), stop advancing.
+     * No-op if not running or already paused.
+     */
+    void pause(Segment* segment);
+
+    /**
+     * @brief Resume a paused EM: continue the current cue from where it was frozen.
+     * No-op if not running or not paused.
+     */
+    void resume(Segment* segment);
 
     /**
      * @brief Advance the sequencer — call every loop() tick.
@@ -149,8 +179,14 @@ class EffektManagerController
      */
     void applyCue(const EffektCue& cue, Segment* segment);
 
-    /** @brief Returns true if an EM is currently running on this segment. */
+    /** @brief Returns true if an EM is currently running on this segment (incl. paused). */
     bool isRunning() const { return _rt.isRunning(); }
+
+    /** @brief Returns true if the running EM is paused (frozen on a cue). */
+    bool isPaused() const { return _rt.isPaused(); }
+
+    /** @brief Run-state for status KO: 0 = stopped, 1 = running, 2 = paused. */
+    uint8_t runState() const { return _rt.activeEmId == EM_NONE ? 0 : (_rt.paused ? 2 : 1); }
 
     /**
      * @brief Re-apply the segment's master brightness to the active cue.
