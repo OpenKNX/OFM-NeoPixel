@@ -80,6 +80,12 @@ class PhysicalStrip
     {
         _colorOrder = order;
 
+        // Keep _config in sync, else a later applyConfig(_config) reverts to the stale default (R/G swap).
+        if (_config)
+        {
+            _config->setColorOrder(order);
+        }
+
         // Pass ColorOrder to driver (all drivers support this now via interface)
         if (_driver)
         {

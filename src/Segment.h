@@ -48,14 +48,14 @@ class Effect; // Forward declaration
  */
 enum class LedTopology : uint8_t
 {
-    LINEAR_1D         = 0, ///< No matrix — plain 1D strip (default)
-    ROWS_SERPENTINE   = 1, ///< →→→→ ←←←← →→→→  (row-major, alternating direction)
-    ROWS_LINEAR       = 2, ///< →→→→ →→→→ →→→→   (row-major, same direction)
-    COLS_SERPENTINE   = 3, ///< ↓↑↓↑  (col-major, alternating direction)
-    COLS_LINEAR       = 4, ///< ↓↓↓↓  (col-major, same direction)
-    ROWS_SERPENTINE_3D= 5, ///< 3D: serpentine rows, stacked depth-first
-    COLS_LINEAR_TILED = 6, ///< 2D tiled: panel-major chain, columns linear inside each tile block
-    COLS_SERP_TILED   = 7, ///< 2D tiled: panel-major chain, columns serpentine inside each tile block
+    LINEAR_1D = 0,          ///< No matrix — plain 1D strip (default)
+    ROWS_SERPENTINE = 1,    ///< →→→→ ←←←← →→→→  (row-major, alternating direction)
+    ROWS_LINEAR = 2,        ///< →→→→ →→→→ →→→→   (row-major, same direction)
+    COLS_SERPENTINE = 3,    ///< ↓↑↓↑  (col-major, alternating direction)
+    COLS_LINEAR = 4,        ///< ↓↓↓↓  (col-major, same direction)
+    ROWS_SERPENTINE_3D = 5, ///< 3D: serpentine rows, stacked depth-first
+    COLS_LINEAR_TILED = 6,  ///< 2D tiled: panel-major chain, columns linear inside each tile block
+    COLS_SERP_TILED = 7,    ///< 2D tiled: panel-major chain, columns serpentine inside each tile block
 };
 
 /**
@@ -68,9 +68,9 @@ enum class LedTopology : uint8_t
  */
 struct LedGeometry
 {
-    uint8_t     width    = 0; ///< Matrix columns (0 = not set / 1D)
-    uint8_t     height   = 0; ///< Matrix rows    (0 = not set / 1D)
-    uint8_t     depth    = 0; ///< Z-layers       (0 = not set / 2D or 1D)
+    uint8_t width = 0;  ///< Matrix columns (0 = not set / 1D)
+    uint8_t height = 0; ///< Matrix rows    (0 = not set / 1D)
+    uint8_t depth = 0;  ///< Z-layers       (0 = not set / 2D or 1D)
     LedTopology topology = LedTopology::LINEAR_1D;
 
     bool isTiled2D() const
@@ -183,8 +183,8 @@ class Segment
     // ====================================================================
     // Properties
     // ====================================================================
-    uint16_t getStartLed() const { return _startLed; }                    // Get start LED index
-    uint16_t getEndLed() const { return _endLed; }                        // Get end LED index (inclusive)
+    uint16_t getStartLed() const { return _startLed; } // Get start LED index
+    uint16_t getEndLed() const { return _endLed; }     // Get end LED index (inclusive)
     /**
      * @brief Effective length for effect calculations.
      * When part of an Effektkette (virtual band), returns the TOTAL virtual band length
@@ -212,9 +212,9 @@ class Segment
      */
     void setVirtualBand(uint16_t totalLength, uint16_t offset);
     void clearVirtualBand();
-    bool     isVirtualBand()          const { return _virtualTotalLength > 0; }
-    uint16_t getVirtualTotalLength()  const { return _virtualTotalLength; }
-    uint16_t getVirtualOffset()       const { return _virtualOffset; }
+    bool isVirtualBand() const { return _virtualTotalLength > 0; }
+    uint16_t getVirtualTotalLength() const { return _virtualTotalLength; }
+    uint16_t getVirtualOffset() const { return _virtualOffset; }
 
     // ====================================================================
     // Grouping & Spacing Configuration
@@ -392,6 +392,30 @@ class Segment
     void pause() { _paused = true; }   // Pause effect
     void resume() { _paused = false; } // Resume effect
     void stop();
+
+    // DIRECT-state snapshot around an EM run: saveDirectState() captures the manual
+    // effect+config before an EM takes over; restoreDirectState() puts it back so
+    // stopping the EM returns the segment to its manual light instead of going blank.
+    void saveDirectState()
+    {
+        _savedConfig = _config;
+        _savedEffect = _effect;
+        _hasSavedState = true;
+    }
+    bool restoreDirectState()
+    {
+        if (!_hasSavedState) return false;
+        // Conflict#1 = (b): a brightness/dim set via KO DURING the EM is the LIVE current
+        // brightness and must survive the EM-stop. Keep the live master; restore effect/colour
+        // from the snapshot; render = master (a direct effect has no cue scaling).
+        uint8_t liveMaster = _config.masterBrightness;
+        _config = _savedConfig;
+        _config.masterBrightness = liveMaster;
+        _config.brightness = liveMaster;
+        _effect = _savedEffect;
+        _paused = false;
+        return true;
+    }
     bool isPaused() const { return _paused; }               // Check if effect is paused
     bool isDirty() const { return _dirty; }                 // Check if segment is dirty
     void setDirty(bool dirty) { _dirty = dirty; }           // Set dirty flag
@@ -432,25 +456,28 @@ class Segment
     uint8_t getHardwareBrightness() const { return _config.hardwareBrightness; }
 
   private:
-    VirtualStrip* _virtualStrip; // Belongs to this virtual strip
-    uint16_t _startLed;          // Start LED in virtual strip
-    uint16_t _endLed;            // End LED in virtual strip (inclusive)
-    uint16_t _physicalLength;    // Physical length (endLed - startLed + 1)
-    uint16_t _virtualLength;     // Virtual length for effects (after grouping/spacing)
-    uint16_t _grouping;          // LEDs per group (1 = no grouping)
-    uint16_t _spacing;           // LEDs to skip between groups (0 = no spacing)
-    uint16_t _offset;            // Offset for effect start position (0 = no offset)
-    bool _reverse;               // Reverse effect direction
-    bool _mirror;                // Mirror effect from center
-    Effect* _effect;             // Current effect (nullptr = none)
-    bool _dirty;                 // Pixels changed?
-    bool _paused;                // Effect paused?
-    LedState _ledState;          // State machine (IDLE, RUNNING, etc)
-    EffectConfig _config;        // Effect configuration (~40 bytes)
-    EffectState _state;          // Effect runtime variables (~12 bytes)
-    LedGeometry _geo;            // 2D/3D matrix geometry (5 bytes, default = 1D)
+    VirtualStrip* _virtualStrip;      // Belongs to this virtual strip
+    uint16_t _startLed;               // Start LED in virtual strip
+    uint16_t _endLed;                 // End LED in virtual strip (inclusive)
+    uint16_t _physicalLength;         // Physical length (endLed - startLed + 1)
+    uint16_t _virtualLength;          // Virtual length for effects (after grouping/spacing)
+    uint16_t _grouping;               // LEDs per group (1 = no grouping)
+    uint16_t _spacing;                // LEDs to skip between groups (0 = no spacing)
+    uint16_t _offset;                 // Offset for effect start position (0 = no offset)
+    bool _reverse;                    // Reverse effect direction
+    bool _mirror;                     // Mirror effect from center
+    Effect* _effect;                  // Current effect (nullptr = none)
+    bool _dirty;                      // Pixels changed?
+    bool _paused;                     // Effect paused?
+    LedState _ledState;               // State machine (IDLE, RUNNING, etc)
+    EffectConfig _config;             // Effect configuration (~40 bytes)
+    EffectConfig _savedConfig;        // DIRECT-state snapshot taken before an EM started
+    Effect* _savedEffect = nullptr;   // DIRECT effect pointer before the EM took over
+    bool _hasSavedState = false;      // true once a direct snapshot exists
+    EffectState _state;               // Effect runtime variables (~12 bytes)
+    LedGeometry _geo;                 // 2D/3D matrix geometry (5 bytes, default = 1D)
     uint16_t _virtualTotalLength = 0; ///< Effektkette: total band length (0 = standalone)
-    uint16_t _virtualOffset      = 0; ///< Effektkette: this segment's start in the band
+    uint16_t _virtualOffset = 0;      ///< Effektkette: this segment's start in the band
 
     // Helper: Recalculate virtual length based on grouping/spacing
     void recalculateVirtualLength();

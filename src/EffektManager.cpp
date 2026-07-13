@@ -32,12 +32,19 @@ void EffektManagerController::start(uint8_t emId, Segment* segment, const Effekt
     const EffektManagerData& em = emData[emIdx];
     if (!em.header.isEnabled()) return;
 
+    // Capture the segment's DIRECT state on the idle->running transition only (not on an
+    // EM->EM handover, where the current state is already a cue), so a later Stop returns
+    // the segment to the manual light it had before the EM took over.
+    if (!_rt.isRunning()) segment->saveDirectState();
+
     _rt.activeEmId   = emId;
     _rt.activeCueIdx = 0;
     _rt.cueStartMs   = millis();
     _rt.fading       = false;
     _rt.fadeIn       = false;
     _rt.fadeStartMs  = 0;
+    _rt.paused       = false;
+    segment->resume();   // clear any prior pause/stop freeze before rendering cue 0
 
     // Pause Effektkette (virtual band) — EM takes priority
     pauseEffektkette(segment);
@@ -49,7 +56,7 @@ void EffektManagerController::start(uint8_t emId, Segment* segment, const Effekt
 #endif
 }
 
-void EffektManagerController::stop(Segment* segment)
+void EffektManagerController::stop(Segment* segment, uint8_t mode)
 {
     if (!_rt.isRunning()) return;
 
@@ -60,16 +67,56 @@ void EffektManagerController::stop(Segment* segment)
     _rt.activeCueIdx = 0;
     _rt.fading       = false;
     _rt.fadeIn       = false;
+    _rt.paused       = false;
 
     // Resume Effektkette if it was paused
     if (segment) resumeEffektkette(segment);
+    if (!segment) return;
 
-    // Clear segment
-    if (segment) segment->clear();
+    // P6 — what the segment shows after the EM stops / a chain finishes:
+    //   LAST  → restore the DIRECT snapshot (keeps live dim, conflict#1=b) / blank if none
+    //   OFF   → blank
+    //   LEAVE → leave as-is (interrupt: the direct KO sets the new visual)
+    //   DEFAULT → applied by OAM (reads ETS); if it reaches here, fall back to LAST.
+    switch (mode)
+    {
+        case EM_STOP_LEAVE:
+            break;
+        case EM_STOP_OFF:
+            segment->stop();
+            break;
+        case EM_STOP_DEFAULT:
+        case EM_STOP_LAST:
+        default:
+            if (!segment->restoreDirectState()) segment->stop();
+            break;
+    }
 
 #ifdef OPENKNX_DEBUG
-    Serial.printf("[EM] Stopped\n");
+    Serial.printf("[EM] Stopped (mode %u)\n", mode);
 #endif
+}
+
+void EffektManagerController::pause(Segment* segment)
+{
+    if (!_rt.isRunning() || _rt.paused) return;
+    // Freeze: remember how far into the current cue we are, then stop advancing + rendering.
+    _rt.pauseElapsed = millis() - _rt.cueStartMs;
+    _rt.paused = true;
+    if (segment) segment->pause(); // effect stops updating -> last frame stays shown
+}
+
+void EffektManagerController::resume(Segment* segment)
+{
+    if (!_rt.isRunning() || !_rt.paused) return;
+    _rt.paused = false;
+    // Continue the current cue from where it was frozen (do not restart its duration).
+    _rt.cueStartMs = millis() - _rt.pauseElapsed;
+    if (segment)
+    {
+        segment->resume();
+        reapplyMasterBrightness(segment);
+    }
 }
 
 // ============================================================================
@@ -79,6 +126,7 @@ void EffektManagerController::stop(Segment* segment)
 void EffektManagerController::tick(Segment* segment, const EffektManagerData* emData)
 {
     if (!_rt.isRunning() || !segment) return;
+    if (_rt.paused) return;  // frozen on current cue — no advance, no fade
 
     uint8_t emIdx             = _rt.activeEmId - 1;
     const EffektManagerData& em = emData[emIdx];
@@ -137,10 +185,14 @@ void EffektManagerController::applyCue(const EffektCue& cue, Segment* segment)
         for (uint8_t i = 0; i < paramCount && i < EM_PARAM_COUNT; i++)
         {
             // String parameters take the cue's text, not the numeric slot
-            // (a numeric value would be misinterpreted as a char pointer)
+            // (a numeric value would be misinterpreted as a char pointer).
+            // Only overwrite when the cue actually carries a text; otherwise keep the
+            // current text (e.g. one set/appended at runtime via the Effekt-Text KO) -
+            // same "runtime value stays authoritative" idea as the brightness above.
             if (effect->getParameterType(i) == ParameterType::PARAM_STRING)
             {
-                effect->setParameter(segment, i, (uint32_t)(uintptr_t)cue.effectText);
+                if (cue.effectText[0] != '\0')
+                    effect->setParameter(segment, i, (uint32_t)(uintptr_t)cue.effectText);
                 continue;
             }
 

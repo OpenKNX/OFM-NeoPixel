@@ -294,6 +294,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("timing <i>", "Show current timing mode for strip");
         openknx.console.printHelpLine("timing <i> <mode>", "Set timing (auto|legacy|slow5-20|fast5-25)");
         openknx.console.printHelpLine("timing <i> info", "Show detailed timing information");
+        openknx.console.printHelpLine("timing <i> freq <kHz>", "Set bitrate directly (e.g. 775); like the ETS Timing field");
         openknx.console.printHelpLine("timing <i> custom <t0h> <t0l> <t1h> <t1l>", "Set custom timing in ns");
         openknx.console.printHelpLine("timing <i> reset",    "Revert to AUTO timing");
         openknx.console.printHelpLine("timing <i> qualify",   "Clone qualify: full strip, interactive (next/apply/stop)");
@@ -4649,23 +4650,30 @@ bool NeoPixel::processPhysTimingsCommand()
     printSectionSeparator();
     openknx.logger.log("");
 
-    openknx.logger.log("ID │ Mode Name       │ Target Bitrate │ Description");
-    openknx.logger.log("───┼─────────────────┼────────────────┼───────────────────────────");
-    openknx.logger.log(" 0 │ AUTO            │ 800 kHz        │ Auto-detect (default)");
-    openknx.logger.log(" 1 │ AUTO_LEGACY     │ 960 kHz*       │ WS2812C/D onboard LEDs");
-    openknx.logger.log(" 2 │ SLOW_20PCT      │ 640 kHz        │ -20% for signal issues");
-    openknx.logger.log(" 3 │ SLOW_15PCT      │ 680 kHz        │ -15%");
-    openknx.logger.log(" 4 │ SLOW_10PCT      │ 720 kHz        │ -10%");
-    openknx.logger.log(" 5 │ SLOW_5PCT       │ 760 kHz        │ -5%");
-    openknx.logger.log(" 6 │ FAST_5PCT       │ 840 kHz        │ +5% performance boost");
-    openknx.logger.log(" 7 │ FAST_10PCT      │ 880 kHz        │ +10%");
-    openknx.logger.log(" 8 │ FAST_15PCT      │ 920 kHz        │ +15%");
-    openknx.logger.log(" 9 │ FAST_20PCT      │ 960 kHz        │ +20%");
-    openknx.logger.log("10 │ FAST_25PCT      │ 1000 kHz       │ +25% maximum");
-    openknx.logger.log("11 │ CUSTOM          │ user-defined   │ Custom T0H/T0L/T1H/T1L");
+    openknx.logger.log("Wert (0-15) = ETS 'Timing'-Dropdown. Setzen: neo phys timing <id> <Wert>");
     openknx.logger.log("");
-    openknx.logger.log("* LEGACY mode uses fixed clkdiv, actual bitrate depends on CPU frequency");
-    openknx.logger.log("  CUSTOM: PIO derives clkdiv from T1H (fixed 3:7:6:4 ratio); RMT applies all 4 values independently");
+    openknx.logger.log("Wert │ Bitrate  │ Hinweis");
+    openknx.logger.log("─────┼──────────┼──────────────────────────────────────────");
+    openknx.logger.log("  0  │  800 kHz │ Standard (WS2812B, SK6812, WS2813/15) - DEFAULT");
+    openknx.logger.log("  1  │  960 kHz │ WS2812C/D onboard");
+    openknx.logger.log("  2  │  640 kHz │ sehr schwaches Signal / lange Kette");
+    openknx.logger.log("  3  │  680 kHz │");
+    openknx.logger.log("  4  │  720 kHz │");
+    openknx.logger.log("  5  │  760 kHz │ Clone-Tuning");
+    openknx.logger.log("  6  │  840 kHz │");
+    openknx.logger.log("  7  │  880 kHz │");
+    openknx.logger.log("  8  │  920 kHz │");
+    openknx.logger.log("  9  │  750 kHz │  Clone-Feinraster (5-kHz-Schritte 750-790):");
+    openknx.logger.log(" 10  │  765 kHz │  hier findest du fuer zickige Clones");
+    openknx.logger.log(" 11  │  770 kHz │  den sauberen Punkt (oft 770-780).");
+    openknx.logger.log(" 12  │  775 kHz │");
+    openknx.logger.log(" 13  │  780 kHz │");
+    openknx.logger.log(" 14  │  785 kHz │");
+    openknx.logger.log(" 15  │  790 kHz │");
+    openknx.logger.log("");
+    openknx.logger.log("Frei waehlbar: neo phys timing <id> freq <kHz>   (z.B. freq 783)");
+    openknx.logger.log("Experten:      neo phys timing <id> custom <t0h> <t0l> <t1h> <t1l>");
+    openknx.logger.log("               PIO leitet clkdiv aus T1H ab (festes 3:7:6:4-Verhaeltnis).");
     openknx.logger.log("");
 
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
@@ -4676,6 +4684,7 @@ bool NeoPixel::processPhysTimingsCommand()
     openknx.logger.log("  neo phys timing 0 legacy      -> Set to AUTO_LEGACY");
     openknx.logger.log("  neo phys timing 0 fast25      -> Set to FAST_25PCT (1 MHz)");
     openknx.logger.log("  neo phys timing 0 info        -> Detailed timing information");
+    openknx.logger.log("  neo phys timing 0 freq 775    -> Set bitrate to 775 kHz (like the ETS Timing field)");
     openknx.logger.log("  neo phys timing 0 custom 300 900 800 600     -> Custom timing (ns): T0H T0L T1H T1L");
     openknx.logger.log("  neo phys timing 0 custom 300 900 800 600 80  -> Custom timing + reset time (µs)");
     openknx.logger.log("  neo phys timing 0 reset       -> Revert to AUTO timing");
@@ -4760,8 +4769,9 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
 
     if (parsed < 1)
     {
-        openknx.logger.log("ERROR: Usage: neo phys timing <id> [mode|info]");
-        return true;
+        // No/invalid strip id (e.g. "neo phys timing ?") -> print the value->kHz table + usage
+        openknx.logger.log("Usage: neo phys timing <id> <0-15 | freq <kHz> | custom <t0h> <t0l> <t1h> <t1l> | info>");
+        return processPhysTimingsCommand();
     }
 
     auto strip = _manager->getStrip(stripId);
@@ -4843,6 +4853,26 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
             default: break;
         }
         openknx.logger.logWithValues("  Protocol:        %s", protocolName);
+
+        // Color order (helps spot an RGBW/GRBW mixup that swaps R/G on clones)
+        const char* colorOrderName = "???";
+        switch (strip->getColorOrder())
+        {
+            case ColorOrder::NONE: colorOrderName = "DEFAULT"; break;
+            case ColorOrder::RGB: colorOrderName = "RGB"; break;
+            case ColorOrder::RBG: colorOrderName = "RBG"; break;
+            case ColorOrder::GRB: colorOrderName = "GRB"; break;
+            case ColorOrder::BGR: colorOrderName = "BGR"; break;
+            case ColorOrder::GBR: colorOrderName = "GBR"; break;
+            case ColorOrder::BRG: colorOrderName = "BRG"; break;
+            case ColorOrder::RGBW: colorOrderName = "RGBW"; break;
+            case ColorOrder::GRBW: colorOrderName = "GRBW"; break;
+            case ColorOrder::RGBCCT: colorOrderName = "RGBCCT"; break;
+            case ColorOrder::GRBCCT: colorOrderName = "GRBCCT"; break;
+            case ColorOrder::RGBCTW: colorOrderName = "RGBCTW"; break;
+            case ColorOrder::GRBCTW: colorOrderName = "GRBCTW"; break;
+        }
+        openknx.logger.logWithValues("  Color Order:     %s", colorOrderName);
 
         if (pioSerialDriver)
         {
@@ -4996,6 +5026,39 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
         return true;
     }
 
+    // Special subcommand: freq <kHz> -> set bitrate directly (mirrors the ETS "Timing" field)
+    if (strcmp(modeStr, "freq") == 0)
+    {
+        unsigned int freqKhz = 0;
+        // Parse kHz after "freq": args = "<id> freq <kHz>"
+        int parsed = sscanf(args.c_str(), "%*d %*s %u", &freqKhz);
+        if (parsed < 1 || freqKhz < 400 || freqKhz > 1200)
+        {
+            openknx.logger.log("ERROR: Usage: neo phys timing <id> freq <kHz>");
+            openknx.logger.log("  Bitrate in kHz (400-1200). Standard = 800; Clones oft 760-790.");
+            openknx.logger.log("  Example: neo phys timing 0 freq 775");
+            return true;
+        }
+
+        // 3:7:6:4 ratio; only T1H matters on PIO (T1H_ns = 600000 / kHz)
+        uint16_t t1h = (uint16_t)(600000UL / freqKhz);
+        uint16_t t0h = (uint16_t)(t1h / 2);
+        uint16_t t0l = (uint16_t)((uint32_t)t1h * 7 / 6);
+        uint16_t t1l = (uint16_t)((uint32_t)t1h * 4 / 6);
+
+        openknx.logger.logWithValues("Setting bitrate for strip [%d]: %u kHz (T1H=%d ns)", stripId, (int)freqKhz, (int)t1h);
+        if (!strip->setCustomTiming(t0h, t0l, t1h, t1l, 0))
+        {
+            openknx.logger.log("ERROR: Failed to set timing!");
+            openknx.logger.log("  Only 1-Wire strips (PIO/RMT). SPI LEDs (APA102/...) use their own SPI clock.");
+            return true;
+        }
+        openknx.logger.log("Bitrate set. NOTE: not persistent across ETS download - set 'Timing' in the ETS parameter instead.");
+        strip->clear();
+        strip->show();
+        return true;
+    }
+
     // Special subcommand: reset -> revert to AUTO timing
     if (strcmp(modeStr, "reset") == 0)
     {
@@ -5037,6 +5100,38 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
             return true;
         }
         return processPhysTimingProfileCommand(stripId, (uint8_t)profileIdx);
+    }
+
+    // Plain number: 0-15 = ETS Timing value (same kHz table), >15 = direct kHz
+    if (modeStr[0] >= '0' && modeStr[0] <= '9')
+    {
+        static const uint16_t kTimingFreqTable[16] = {
+            800, 960, 640, 680, 720, 760, 840, 880, 920, 750, 765, 770, 775, 780, 785, 790};
+        int num = atoi(modeStr);
+        uint16_t freqKhz;
+        if (num >= 0 && num <= 15)
+            freqKhz = kTimingFreqTable[num]; // 0-15 = ETS 'Timing' dropdown value
+        else if (num >= 400 && num <= 1200)
+            freqKhz = (uint16_t)num; // >15 = direct frequency in kHz (e.g. 799)
+        else
+        {
+            openknx.logger.log("ERROR: Use 0-15 (ETS Timing value) or 400-1200 (direct kHz, e.g. 799).");
+            return true;
+        }
+        const uint16_t t1h = (uint16_t)(600000UL / freqKhz);
+        const uint16_t t0h = (uint16_t)(t1h / 2);
+        const uint16_t t0l = (uint16_t)((uint32_t)t1h * 7 / 6);
+        const uint16_t t1l = (uint16_t)((uint32_t)t1h * 4 / 6);
+        openknx.logger.logWithValues("Setting timing for strip [%d]: %u kHz (T1H=%d ns)",
+                                     stripId, (int)freqKhz, (int)t1h);
+        if (!strip->setCustomTiming(t0h, t0l, t1h, t1l, 0))
+        {
+            openknx.logger.log("ERROR: Failed to set timing! (1-Wire strips only; SPI LEDs use SPI clock)");
+            return true;
+        }
+        strip->clear();
+        strip->show();
+        return true;
     }
 
     TimingMode newMode = parseTimingMode(modeStr);

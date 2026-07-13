@@ -22,16 +22,23 @@
 // - 0-bit: 3 cycles HIGH + 7 cycles LOW  = 375ns + 875ns ≈ 1.25µs
 // - 1-bit: 6 cycles HIGH + 4 cycles LOW  = 750ns + 500ns ≈ 1.25µs
 //
-// PIO Assembly Program (adapted from Raspberry Pi Pico SDK):
+// PIO Assembly Program = canonical Raspberry Pi Pico SDK ws2812.pio
+// with T1=3, T2=3, T3=4 ("selected for broad compatibility with WS2812,
+// WS2812B and SK6812"). Structure starts LOW (inter-bit gap), then pulses:
 //
 // .wrap_target
-// 0: out x, 1      side 1 [2]   ; Pull 1 bit, set HIGH, wait 2 (= 3 cycles HIGH)
-// 1: jmp !x, do_0  side 1 [2]   ; If bit=0 jump, else 3 more HIGH (total 6)
-// 2: jmp finish    side 0 [3]   ; 1-bit: Set LOW, wait 3 (total 4 cycles LOW)
+// bitloop:
+// 0: out x, 1       side 0 [3]   ; LOW 4 cycles (T3), pull next bit into x
+// 1: jmp !x, do_0   side 1 [2]   ; HIGH 3 cycles (T1); if bit==0 -> do_0 (LOW)
+// 2: jmp bitloop    side 1 [2]   ; 1-bit: HIGH 3 more cycles (T2), wrap
 // do_0:
-// 3: nop           side 0 [6]   ; 0-bit: Set LOW, wait 6 (total 7 cycles LOW)
-// finish:
+// 3: nop            side 0 [2]   ; 0-bit: LOW 3 cycles (T2)
 // .wrap
+//
+// => T0H:T0L:T1H:T1L = 3:7:6:4 (@800kHz true: 375/875/750/500 ns). SK6812-safe.
+// The previous custom "start-HIGH" program emitted ~4-5 HIGH cycles with only
+// ~1 cycle 0/1 separation -> T0H ~500ns (> SK6812 T0H_max ~450ns), so SK6812
+// only worked when accidentally overclocked (old hardcoded-125MHz clkdiv).
 //
 // =============================================================================
 
@@ -39,10 +46,10 @@
     #define ws2812_wrap 3        // Wrap instruction index
 
 static const uint16_t ws2812b_program_instructions[] = {
-    0x6221, //  0: out    x, 1            side 1 [2]  ; Pull bit, HIGH, wait 2
-    0x1323, //  1: jmp    !x, 3           side 1 [2]  ; If 0, jump to 3, HIGH 2 more
-    0x1003, //  2: jmp    0               side 0 [3]  ; 1-bit: LOW 4 cycles, loop
-    0xa246, //  3: nop                    side 0 [6]  ; 0-bit: LOW 7 cycles, loop
+    0x6321, //  0: out    x, 1            side 0 [3]  ; LOW 4 (T3), pull bit into x
+    0x1223, //  1: jmp    !x, 3           side 1 [2]  ; HIGH 3 (T1); if 0 -> do_0(3)
+    0x1200, //  2: jmp    0               side 1 [2]  ; 1-bit: HIGH 3 more (T2), wrap
+    0xa242, //  3: nop                    side 0 [2]  ; 0-bit: LOW 3 (T2)
 };
 
 static const pio_program_t neopixel_serial_program = {
@@ -387,8 +394,9 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     const SerialStripConfig* serialCfg = dynamic_cast<const SerialStripConfig*>(config);
     if (!serialCfg) return false;
 
-    // Apply ColorOrder
-    _inst->colorOrder = serialCfg->getColorOrder();
+    // Apply ColorOrder (never let a NONE config stomp the live driver order)
+    const ColorOrder cfgOrder = serialCfg->getColorOrder();
+    if (cfgOrder != ColorOrder::NONE) _inst->colorOrder = cfgOrder;
 
     // Apply level-shifter GPIO optimizations
     _inst->levelShifterType = serialCfg->getLevelShifter();
