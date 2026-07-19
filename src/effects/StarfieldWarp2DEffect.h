@@ -185,6 +185,7 @@ class StarfieldWarp2DEffect : public Effect
                 segment->setPixelGlobalXY(x, y, 0, 0, 0);
 
         uint16_t active = 8 + (uint16_t)density * (MAX_STARS - 8) / 100;
+        if (active > MAX_STARS) active = MAX_STARS; // clamp: option1 can exceed 100 via KO/Scene/console
         uint16_t cx = w / 2;
         uint16_t cy = h / 2;
 
@@ -193,8 +194,11 @@ class StarfieldWarp2DEffect : public Effect
 
         for (uint16_t i = 0; i < active; i++)
         {
-            if (_sz[i] <= zStep) respawn(i, w, h);
-            _sz[i] -= zStep;
+            if (_sz[i] <= zStep)
+                respawn(i, w, h); // respawn sets a fresh far depth; use it as-is this frame
+            else
+                _sz[i] -= zStep;
+            if (_sz[i] == 0) _sz[i] = 1; // never divide by zero in the projection below
 
             int16_t dx = (int16_t)_sx[i] - (int16_t)w;
             int16_t dy = (int16_t)_sy[i] - (int16_t)h;

@@ -913,9 +913,13 @@ void PIO_NeoPixel_SPI::sendDataDMA()
     // Without this, the CPU might reorder buffer writes AFTER the DMA starts
     __dmb(); // Data Memory Barrier (ARM Cortex-M0+ instruction)
 
-    // Trigger DMA transfer (last parameter true = start immediately)
-    // DMA reads from _inst->buffer and writes to PIO TX FIFO
-    dma_channel_set_read_addr(_inst->dmaChannel, _inst->buffer, true);
+    // CRITICAL: re-set BOTH read address AND transfer count every frame. After a completed DMA the
+    // trans_count register is 0 (NORMAL mode, no auto-reload), so re-triggering with only
+    // set_read_addr would transfer 0 words -> strip frozen on frame 1. Mirror the Serial driver,
+    // which documents+fixes the same hazard: set count, then start.
+    dma_channel_set_read_addr(_inst->dmaChannel, _inst->buffer, false);
+    dma_channel_set_trans_count(_inst->dmaChannel, _inst->bufferWordCount, false);
+    dma_channel_start(_inst->dmaChannel);
 }
 
 /**

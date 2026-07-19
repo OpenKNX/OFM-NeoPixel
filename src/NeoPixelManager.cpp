@@ -36,14 +36,16 @@ NeoPixelManager::NeoPixelManager()
  */
 NeoPixelManager::~NeoPixelManager()
 {
-    // Lösche alle Strips
+    // Manager is the sole owner of these heap objects (add*/new hand back raw pointers).
+    // Free segments first (they reference virtual strips), then virtual strips, then physical.
+    for (auto seg : _segments)
+        if (seg) delete seg;
+    _segments.clear();
+    for (auto vstrip : _virtualStrips)
+        if (vstrip) delete vstrip;
+    _virtualStrips.clear();
     for (auto strip : _strips)
-    {
-        if (strip)
-        {
-            delete strip;
-        }
-    }
+        if (strip) delete strip;
     _strips.clear();
 }
 
@@ -1073,6 +1075,12 @@ void NeoPixelManager::applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scal
 {
     if (!phys || !phys->getBuffer()) return;
 
+    // SPI (APA102/SK9822) buffers are FRAMED (start/end frame + per-LED 111-marker brightness byte),
+    // not contiguous RGB — scaling them as RGB corrupts the frame markers. Skip ABL for SPI here
+    // (proper APA102 dimming via the 5-bit global-brightness field is a separate task).
+    if (phys && phys->isSpiStrip())
+        return;
+
     uint16_t ledCount = phys->getLedCount();
     uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
     uint8_t* buffer = phys->getBuffer();
@@ -1774,6 +1782,11 @@ bool NeoPixelManager::removeVirtualStrip(VirtualStrip* vstrip)
             ++segIt;
         }
     }
+
+    // Drop stale Phys->Virtual mappings (this vstrip is being freed) and force a lazy rebuild,
+    // else freed VirtualStrip* would dangle in _physToVirtualMap.
+    _physToVirtualMap.clear();
+    _mappingDirty = true;
 
     // Now remove the VirtualStrip itself
     for (auto it = _virtualStrips.begin(); it != _virtualStrips.end(); ++it)

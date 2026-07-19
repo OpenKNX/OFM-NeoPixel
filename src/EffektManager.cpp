@@ -111,7 +111,12 @@ void EffektManagerController::resume(Segment* segment)
     if (!_rt.isRunning() || !_rt.paused) return;
     _rt.paused = false;
     // Continue the current cue from where it was frozen (do not restart its duration).
+    uint32_t oldCueStartMs = _rt.cueStartMs;
     _rt.cueStartMs = millis() - _rt.pauseElapsed;
+    // Shift the fade clock by the same pause duration (= cueStartMs delta) so a crossfade in
+    // progress continues from where it froze instead of being skipped on resume.
+    if (_rt.fading)
+        _rt.fadeStartMs += (_rt.cueStartMs - oldCueStartMs);
     if (segment)
     {
         segment->resume();

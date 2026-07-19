@@ -720,8 +720,11 @@ bool PhysicalStrip::setTimingMode(TimingMode mode)
             return false;
         }
 
-        // Factory doesn't get _colorOrder; restore it (else mode change swaps R/G on non-default orders).
-        _driver->setColorOrder(_colorOrder);
+        // Factory doesn't get _colorOrder; restore it if known. NONE means "no explicit order"
+        // (protocol not in createDriver's switch) -> keep the driver's ProtocolHelper default,
+        // else we'd overwrite it with NONE and the render switch would blank the strip.
+        if (_colorOrder != ColorOrder::NONE)
+            _driver->setColorOrder(_colorOrder);
 
         _initialized = true;
         return true;
