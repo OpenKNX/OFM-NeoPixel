@@ -1023,7 +1023,7 @@ bool PIO_NeoPixel_Serial::show()
 
     // Wait for previous transfer to complete including latch time.
     // busy-wait ensures proper reset pulse; isBusy() checks DMA in progress +
-    // FIFO drain time + reset time. A normal frame finishes in well under 1 ms.
+    // final OSR drain time + reset time.
     //
     // SAFETY: bound the wait with a timeout. If a DMA/PIO transfer ever wedges
     // (channel stuck busy / SM stalled), an unbounded spin here would block the
@@ -1298,7 +1298,8 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
  * Returns true if:
  * - DMA transfer is still in progress, OR
  * - PIO TX FIFO is not empty (still transmitting), OR
- * - Reset/latch time hasn't passed
+ * - The final output-shift-register word has not drained, OR
+ * - Reset/latch time hasn't passed after the final output bit
  *
  * This prevents starting a new transfer too early, which would
  * cause visual glitches (flashing) on the LED strip.
@@ -1325,29 +1326,38 @@ bool PIO_NeoPixel_Serial::isBusy()
         return true; // FIFO still has data
     }
 
-    // FIFO just became empty - record the time if we haven't already
-    // Note: FIFO empty does NOT mean all bits sent! OSR might still have up to 32 bits
-    // being shifted out. We account for this in the timing calculation below.
+    // FIFO just became empty - record the time if we haven't already.
+    //
+    // IMPORTANT: FIFO empty is not the end of the frame. The state machine may have
+    // just pulled the final FIFO word into the OSR and can still emit a complete
+    // 24/32-bit word. The reset interval begins only after that final bit's falling
+    // edge, so it must not be used to cover the OSR drain time.
     if (!_inst->waitingForReset)
     {
         _inst->fifoEmptyTime = micros();
         _inst->waitingForReset = true;
     }
 
-    // Calculate required wait time after FIFO empty:
-    // 1. OSR flush time: up to 32 bits at bit rate (worst case ~40µs at 800kHz)
-    // 2. Reset time: protocol-specific latch pulse (300µs for WS2805/WS2812B)
-    //
-    // OSR flush time = 32 / bitrate = 32 / 800000 = ~40µs
-    // We add a generous margin and include it in the reset time (already 300µs)
-    // so we don't need separate calculation.
-    //
-    // Total wait = resetTimeUs (which is already longer than spec for safety)
+    // Calculate a conservative bound for the final OSR word. RGB uses a 24-bit
+    // autopull threshold, RGBW uses 32-bit, and RGBCCT follows fifoWordBits.
+    // Add one microsecond for PIO instruction/observation jitter. actual_bitrate is
+    // the requested divider result; the small positive margin also covers the PIO
+    // divider's hardware quantisation.
+    uint32_t finalWordBits = _inst->fifoWordBits;
+    if (_inst->bytesPerLed == 3) finalWordBits = 24;
+    else if (_inst->bytesPerLed == 4) finalWordBits = 32;
+    if (finalWordBits == 0) finalWordBits = 32;
 
-    uint32_t elapsed = micros() - _inst->fifoEmptyTime;
-    if (elapsed < _inst->resetTimeUs)
+    const float bitrate = _inst->actual_bitrate;
+    const uint32_t drainUs = bitrate > 0.0f
+                                 ? (uint32_t)(((float)finalWordBits * 1000000.0f) / bitrate + 0.999f) + 1u
+                                 : 0u;
+    const uint32_t requiredLowUs = drainUs + _inst->resetTimeUs;
+
+    const uint32_t elapsed = micros() - _inst->fifoEmptyTime;
+    if (elapsed < requiredLowUs)
     {
-        return true; // Still waiting for OSR flush + reset pulse
+        return true; // Still draining the final word and/or waiting for reset pulse
     }
 
     // Ready for next transfer
