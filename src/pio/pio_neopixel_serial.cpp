@@ -1095,11 +1095,11 @@ bool PIO_NeoPixel_Serial::show()
     // main loop, starve openknx.watchdog.loop() and trigger a 16 s watchdog
     // reboot. Instead we force-recover and log, so the device keeps running and
     // the wedge becomes diagnosable (USB stays connected because we don't reboot).
-    static constexpr uint32_t kShowWaitTimeoutUs = 50000; // 50 ms (>> any real frame)
+    const uint32_t showWaitTimeoutUs = getTransferTimeoutUs();
     const uint32_t waitStartUs = micros();
     while (isBusy())
     {
-        if ((uint32_t)(micros() - waitStartUs) > kShowWaitTimeoutUs)
+        if ((uint32_t)(micros() - waitStartUs) > showWaitTimeoutUs)
         {
             // Wedge recovery: abort any in-flight DMA and clear the transfer
             // state so the next show() can re-arm cleanly.
@@ -1118,7 +1118,7 @@ bool PIO_NeoPixel_Serial::show()
                 openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial",
                     "show() WEDGE recovered: GPIO%u SM%u DMA%d stuck >%lums (no reboot)",
                     _inst->pin, _inst->sm, _inst->dmaChannel,
-                    (unsigned long)(kShowWaitTimeoutUs / 1000));
+                    (unsigned long)((showWaitTimeoutUs + 999U) / 1000U));
             }
             break;
         }
@@ -1443,6 +1443,27 @@ void PIO_NeoPixel_Serial::clear()
     if (_inst->busy) return;
 
     memset(_inst->buffer, 0, _inst->bufferSize);
+}
+
+uint32_t PIO_NeoPixel_Serial::getTransferTimeoutUs() const
+{
+    if (!_inst || _inst->bufferSize == 0) return 1000000U;
+
+    // Use the realised PIO bitrate, not the nominal protocol rate. A frame is
+    // followed by one final OSR word and the protocol reset interval; add a
+    // small scheduler/IRQ margin while retaining a finite recovery deadline.
+    const uint32_t bitrate = _inst->actual_bitrate > 1.0f
+                                 ? (uint32_t)_inst->actual_bitrate
+                                 : getOneWireTimingProfile(_inst->protocol).bitRateHz;
+    uint32_t finalWordBits = _inst->fifoWordBits;
+    if (_inst->bytesPerLed == 3) finalWordBits = 24;
+    else if (_inst->bytesPerLed == 4) finalWordBits = 32;
+    if (finalWordBits == 0) finalWordBits = 32;
+
+    const uint64_t payloadUs = ((uint64_t)_inst->bufferSize * 8ULL * 1000000ULL + bitrate - 1ULL) / bitrate;
+    const uint64_t finalWordUs = ((uint64_t)finalWordBits * 1000000ULL + bitrate - 1ULL) / bitrate;
+    const uint64_t deadlineUs = payloadUs + finalWordUs + _inst->resetTimeUs + 2000ULL;
+    return deadlineUs > UINT32_MAX ? UINT32_MAX : (uint32_t)deadlineUs;
 }
 
 /**

@@ -41,7 +41,8 @@ static bool rmt_ns_to_ticks(uint32_t durationNs, uint16_t& ticks)
 static bool make_balanced_rmt_symbols(uint16_t t0h, uint16_t t0l,
                                       uint16_t t1h, uint16_t t1l,
                                       rmt_symbol_word_t& zero,
-                                      rmt_symbol_word_t& one)
+                                      rmt_symbol_word_t& one,
+                                      uint16_t* periodTicksOut = nullptr)
 {
     const uint32_t zeroPeriodNs = (uint32_t)t0h + t0l;
     const uint32_t onePeriodNs = (uint32_t)t1h + t1l;
@@ -70,6 +71,7 @@ static bool make_balanced_rmt_symbols(uint16_t t0h, uint16_t t0l,
         .duration1 = (uint16_t)(periodTicks - oneHighTicks),
         .level1 = 0,
     };
+    if (periodTicksOut) *periodTicksOut = periodTicks;
     return true;
 }
 
@@ -173,6 +175,8 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
     _inst->initialized = false;
     _inst->busy = false;
     _inst->resetTimeUs = getOneWireTimingProfile(protocol).resetTimeUs;
+    const OneWireTimingProfile& timing = getOneWireTimingProfile(protocol);
+    _inst->bitPeriodNs = ((uint32_t)timing.t0hNs + timing.t0lNs + timing.t1hNs + timing.t1lNs + 1U) / 2U;
 
     // Allocate buffer
     _inst->bufferSize = ledCount * _inst->bytesPerLed;
@@ -287,9 +291,10 @@ bool RMT_NeoPixel_Serial::init()
     // effective serial clock.
     rmt_symbol_word_t zero = {};
     rmt_symbol_word_t one = {};
+    uint16_t periodTicks = 0;
     if (!make_balanced_rmt_symbols(timing.t0hNs, timing.t0lNs,
                                    timing.t1hNs, timing.t1lNs,
-                                   zero, one))
+                                   zero, one, &periodTicks))
     {
         ESP_LOGE("RMT_NeoPixel", "Invalid built-in timing profile %s", timing.name);
         rmt_del_channel(_inst->channel);
@@ -323,6 +328,7 @@ bool RMT_NeoPixel_Serial::init()
     registerInstance(channel, this);
 
     _inst->initialized = true;
+    _inst->bitPeriodNs = (uint32_t)periodTicks * (1000000000UL / RMT_LED_STRIP_RESOLUTION_HZ);
     return true;
 }
 
@@ -482,6 +488,16 @@ bool RMT_NeoPixel_Serial::isBusy()
     return _inst ? _inst->busy : false;
 }
 
+uint32_t RMT_NeoPixel_Serial::getTransferTimeoutUs() const
+{
+    if (!_inst || _inst->bufferSize == 0) return 1000000U;
+
+    const uint32_t bitPeriodNs = _inst->bitPeriodNs ? _inst->bitPeriodNs : 1250U;
+    const uint64_t payloadUs = ((uint64_t)_inst->bufferSize * 8ULL * bitPeriodNs + 999ULL) / 1000ULL;
+    const uint64_t deadlineUs = payloadUs + _inst->resetTimeUs + 2000ULL;
+    return deadlineUs > UINT32_MAX ? UINT32_MAX : (uint32_t)deadlineUs;
+}
+
 void RMT_NeoPixel_Serial::clear()
 {
     if (!_inst || !_inst->buffer) return;
@@ -559,7 +575,8 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     {
         rmt_symbol_word_t custom_zero = {};
         rmt_symbol_word_t custom_one = {};
-        if (!make_balanced_rmt_symbols(t0h, t0l, t1h, t1l, custom_zero, custom_one))
+        uint16_t customPeriodTicks = 0;
+        if (!make_balanced_rmt_symbols(t0h, t0l, t1h, t1l, custom_zero, custom_one, &customPeriodTicks))
         {
             ESP_LOGE("RMT_NeoPixel", "Invalid custom timing %u/%u/%u/%u ns for %luHz RMT",
                      t0h, t0l, t1h, t1l, (unsigned long)RMT_LED_STRIP_RESOLUTION_HZ);
@@ -588,6 +605,7 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
         _inst->customT0L = t0l;
         _inst->customT1H = t1h;
         _inst->customT1L = t1l;
+        _inst->bitPeriodNs = (uint32_t)customPeriodTicks * (1000000000UL / RMT_LED_STRIP_RESOLUTION_HZ);
 
     }
 

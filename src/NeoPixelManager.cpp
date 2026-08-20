@@ -1192,10 +1192,12 @@ bool NeoPixelManager::showAll()
             _errorCount++;
         }
     }
-    // Phase 2: wait for every in-flight transfer to finish (100 ms cap per strip).
+    // Phase 2: wait for every in-flight transfer to finish. The deadline is
+    // derived by the driver from its actual serial rate and frame size, rather
+    // than imposing a fixed maximum strip length.
     for (auto strip : _strips)
     {
-        if (strip && !strip->waitForTransfer(100))
+        if (strip && !strip->waitForTransfer(strip->getTransferTimeoutMs()))
         {
             allSuccess = false;
             _errorCount++;

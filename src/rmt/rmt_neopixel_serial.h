@@ -56,6 +56,7 @@ struct rmt_neopixel_serial_inst
     bool initialized;   // Initialized?
     volatile bool busy; // Transfer running?
     uint32_t resetTimeUs; // LOW latch interval after the final RMT symbol
+    uint32_t bitPeriodNs; // Realised common bit-cell period of the active encoder
 
     LevelShifterType levelShifterType; // Level-shifter type (NONE or TXS0108E)
 };
@@ -94,6 +95,7 @@ class RMT_NeoPixel_Serial : public IHardwareDriver
     uint8_t* getBuffer() override { return _inst ? _inst->buffer : nullptr; }
     size_t getBufferSize() const override { return _inst ? _inst->bufferSize : 0; }
     bool isInitialized() const override { return _inst ? _inst->initialized : false; }
+    uint32_t getTransferTimeoutUs() const override;
     DriverImplementation getDriverType() const override { return DriverImplementation::RMT_SERIAL; }
 
     // Configuration interface

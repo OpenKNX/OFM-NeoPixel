@@ -108,6 +108,7 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
     uint8_t* getBuffer() override { return _inst ? _inst->buffer : nullptr; }
     size_t getBufferSize() const override { return _inst ? _inst->bufferSize : 0; }
     bool isInitialized() const override { return _inst ? _inst->initialized : false; }
+    uint32_t getTransferTimeoutUs() const override;
     DriverImplementation getDriverType() const override { return DriverImplementation::PIO_SERIAL; }
 
     /**

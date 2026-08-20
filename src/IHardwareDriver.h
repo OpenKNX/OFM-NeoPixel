@@ -134,6 +134,15 @@ class IHardwareDriver
     virtual size_t getBufferSize() const = 0;
     virtual bool isInitialized() const = 0;
 
+    /**
+     * @brief Conservative, bounded deadline for one complete frame transfer.
+     *
+     * The default keeps legacy/synchronous drivers safe. Clockless drivers
+     * override it with their actual payload and protocol timing so callers do
+     * not impose a fixed strip-length limit.
+     */
+    virtual uint32_t getTransferTimeoutUs() const { return 1000000U; }
+
     // Get driver implementation type (for runtime detection)
     virtual DriverImplementation getDriverType() const = 0;
 
