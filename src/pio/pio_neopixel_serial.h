@@ -64,12 +64,11 @@ struct pio_neopixel_serial_inst
     bool outputInverted;           // Physical output polarity required by protocol
 
     uint8_t* buffer;        // LED data buffer (RGB/RGBW bytes) - user writes here
-    uint8_t* bufferSending; // RGBCCT only: DMA reads from here (double-buffer)
     size_t bufferSize;      // Buffer size in bytes
 
-    uint32_t* dmaBuffer;  // DMA transfer buffer (32-bit words) - for RGB/RGBW only, nullptr for RGBCCT
-    size_t dmaBufferSize; // DMA buffer size (in words/halfwords/bytes depending on fifoWordBits)
-    uint fifoWordBits;    // FIFO word size in bits (8/16/32) - for RGBCCT dynamic sizing
+    uint32_t* dmaBuffer;  // DMA words; RGBCCT expands every payload byte into one MSB-aligned word
+    size_t dmaBufferSize; // Number of 32-bit DMA words
+    uint fifoWordBits;    // Valid serial bits emitted from each FIFO word (24/32, or 8 for RGBCCT)
 
     int dmaChannel;     // DMA channel (-1 if not used)
     int dmaIrqNum;      // DMA IRQ number (0 or 1, -1 if not used)
