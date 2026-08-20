@@ -875,7 +875,8 @@ bool PIO_NeoPixel_Serial::initDMA()
     static bool irq0_initialized = false;
     if (!irq0_initialized)
     {
-        irq_set_exclusive_handler(DMA_IRQ_0, unifiedDmaIRQHandler);
+        irq_add_shared_handler(DMA_IRQ_0, unifiedDmaIRQHandler,
+                               PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
         irq_set_enabled(DMA_IRQ_0, true);
         irq0_initialized = true;
     #ifdef OPENKNX_DEBUG

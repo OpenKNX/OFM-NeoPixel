@@ -17,7 +17,7 @@ void unifiedDmaIRQHandler()
     for (int i = 0; i < MAX_DMA_CHANNELS; i++)
     {
         // Check IRQ0 (Serial strips)
-        if (dma_channel_get_irq0_status(i))
+        if (g_serialHandlers[i] && dma_channel_get_irq0_status(i))
         {
             dma_channel_acknowledge_irq0(i);
 
@@ -29,7 +29,7 @@ void unifiedDmaIRQHandler()
         }
 
         // Check IRQ1 (SPI strips)
-        if (dma_channel_get_irq1_status(i))
+        if (g_spiHandlers[i] && dma_channel_get_irq1_status(i))
         {
             dma_channel_acknowledge_irq1(i);
 

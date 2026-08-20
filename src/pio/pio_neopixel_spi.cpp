@@ -577,7 +577,8 @@ bool PIO_NeoPixel_SPI::initDMA()
     static bool irq1_initialized = false;
     if (!irq1_initialized)
     {
-        irq_set_exclusive_handler(DMA_IRQ_1, unifiedDmaIRQHandler);
+        irq_add_shared_handler(DMA_IRQ_1, unifiedDmaIRQHandler,
+                               PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
         irq_set_enabled(DMA_IRQ_1, true);
         irq1_initialized = true;
 
