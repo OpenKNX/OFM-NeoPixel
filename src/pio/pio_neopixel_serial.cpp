@@ -1134,8 +1134,34 @@ bool PIO_NeoPixel_Serial::show()
     }
     else
     {
-        sendDataPIO();
-        _inst->busy = false; // PIO mode is blocking
+        if (!sendDataPIO())
+        {
+            _inst->busy = false;
+            _inst->waitingForReset = false;
+            return false;
+        }
+
+        // Direct FIFO writes are blocking only while the FIFO is full. The
+        // final words can still be queued or held in the OSR, so keep the
+        // instance busy until the same FIFO-drain and latch check used by DMA
+        // reports the line safe for a following frame.
+        const uint32_t completionStartUs = micros();
+        const uint32_t completionTimeoutUs = getTransferTimeoutUs();
+        while (isBusy())
+        {
+            if ((uint32_t)(micros() - completionStartUs) > completionTimeoutUs)
+            {
+                pio_sm_clear_fifos(_inst->pio, _inst->sm);
+                _inst->busy = false;
+                _inst->waitingForReset = false;
+                openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial",
+                    "direct PIO transfer timed out on GPIO%u SM%u after %lums",
+                    _inst->pin, _inst->sm,
+                    (unsigned long)((completionTimeoutUs + 999U) / 1000U));
+                return false;
+            }
+        }
+        _inst->busy = false;
     }
 
     return true;
@@ -1145,15 +1171,8 @@ bool PIO_NeoPixel_Serial::show()
  * @brief Sends data directly via PIO
  *
  * Transfers color data blocking via PIO FIFO.
- * Data is packed into 32-bit words:
- *
- * RGB format (3 bytes per LED):
- * - Pack as: Byte2<<24 | Byte1<<16 | Byte0<<8
- * - LSB (Byte0) sent first
- *
- * RGBW format (4 bytes per LED):
- * - Pack as: Byte3<<24 | Byte2<<16 | Byte1<<8 | Byte0
- * - LSB (Byte0) sent first
+ * Data is packed identically to the DMA path. The PIO is configured for
+ * shift-left/MSB-first output, therefore Byte0 belongs in bits 31..24.
  *
  * NOTE: Buffer order is determined by ColorOrder setting (via rgbToBuffer).
  *       This function is ColorOrder-agnostic and just sends bytes in buffer order.
@@ -1173,15 +1192,15 @@ static inline bool neoSerialPutGuarded(PIO pio, uint sm, uint32_t value, uint32_
     return true;
 }
 
-void PIO_NeoPixel_Serial::sendDataPIO()
+bool PIO_NeoPixel_Serial::sendDataPIO()
 {
-    if (!_inst) return;
+    if (!_inst) return false;
 
-    static constexpr uint32_t kPutTimeoutUs = 20000; // 20 ms >> any real FIFO wait
+    const uint32_t putTimeoutUs = getTransferTimeoutUs();
 
     // Send data to PIO FIFO in 32-bit chunks
-    // PIO autopull LSB-first (shift_right=false means shift LEFT, output from LSB!)
-    // Pack REVERSED: Byte2<<24 | Byte1<<16 | Byte0<<8 so LSB (Byte0) is sent first!
+    // The PIO shift register emits MSB first (shift_right=false), matching the
+    // packed DMA words below.
 
     // CRITICAL: Memory barrier to ensure all buffer writes are visible to PIO!
     __dmb(); // Data Memory Barrier
@@ -1192,29 +1211,28 @@ void PIO_NeoPixel_Serial::sendDataPIO()
 
     if (bytesPerTransfer == 3)
     {
-        // 3-byte buffer: Pack REVERSED as Byte2<<24 | Byte1<<16 | Byte0<<8
-        // This is different from packDataToDMABuffer because direct PIO writes
-        // go through a different hardware path than DMA transfers
+        // 3-byte buffer: the unused low byte is not shifted because RGB uses
+        // a 24-bit autopull threshold.
         for (uint32_t i = 0; i < numTransfers; i++)
         {
             uint32_t idx = i * 3;
-            uint32_t value = ((uint32_t)buf[idx + 2] << 24) | // Byte2 → bits 31-24
+            uint32_t value = ((uint32_t)buf[idx] << 24) |     // Byte0 → bits 31-24 (sent first)
                              ((uint32_t)buf[idx + 1] << 16) | // Byte1 → bits 23-16
-                             ((uint32_t)buf[idx] << 8);       // Byte0 → bits 15-8 (sent 1st!)
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
+                             ((uint32_t)buf[idx + 2] << 8);   // Byte2 → bits 15-8
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, putTimeoutUs)) return false;
         }
     }
     else if (bytesPerTransfer == 4)
     {
-        // 4-byte buffer (RGBW): Pack REVERSED
+        // 4-byte buffer (RGBW): identical to packDataToDMABuffer().
         for (uint32_t i = 0; i < numTransfers; i++)
         {
             uint32_t idx = i * 4;
-            uint32_t value = ((uint32_t)buf[idx + 3] << 24) | // Byte3 → bits 31-24
-                             ((uint32_t)buf[idx + 2] << 16) | // Byte2 → bits 23-16
-                             ((uint32_t)buf[idx + 1] << 8) |  // Byte1 → bits 15-8
-                             (uint32_t)buf[idx];              // Byte0 → bits 7-0 (sent 1st!)
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
+            uint32_t value = ((uint32_t)buf[idx] << 24) |     // Byte0 → bits 31-24 (sent first)
+                             ((uint32_t)buf[idx + 1] << 16) | // Byte1 → bits 23-16
+                             ((uint32_t)buf[idx + 2] << 8) |  // Byte2 → bits 15-8
+                             (uint32_t)buf[idx + 3];          // Byte3 → bits 7-0
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, putTimeoutUs)) return false;
         }
     }
     else if (bytesPerTransfer == 5)
@@ -1235,7 +1253,7 @@ void PIO_NeoPixel_Serial::sendDataPIO()
                              ((uint32_t)buf[idx + 1] << 16) |
                              ((uint32_t)buf[idx + 2] << 8) |
                              (uint32_t)buf[idx + 3];
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, putTimeoutUs)) return false;
         }
 
         // Send remaining bytes (1-3 bytes) padded to 32-bit
@@ -1246,9 +1264,11 @@ void PIO_NeoPixel_Serial::sendDataPIO()
             if (remainingBytes >= 1) value |= ((uint32_t)buf[idx] << 24);
             if (remainingBytes >= 2) value |= ((uint32_t)buf[idx + 1] << 16);
             if (remainingBytes >= 3) value |= ((uint32_t)buf[idx + 2] << 8);
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, putTimeoutUs)) return false;
         }
     }
+
+    return true;
 }
 
 /**
@@ -1375,8 +1395,9 @@ bool PIO_NeoPixel_Serial::isBusy()
 {
     if (!_inst) return false;
 
-    // No DMA = not busy (non-DMA mode is blocking)
-    if (!_inst->useDMA) return false;
+    // Direct PIO writes set busy while they drain the FIFO, final OSR word and
+    // reset interval. An idle no-DMA strip must still report ready immediately.
+    if (!_inst->useDMA && !_inst->busy) return false;
 
     // Check hardware directly: Is DMA channel still active?
     // This is more reliable than relying on IRQ callback

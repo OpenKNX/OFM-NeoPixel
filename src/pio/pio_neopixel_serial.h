@@ -195,7 +195,7 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
 
     bool initPIO();
     bool initDMA();
-    void sendDataPIO();
+    bool sendDataPIO();
     void sendDataDMA();
     void packDataToDMABuffer();
     static void dmaIRQHandler();
