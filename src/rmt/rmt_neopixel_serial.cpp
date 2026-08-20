@@ -10,67 +10,123 @@
     #include <Arduino.h>
     #include <esp_log.h>
 
-    #define RMT_LED_STRIP_RESOLUTION_HZ 10000000 // 10MHz for RMT
+    #define RMT_LED_STRIP_RESOLUTION_HZ 40000000UL // 40MHz = 25ns RMT ticks
+    #define RMT_MAX_DURATION_TICKS 32767U
 
 // Static instance mapping
 RMT_NeoPixel_Serial* RMT_NeoPixel_Serial::_instances[8] = {nullptr};
 
 /**
- * WS2812 Timing for RMT (10MHz Resolution)
+ * WS2812 Timing for RMT (40MHz Resolution)
  *
  * WS2812 Timing:
  * - 0-Bit: 0.4µs HIGH, 0.85µs LOW
  * - 1-Bit: 0.8µs HIGH, 0.45µs LOW
  * - Reset: >50µs LOW
  *
- * At 10MHz (100ns per tick):
- * - 0.4µs = 4 ticks
- * - 0.85µs = 8-9 ticks (round to 9)
- * - 0.8µs = 8 ticks
- * - 0.45µs = 4-5 ticks (round to 5)
+ * At 40MHz (25ns per tick):
+ * - 0.4µs = 16 ticks
+ * - 0.85µs = 34 ticks
+ * - 0.8µs = 32 ticks
+ * - 0.45µs = 18 ticks
  */
 static const rmt_symbol_word_t ws2812_zero = {
-    .duration0 = 4, // T0H = 0.4µs
+    .duration0 = 16, // T0H = 0.4µs
     .level0 = 1,
-    .duration1 = 9, // T0L = 0.9µs
+    .duration1 = 34, // T0L = 0.85µs
     .level1 = 0,
 };
 
 static const rmt_symbol_word_t ws2812_one = {
-    .duration0 = 8, // T1H = 0.8µs
+    .duration0 = 32, // T1H = 0.8µs
     .level0 = 1,
-    .duration1 = 5, // T1L = 0.5µs
+    .duration1 = 18, // T1L = 0.45µs
     .level1 = 0,
 };
 
-// Reset Symbol (>50µs LOW)
 /**
- * WS2811 Timing for RMT (10MHz Resolution)
+ * WS2811 Timing for RMT (40MHz Resolution)
  *
  * WS2811 operates at 400kHz (much slower than WS2812):
  * - 0-Bit: 0.5µs HIGH, 2.0µs LOW
  * - 1-Bit: 1.2µs HIGH, 1.3µs LOW
  * - Reset: >50µs LOW
  *
- * At 10MHz (100ns per tick):
- * - 0.5µs = 5 ticks
- * - 2.0µs = 20 ticks
- * - 1.2µs = 12 ticks
- * - 1.3µs = 13 ticks
+ * At 40MHz (25ns per tick):
+ * - 0.5µs = 20 ticks
+ * - 2.0µs = 80 ticks
+ * - 1.2µs = 48 ticks
+ * - 1.3µs = 52 ticks
  */
 static const rmt_symbol_word_t ws2811_zero = {
-    .duration0 = 5,  // T0H = 0.5µs
+    .duration0 = 20, // T0H = 0.5µs
     .level0 = 1,
-    .duration1 = 20, // T0L = 2.0µs
+    .duration1 = 80, // T0L = 2.0µs
     .level1 = 0,
 };
 
 static const rmt_symbol_word_t ws2811_one = {
-    .duration0 = 12, // T1H = 1.2µs
+    .duration0 = 48, // T1H = 1.2µs
     .level0 = 1,
-    .duration1 = 13, // T1L = 1.3µs
+    .duration1 = 52, // T1L = 1.3µs
     .level1 = 0,
 };
+
+/**
+ * Convert a duration to an RMT tick count with round-to-nearest semantics.
+ * RMT cannot emit a zero-duration half-symbol, and this driver only supports
+ * symbols that fit in the hardware duration field.
+ */
+static bool rmt_ns_to_ticks(uint32_t durationNs, uint16_t& ticks)
+{
+    const uint64_t scaled = (uint64_t)durationNs * RMT_LED_STRIP_RESOLUTION_HZ;
+    uint64_t rounded = (scaled + 500000000ULL) / 1000000000ULL;
+    if (rounded == 0) rounded = 1;
+    if (rounded > RMT_MAX_DURATION_TICKS) return false;
+    ticks = (uint16_t)rounded;
+    return true;
+}
+
+/**
+ * Quantise custom symbols without allowing the zero and one bit cells to drift
+ * apart. The current ETS frequency controls one serial clock, therefore the
+ * two symbols must have the same total duration. Keep the requested HIGH pulse
+ * as closely as possible and derive the LOW pulse from one rounded target cell.
+ */
+static bool make_balanced_rmt_symbols(uint16_t t0h, uint16_t t0l,
+                                      uint16_t t1h, uint16_t t1l,
+                                      rmt_symbol_word_t& zero,
+                                      rmt_symbol_word_t& one)
+{
+    const uint32_t zeroPeriodNs = (uint32_t)t0h + t0l;
+    const uint32_t onePeriodNs = (uint32_t)t1h + t1l;
+    const uint32_t targetPeriodNs = (zeroPeriodNs + onePeriodNs + 1U) / 2U;
+
+    uint16_t periodTicks = 0;
+    uint16_t zeroHighTicks = 0;
+    uint16_t oneHighTicks = 0;
+    if (!rmt_ns_to_ticks(targetPeriodNs, periodTicks) ||
+        !rmt_ns_to_ticks(t0h, zeroHighTicks) ||
+        !rmt_ns_to_ticks(t1h, oneHighTicks) ||
+        zeroHighTicks >= periodTicks || oneHighTicks >= periodTicks)
+    {
+        return false;
+    }
+
+    zero = {
+        .duration0 = zeroHighTicks,
+        .level0 = 1,
+        .duration1 = (uint16_t)(periodTicks - zeroHighTicks),
+        .level1 = 0,
+    };
+    one = {
+        .duration0 = oneHighTicks,
+        .level0 = 1,
+        .duration1 = (uint16_t)(periodTicks - oneHighTicks),
+        .level1 = 0,
+    };
+    return true;
+}
 
 // ============================================================================
 // Static Resource Detection Helpers (ESP32)
@@ -564,26 +620,22 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
 
     // Apply custom timing if T0H is set.
     // RMT encodes T0H/T0L and T1H/T1L independently via rmt_symbol_word_t.
-    // Resolution: 10MHz = 100ns per tick  →  ticks = ns / 100
+    // Quantisation uses 40MHz/25ns ticks and preserves one common bit period
+    // for zero and one symbols.
     uint16_t t0h = serialCfg->getT0H();
     uint16_t t0l = serialCfg->getT0L();
     uint16_t t1h = serialCfg->getT1H();
     uint16_t t1l = serialCfg->getT1L();
     if (t0h > 0 && t0l > 0 && t1h > 0 && t1l > 0 && _inst->initialized)
     {
-        // Build custom symbol words (ticks at 10 MHz = 100 ns per tick)
-        rmt_symbol_word_t custom_zero = {
-            .duration0 = (uint16_t)(t0h / 100),
-            .level0    = 1,
-            .duration1 = (uint16_t)(t0l / 100),
-            .level1    = 0,
-        };
-        rmt_symbol_word_t custom_one = {
-            .duration0 = (uint16_t)(t1h / 100),
-            .level0    = 1,
-            .duration1 = (uint16_t)(t1l / 100),
-            .level1    = 0,
-        };
+        rmt_symbol_word_t custom_zero = {};
+        rmt_symbol_word_t custom_one = {};
+        if (!make_balanced_rmt_symbols(t0h, t0l, t1h, t1l, custom_zero, custom_one))
+        {
+            ESP_LOGE("RMT_NeoPixel", "Invalid custom timing %u/%u/%u/%u ns for %luHz RMT",
+                     t0h, t0l, t1h, t1l, (unsigned long)RMT_LED_STRIP_RESOLUTION_HZ);
+            return false;
+        }
 
         // Recreate the bytes encoder with the new symbols
         if (_inst->encoder)
