@@ -10,6 +10,7 @@
     #include "../PhysicalStripConfig.h"
     #include <Arduino.h>
     #include <esp_log.h>
+    #include <limits.h>
 
     #define RMT_LED_STRIP_RESOLUTION_HZ 40000000UL // 40MHz = 25ns RMT ticks
     #define RMT_MAX_DURATION_TICKS 32767U
@@ -473,10 +474,30 @@ bool RMT_NeoPixel_Serial::show()
         return false;
     }
 
-    // Wait for the final data symbol, then hold the line LOW for the complete
-    // protocol latch interval. eot_level alone selects the idle level; it does
-    // not create elapsed reset time.
-    rmt_tx_wait_all_done(_inst->channel, portMAX_DELAY);
+    // Wait for the final data symbol using the same frame-size-derived bound
+    // exposed to the manager. A peripheral fault must not turn into a watchdog
+    // reset merely because portMAX_DELAY was used here.
+    const uint32_t deadlineUs = getTransferTimeoutUs();
+    const uint64_t deadlineMs = ((uint64_t)deadlineUs + 999ULL) / 1000ULL;
+    const int timeoutMs = deadlineMs > (uint64_t)INT_MAX ? INT_MAX : (int)deadlineMs;
+    err = rmt_tx_wait_all_done(_inst->channel, timeoutMs);
+    if (err != ESP_OK)
+    {
+        // rmt_disable() is the ESP-IDF-defined way to terminate an unfinished
+        // transaction. Re-enable the channel for a later retry, retaining the
+        // existing encoder and profile; eot_level keeps the line at idle LOW.
+        const esp_err_t disableErr = rmt_disable(_inst->channel);
+        gpio_set_level((gpio_num_t)_inst->pin, 0);
+        delayMicroseconds(_inst->resetTimeUs);
+        const esp_err_t enableErr = rmt_enable(_inst->channel);
+        _inst->busy = false;
+        ESP_LOGE("RMT_NeoPixel", "RMT transfer timed out/failed (%d, disable=%d, enable=%d) after %dms",
+                 err, disableErr, enableErr, timeoutMs);
+        return false;
+    }
+
+    // eot_level alone selects the idle level; it does not create elapsed reset
+    // time, so hold LOW for the complete protocol-specific latch interval.
     delayMicroseconds(_inst->resetTimeUs);
     _inst->busy = false;
 
