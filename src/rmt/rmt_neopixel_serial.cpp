@@ -540,6 +540,7 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     const bool anyCustomTiming = t0h || t0l || t1h || t1l;
     const bool completeCustomTiming = t0h && t0l && t1h && t1l;
     if (anyCustomTiming && !completeCustomTiming) return false;
+    if (!completeCustomTiming && serialCfg->getTimingMode() != TimingMode::AUTO) return false;
     if (_inst->initialized && isBusy()) return false;
 
     const OneWireTimingProfile& profile = getOneWireTimingProfile(_inst->protocol);

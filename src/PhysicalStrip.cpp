@@ -695,64 +695,21 @@ bool PhysicalStrip::setTimingMode(TimingMode mode)
         return true; // Already set, no change needed
     }
 
+    if (!_config || !_config->isSerialConfig()) return false;
+    auto* sCfg = static_cast<SerialStripConfig*>(_config);
+    const SerialStripConfig previousConfig = *sCfg;
+    const TimingMode previousTimingMode = _timingMode;
+
+    // A named timing mode and a four-value override are mutually exclusive.
+    // Do not recreate a driver: that loses buffers, DMA ownership and the
+    // last known-good configuration if initialization later fails.
+    if (mode != TimingMode::CUSTOM) sCfg->setTiming(0, 0, 0, 0);
+    sCfg->setTimingMode(mode);
     _timingMode = mode;
+    if (applyConfig()) return true;
 
-    // Reinitialize driver with new timing mode
-    if (!_driver)
-    {
-        return false;
-    }
-
-#ifdef ARDUINO_ARCH_RP2040
-    // For PIO Serial driver, we need to recreate it
-    auto pioDriver = dynamic_cast<PIO_NeoPixel_Serial*>(_driver);
-    if (pioDriver)
-    {
-        // Save current state
-        bool wasBusy = pioDriver->isBusy();
-        if (wasBusy)
-        {
-            // Wait for current transfer to complete
-            uint32_t timeout = millis() + 100;
-            while (pioDriver->isBusy() && millis() < timeout)
-            {
-                delay(1);
-            }
-        }
-
-        // Delete old driver and create new one with new timing mode
-        delete _driver;
-        _driver = DriverFactory::create(
-            _dataPin,
-            _ledCount,
-            _protocol,
-            DriverType::SERIAL_1WIRE,
-            _dataPin,
-            _clockPin,
-            _timingMode);
-
-        if (!_driver)
-        {
-            _initialized = false;
-            return false;
-        }
-
-        // Reinitialize
-        if (!_driver->init())
-        {
-            _initialized = false;
-            return false;
-        }
-
-        // Factory doesn't get _colorOrder; restore it (else mode change swaps R/G on non-default orders).
-        _driver->setColorOrder(_colorOrder);
-
-        _initialized = true;
-        return true;
-    }
-#endif
-
-    // For non-PIO drivers or other platforms, timing mode has no effect
+    *sCfg = previousConfig;
+    _timingMode = previousTimingMode;
     return false;
 }
 

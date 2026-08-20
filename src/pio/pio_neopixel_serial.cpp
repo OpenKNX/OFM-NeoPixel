@@ -453,9 +453,34 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     const uint8_t oneHighCycles = _inst->oneHighCycles ? _inst->oneHighCycles : 6;
     const uint8_t cyclesPerBit = _inst->cyclesPerBit ? _inst->cyclesPerBit : 10;
     const float sysClk = (float)clock_get_hz(clk_sys);
-    const float targetBitrate = completeCustomTiming
-                                    ? 1000000000.0f / ((float)t1h * (float)cyclesPerBit / (float)oneHighCycles)
-                                    : (float)profile.bitRateHz;
+    const TimingMode requestedMode = completeCustomTiming
+                                         ? TimingMode::CUSTOM
+                                         : serialCfg->getTimingMode();
+    if (requestedMode == TimingMode::CUSTOM && !completeCustomTiming) return false;
+
+    float targetBitrate = (float)profile.bitRateHz;
+    if (completeCustomTiming)
+    {
+        targetBitrate = 1000000000.0f / ((float)t1h * (float)cyclesPerBit / (float)oneHighCycles);
+    }
+    else
+    {
+        switch (requestedMode)
+        {
+            case TimingMode::AUTO_LEGACY: targetBitrate = 960000.0f; break;
+            case TimingMode::SLOW_20PCT: targetBitrate *= 0.80f; break;
+            case TimingMode::SLOW_15PCT: targetBitrate *= 0.85f; break;
+            case TimingMode::SLOW_10PCT: targetBitrate *= 0.90f; break;
+            case TimingMode::SLOW_5PCT: targetBitrate *= 0.95f; break;
+            case TimingMode::FAST_5PCT: targetBitrate *= 1.05f; break;
+            case TimingMode::FAST_10PCT: targetBitrate *= 1.10f; break;
+            case TimingMode::FAST_15PCT: targetBitrate *= 1.15f; break;
+            case TimingMode::FAST_20PCT: targetBitrate *= 1.20f; break;
+            case TimingMode::FAST_25PCT: targetBitrate *= 1.25f; break;
+            case TimingMode::AUTO:
+            default: break;
+        }
+    }
     const float targetClkdiv = sysClk / (targetBitrate * (float)cyclesPerBit);
     if (targetClkdiv < 1.0f || targetClkdiv > 65536.0f) return false;
 
@@ -499,7 +524,7 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
 
     _inst->actual_clkdiv = targetClkdiv;
     _inst->actual_bitrate = sysClk / targetClkdiv / (float)cyclesPerBit;
-    _inst->timingMode = completeCustomTiming ? TimingMode::CUSTOM : TimingMode::AUTO;
+    _inst->timingMode = requestedMode;
     _inst->resetTimeUs = serialCfg->getResetTime() > 0
                               ? serialCfg->getResetTime()
                               : profile.resetTimeUs;
