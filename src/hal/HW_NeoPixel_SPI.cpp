@@ -647,7 +647,7 @@ void HW_NeoPixel_SPI::clear()
  */
 DriverCapabilities HW_NeoPixel_SPI::getCapabilities() const
 {
-    DriverCapabilities caps;
+    DriverCapabilities caps = {};
     caps.supportsRGBW = false;    // SPI protocols do not support RGBW
     caps.supportsDMA = false;     // Hardware SPI is simple, no DMA needed
     caps.supportsAsync = false;   // Synchronous transmission

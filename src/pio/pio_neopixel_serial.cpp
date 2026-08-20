@@ -1502,7 +1502,7 @@ uint32_t PIO_NeoPixel_Serial::getTransferTimeoutUs() const
  */
 DriverCapabilities PIO_NeoPixel_Serial::getCapabilities() const
 {
-    DriverCapabilities caps;
+    DriverCapabilities caps = {};
     caps.supportsRGBW = (_inst && _inst->bytesPerLed >= 4);
     caps.supportsRGBCCT = (_inst && _inst->bytesPerLed == 5);
     caps.supportsDMA = (_inst && _inst->useDMA);
@@ -1520,10 +1520,7 @@ DriverCapabilities PIO_NeoPixel_Serial::getCapabilities() const
  */
 void PIO_NeoPixel_Serial::registerDMAHandler(int channel, PIO_NeoPixel_Serial* instance)
 {
-    if (channel >= 0 && channel < MAX_DMA_CHANNELS)
-    {
-        g_serialHandlers[channel] = instance; // Use global registry
-    }
+    setSerialDMAHandler(channel, instance);
 }
 
 /**
@@ -1532,10 +1529,7 @@ void PIO_NeoPixel_Serial::registerDMAHandler(int channel, PIO_NeoPixel_Serial* i
  */
 void PIO_NeoPixel_Serial::unregisterDMAHandler(int channel)
 {
-    if (channel >= 0 && channel < MAX_DMA_CHANNELS)
-    {
-        g_serialHandlers[channel] = nullptr; // Use global registry
-    }
+    setSerialDMAHandler(channel, nullptr);
 }
 
 /**

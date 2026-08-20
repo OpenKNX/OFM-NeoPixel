@@ -17,6 +17,7 @@
 
     #include <Arduino.h>
     #include <hardware/dma.h>
+    #include <hardware/sync.h>
     #include <stdint.h>
 
     // DMA channel count is chip-specific: RP2040 has 12, RP2350 has 16. Use the SDK's
@@ -39,6 +40,27 @@ class PIO_NeoPixel_SPI;    // Forward declaration for SPI strips
 //
 inline PIO_NeoPixel_Serial* volatile g_serialHandlers[MAX_DMA_CHANNELS] = {nullptr};
 inline PIO_NeoPixel_SPI* volatile g_spiHandlers[MAX_DMA_CHANNELS] = {nullptr};
+
+// The IRQ handler dereferences these registries while DMA completion interrupts
+// are enabled. Update a registry entry with interrupts masked so a destructor
+// cannot clear (or an initializer cannot publish) a pointer halfway through an
+// ISR dispatch. DMA is disabled and settled before unregistration by each
+// driver, making the entry lifetime safe as well.
+inline void setSerialDMAHandler(int channel, PIO_NeoPixel_Serial* instance)
+{
+    if (channel < 0 || channel >= MAX_DMA_CHANNELS) return;
+    const uint32_t interruptState = save_and_disable_interrupts();
+    g_serialHandlers[channel] = instance;
+    restore_interrupts(interruptState);
+}
+
+inline void setSPIDMAHandler(int channel, PIO_NeoPixel_SPI* instance)
+{
+    if (channel < 0 || channel >= MAX_DMA_CHANNELS) return;
+    const uint32_t interruptState = save_and_disable_interrupts();
+    g_spiHandlers[channel] = instance;
+    restore_interrupts(interruptState);
+}
 
 void unifiedDmaIRQHandler(); // Unified DMA IRQ Handler declaration
 

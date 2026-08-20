@@ -994,7 +994,7 @@ void PIO_NeoPixel_SPI::clear()
  */
 DriverCapabilities PIO_NeoPixel_SPI::getCapabilities() const
 {
-    DriverCapabilities caps;
+    DriverCapabilities caps = {};
     caps.supportsRGBW = false;
     caps.supportsDMA = (_inst && _inst->useDMA);
     caps.supportsAsync = caps.supportsDMA;
@@ -1010,10 +1010,7 @@ DriverCapabilities PIO_NeoPixel_SPI::getCapabilities() const
  */
 void PIO_NeoPixel_SPI::registerDMAHandler(int channel, PIO_NeoPixel_SPI* instance)
 {
-    if (channel >= 0 && channel < MAX_DMA_CHANNELS)
-    {
-        g_spiHandlers[channel] = instance; // Use global registry
-    }
+    setSPIDMAHandler(channel, instance);
 }
 
 /**
@@ -1022,10 +1019,7 @@ void PIO_NeoPixel_SPI::registerDMAHandler(int channel, PIO_NeoPixel_SPI* instanc
  */
 void PIO_NeoPixel_SPI::unregisterDMAHandler(int channel)
 {
-    if (channel >= 0 && channel < MAX_DMA_CHANNELS)
-    {
-        g_spiHandlers[channel] = nullptr; // Use global registry
-    }
+    setSPIDMAHandler(channel, nullptr);
 }
 
 /*

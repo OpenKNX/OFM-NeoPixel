@@ -606,8 +606,7 @@ DriverCapabilities PhysicalStrip::getCapabilities() const
 {
     if (!_driver)
     {
-        DriverCapabilities empty = {false, false, false, 0, 0};
-        return empty;
+        return {};
     }
     return _driver->getCapabilities();
 }
