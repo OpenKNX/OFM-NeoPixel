@@ -196,7 +196,7 @@ class NeoPixel : public OpenKNX::Module
     enum class ScanPhase : uint8_t
     {
         IDLE       = 0, ///< No scan running
-        SHOW_COLOR = 1, ///< Showing current profile colour on the full strip
+        SHOW_COLOR = 1, ///< Cycling the current profile's qualification payload
         WAIT_INPUT = 2, ///< Waiting for next/apply/stop or auto-advance timeout
         PAUSE      = 3, ///< Brief blank gap between profiles
         DONE       = 4, ///< Transient end state (→ IDLE)
@@ -205,6 +205,7 @@ class NeoPixel : public OpenKNX::Module
     uint32_t   _scanStripId    = 0;
     uint8_t    _scanProfileIdx = 0;
     uint32_t   _scanPhaseStart = 0;
+    uint8_t    _scanPayloadPhase = 0;
 
     // Saved timing state to restore if user calls 'scan' without applying a profile
     uint16_t   _scanSavedT0H   = 0;

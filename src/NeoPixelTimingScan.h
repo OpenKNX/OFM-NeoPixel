@@ -22,8 +22,10 @@ struct CloneTimingProfile
 extern const CloneTimingProfile kCloneProfiles[];
 extern const uint8_t            kCloneProfileCount;
 extern const uint32_t           kScanColorDurationMs;
+extern const uint8_t            kScanPayloadPhaseCount;
+extern const uint32_t           kScanPayloadPhaseDurationMs;
 extern const uint32_t           kScanPauseDurationMs;
 extern const uint32_t           kScanWaitTimeoutMs;   ///< Auto-advance timeout while waiting for user input (ms)
 
 bool applyCloneTimingProfile(PhysicalStrip* strip, const CloneTimingProfile& profile);
-bool writeCloneTimingStressPayload(PhysicalStrip* strip);
+bool writeCloneTimingStressPayload(PhysicalStrip* strip, uint8_t phase = 0);

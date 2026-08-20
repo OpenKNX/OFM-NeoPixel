@@ -110,7 +110,9 @@ const CloneTimingProfile kCloneProfiles[] = {
     { "SLOW20_LONG", 469,1094, 938, 625, 300, "640kHz waveform, 300us reset" },
 };
 const uint8_t  kCloneProfileCount   = sizeof(kCloneProfiles) / sizeof(kCloneProfiles[0]);
-const uint32_t kScanColorDurationMs = 2000;  ///< Show each profile for 2 s before prompting
+const uint32_t kScanColorDurationMs = 2100;  ///< Show each complete payload sequence for 2.1 s before prompting
+const uint8_t  kScanPayloadPhaseCount = 6;
+const uint32_t kScanPayloadPhaseDurationMs = kScanColorDurationMs / kScanPayloadPhaseCount;
 const uint32_t kScanPauseDurationMs = 300;   ///< Brief blank gap between profiles (ms)
 const uint32_t kScanWaitTimeoutMs   = 10000; ///< Auto-advance if no input after 10 s
 
@@ -121,15 +123,26 @@ bool applyCloneTimingProfile(PhysicalStrip* strip, const CloneTimingProfile& pro
                                             profile.resetUs);
 }
 
-bool writeCloneTimingStressPayload(PhysicalStrip* strip)
+bool writeCloneTimingStressPayload(PhysicalStrip* strip, uint8_t phase)
 {
     if (!strip) return false;
     uint8_t* buffer = strip->getBuffer();
     const size_t size = strip->getBufferSize();
     if (!buffer || size == 0) return false;
 
-    static constexpr uint8_t pattern[] = {0x00, 0xFF, 0xAA, 0x55, 0x80, 0x01};
-    for (size_t i = 0; i < size; i++) buffer[i] = pattern[i % sizeof(pattern)];
+    switch (phase % kScanPayloadPhaseCount)
+    {
+        case 0: memset(buffer, 0x00, size); break; // all-zero
+        case 1: memset(buffer, 0xFF, size); break; // all-one
+        case 2: memset(buffer, 0xAA, size); break; // alternating 1010
+        case 3: memset(buffer, 0x55, size); break; // alternating 0101
+        case 4:
+            for (size_t i = 0; i < size; i++) buffer[i] = (uint8_t)(1U << (i & 7U));
+            break; // walking-one across all bit positions
+        case 5:
+            for (size_t i = 0; i < size; i++) buffer[i] = (uint8_t)~(1U << (i & 7U));
+            break; // walking-zero across all bit positions
+    }
     return true;
 }
 
@@ -5234,7 +5247,7 @@ bool NeoPixel::processPhysTimingScanCommand(uint32_t stripId)
                                  (int)kCloneProfileCount,
                                  (int)(kScanColorDurationMs / 1000),
                                  (int)(kScanWaitTimeoutMs / 1000));
-    openknx.logger.log("  Watch the ENTIRE STRIP while every candidate sends the same stress pattern.");
+    openknx.logger.log("  Watch the ENTIRE STRIP while every candidate sends the same six-phase qualification pattern.");
     openknx.logger.log("  Commands: neo scan next | neo scan apply | neo scan stop");
     openknx.logger.log("");
     openknx.logger.log("  Profile │ Payload │ Waveform/Reset");
@@ -5242,7 +5255,7 @@ bool NeoPixel::processPhysTimingScanCommand(uint32_t stripId)
     for (uint8_t i = 0; i < kCloneProfileCount; i++)
     {
         const CloneTimingProfile& p = kCloneProfiles[i];
-        openknx.logger.logWithValues("    %d     │ stress │ %s", (int)i, p.desc);
+        openknx.logger.logWithValues("    %d     │ 00/FF/AA/55/walk │ %s", (int)i, p.desc);
     }
     openknx.logger.log("");
     openknx.logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -5260,9 +5273,21 @@ bool NeoPixel::processPhysTimingScanCommand(uint32_t stripId)
     // Apply profile 0 immediately; the state machine will start from SHOW_COLOR
     const CloneTimingProfile& first = kCloneProfiles[0];
     if (!applyCloneTimingProfile(strip, first) ||
-        !writeCloneTimingStressPayload(strip) || !strip->show())
+        !writeCloneTimingStressPayload(strip, 0) || !strip->show())
     {
         openknx.logger.log("ERROR: Failed to apply or transmit the first timing candidate.");
+        if (_scanSavedMode == TimingMode::CUSTOM)
+            strip->setCustomTiming(_scanSavedT0H, _scanSavedT0L,
+                                   _scanSavedT1H, _scanSavedT1L, _scanSavedReset);
+        else
+        {
+            sCfg->setTiming(0, 0, 0, 0);
+            sCfg->setResetTime(_scanSavedReset);
+            sCfg->setTimingMode(_scanSavedMode);
+            strip->setTimingMode(_scanSavedMode);
+        }
+        memcpy(buffer, _scanSavedBuffer.data(), _scanSavedBuffer.size());
+        strip->show();
         _scanSavedBuffer.clear();
         return true;
     }
@@ -5270,6 +5295,7 @@ bool NeoPixel::processPhysTimingScanCommand(uint32_t stripId)
     openknx.logger.logWithValues("Profile 1/%d: %s — %s",
                                  (int)kCloneProfileCount, first.name, first.desc);
 
+    _scanPayloadPhase  = 0;
     _scanPhaseStart    = millis();
     _scanPromptPrinted = false;
     _scanPhase         = ScanPhase::SHOW_COLOR;
@@ -5359,8 +5385,17 @@ bool NeoPixel::processScanControlCommand(const std::string& cmd)
                 strip->setTimingMode(_scanSavedMode);
             }
         }
-        strip->clear();
-        strip->show();
+        uint8_t* buffer = strip->getBuffer();
+        if (buffer && _scanSavedBuffer.size() == strip->getBufferSize())
+        {
+            memcpy(buffer, _scanSavedBuffer.data(), _scanSavedBuffer.size());
+        }
+        if (!strip->show())
+        {
+            openknx.logger.logWithValues("ERROR: Could not restore the saved LED frame: %s",
+                                         strip->getLastErrorName());
+        }
+        _scanSavedBuffer.clear();
         _scanPhase      = ScanPhase::IDLE;
         _lastUpdateTime = millis();
     };
@@ -5368,9 +5403,20 @@ bool NeoPixel::processScanControlCommand(const std::string& cmd)
     // ── apply ────────────────────────────────────────────────────────────────
     if (cmd == "apply")
     {
-        openknx.logger.logWithValues("Applying profile %d (%s) permanently ...",
+        openknx.logger.logWithValues("Applying profile %d (%s) for this boot ...",
                                      (int)_scanProfileIdx, kCloneProfiles[_scanProfileIdx].name);
         processPhysTimingProfileCommand(_scanStripId, _scanProfileIdx);
+        uint8_t* buffer = strip->getBuffer();
+        if (buffer && _scanSavedBuffer.size() == strip->getBufferSize())
+        {
+            memcpy(buffer, _scanSavedBuffer.data(), _scanSavedBuffer.size());
+            if (!strip->show())
+            {
+                openknx.logger.logWithValues("ERROR: Profile kept, but the saved LED frame could not be restored: %s",
+                                             strip->getLastErrorName());
+            }
+        }
+        _scanSavedBuffer.clear();
         _scanPhase      = ScanPhase::IDLE;
         _lastUpdateTime = millis();
         return true;

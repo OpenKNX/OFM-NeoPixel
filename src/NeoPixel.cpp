@@ -171,8 +171,8 @@ void NeoPixel::loop(bool configured)
  * @brief Non-blocking state machine for clone timing scan.
  *
  * Called every loop() iteration while _scanPhase != IDLE.
- * Cycles through all kCloneProfiles with the same byte-pattern stress frame
- * for kScanColorDurationMs ms, then blanks the line
+ * Cycles through all kCloneProfiles with the same six-phase byte-pattern
+ * qualification sequence, then blanks the line
  * for kScanPauseDurationMs ms before moving to the next profile.
  *
  * After all profiles, restores the original timing and prints a summary.
@@ -188,10 +188,23 @@ void NeoPixel::loopTimingScan()
     {
         case ScanPhase::SHOW_COLOR:
         {
-            if (now - _scanPhaseStart < kScanColorDurationMs)
-                return; // Still showing — wait
+            if (now - _scanPhaseStart < kScanPayloadPhaseDurationMs)
+                return; // Keep the current qualification phase visible.
 
-            // Transition to interactive wait
+            if (++_scanPayloadPhase < kScanPayloadPhaseCount)
+            {
+                if (!writeCloneTimingStressPayload(strip, _scanPayloadPhase) || !strip->show())
+                {
+                    openknx.logger.log("ERROR: Timing candidate payload could not be transmitted; restoring original state.");
+                    processScanControlCommand("stop");
+                    return;
+                }
+                _scanPhaseStart = now;
+                return;
+            }
+
+            // All payload phases were emitted with this waveform. Transition to
+            // the interactive result prompt.
             _scanPhaseStart    = now;
             _scanPromptPrinted = false;
             _scanPhase         = ScanPhase::WAIT_INPUT;
@@ -232,16 +245,17 @@ void NeoPixel::loopTimingScan()
                 return;
             }
 
-            // Apply the next complete waveform and the same stress payload.
+            // Apply the next complete waveform and restart the same payload sequence.
             const CloneTimingProfile& p = kCloneProfiles[_scanProfileIdx];
             if (!applyCloneTimingProfile(strip, p) ||
-                !writeCloneTimingStressPayload(strip) || !strip->show())
+                !writeCloneTimingStressPayload(strip, 0) || !strip->show())
             {
                 openknx.logger.log("ERROR: Timing candidate could not be applied or transmitted; restoring original state.");
                 processScanControlCommand("stop");
                 return;
             }
 
+            _scanPayloadPhase  = 0;
             _scanPhaseStart    = now;
             _scanPromptPrinted = false;
             _scanPhase         = ScanPhase::SHOW_COLOR;
