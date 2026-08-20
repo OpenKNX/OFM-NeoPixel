@@ -176,6 +176,7 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
     _inst->encoder = nullptr;
     _inst->initialized = false;
     _inst->busy = false;
+    _inst->usingDMA = false;
     _inst->resetTimeUs = timing.resetTimeUs;
     _inst->bitPeriodNs = ((uint32_t)timing.t0hNs + timing.t0lNs + timing.t1hNs + timing.t1lNs + 1U) / 2U;
 
@@ -210,6 +211,7 @@ RMT_NeoPixel_Serial::~RMT_NeoPixel_Serial()
             }
             if (_inst->channel)
             {
+                rmt_disable(_inst->channel);
                 rmt_del_channel(_inst->channel);
             }
         }
@@ -286,6 +288,7 @@ bool RMT_NeoPixel_Serial::init()
                  tx_chan_config.flags.with_dma ? "on" : "off");
         return false;
     }
+    _inst->usingDMA = tx_chan_config.flags.with_dma;
 
     // Create an encoder from the selected protocol profile. Its two symbols
     // are quantised together so a payload's bit pattern cannot change its
@@ -527,9 +530,10 @@ void RMT_NeoPixel_Serial::clear()
 
 DriverCapabilities RMT_NeoPixel_Serial::getCapabilities() const
 {
-    DriverCapabilities caps;
+    DriverCapabilities caps = {};
     caps.supportsRGBW = (_inst && _inst->bytesPerLed == 4);
-    caps.supportsDMA = true;
+    caps.supportsRGBCCT = (_inst && _inst->bytesPerLed == 5);
+    caps.supportsDMA = (_inst && _inst->usingDMA);
     caps.supportsAsync = false; // show() is blocking (rmt_tx_wait_all_done)
     caps.maxFrequency = 400;    // ~400Hz update rate
     caps.maxLeds = 2000;

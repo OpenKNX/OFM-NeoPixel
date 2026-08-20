@@ -55,6 +55,7 @@ struct rmt_neopixel_serial_inst
 
     bool initialized;   // Initialized?
     volatile bool busy; // Transfer running?
+    bool usingDMA;      // Channel was successfully allocated with RMT DMA
     uint32_t resetTimeUs; // LOW latch interval after the final RMT symbol
     uint32_t bitPeriodNs; // Realised common bit-cell period of the active encoder
 
