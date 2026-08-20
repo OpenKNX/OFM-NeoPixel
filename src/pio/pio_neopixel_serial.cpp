@@ -1,6 +1,7 @@
 #if defined(ARDUINO_ARCH_RP2040)
 
     #include "pio_neopixel_serial.h"
+    #include "../OneWireTimingMath.h"
     #include "../OneWireTimingProfile.h"
     #include "../PhysicalStripConfig.h"
     #include "OpenKNX.h"
@@ -1231,46 +1232,12 @@ bool PIO_NeoPixel_Serial::sendDataPIO()
     // CRITICAL: Memory barrier to ensure all buffer writes are visible to PIO!
     __dmb(); // Data Memory Barrier
 
-    uint32_t bytesPerTransfer = _inst->bytesPerLed;
-    uint32_t numTransfers = _inst->bufferSize / bytesPerTransfer;
-    uint8_t* buf = _inst->buffer;
-
-    if (bytesPerTransfer == 3)
+    const size_t wordCount = oneWirePackedWordCount(_inst->bufferSize, _inst->bytesPerLed);
+    if (wordCount == 0) return false;
+    for (size_t i = 0; i < wordCount; ++i)
     {
-        // 3-byte buffer: the unused low byte is not shifted because RGB uses
-        // a 24-bit autopull threshold.
-        for (uint32_t i = 0; i < numTransfers; i++)
-        {
-            uint32_t idx = i * 3;
-            uint32_t value = ((uint32_t)buf[idx] << 24) |     // Byte0 → bits 31-24 (sent first)
-                             ((uint32_t)buf[idx + 1] << 16) | // Byte1 → bits 23-16
-                             ((uint32_t)buf[idx + 2] << 8);   // Byte2 → bits 15-8
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, putTimeoutUs)) return false;
-        }
-    }
-    else if (bytesPerTransfer == 4)
-    {
-        // 4-byte buffer (RGBW): identical to packDataToDMABuffer().
-        for (uint32_t i = 0; i < numTransfers; i++)
-        {
-            uint32_t idx = i * 4;
-            uint32_t value = ((uint32_t)buf[idx] << 24) |     // Byte0 → bits 31-24 (sent first)
-                             ((uint32_t)buf[idx + 1] << 16) | // Byte1 → bits 23-16
-                             ((uint32_t)buf[idx + 2] << 8) |  // Byte2 → bits 15-8
-                             (uint32_t)buf[idx + 3];          // Byte3 → bits 7-0
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, putTimeoutUs)) return false;
-        }
-    }
-    else if (bytesPerTransfer == 5)
-    {
-        // A 5-channel pixel is 40 bits. Emit one valid byte per 32-bit FIFO
-        // word with 8-bit autopull so a final alignment word can never add
-        // 8/16/24 false zero bits after the frame.
-        for (size_t i = 0; i < _inst->bufferSize; i++)
-        {
-            const uint32_t value = (uint32_t)buf[i] << 24;
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, putTimeoutUs)) return false;
-        }
+        const uint32_t value = oneWirePackedWordAt(_inst->buffer, _inst->bytesPerLed, i);
+        if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, putTimeoutUs)) return false;
     }
 
     return true;
@@ -1347,42 +1314,10 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
 {
     if (!_inst || !_inst->buffer || !_inst->dmaBuffer) return;
 
-    uint8_t* src = _inst->buffer;
     uint32_t* dst = _inst->dmaBuffer;
-    uint32_t bytesPerLed = _inst->bytesPerLed;
-
-    if (bytesPerLed == 3)
-    {
-        // 3-byte buffer: Pack for MSB-first transmission (PIO shifts left, sends bit 31 first!)
-        // Buffer layout: [Byte0, Byte1, Byte2] → Pack as Byte0<<24 | Byte1<<16 | Byte2<<8
-        for (uint16_t i = 0; i < _inst->ledCount; i++)
-        {
-            uint32_t idx = i * 3;
-            dst[i] = ((uint32_t)src[idx] << 24) |     // Byte0 → bits 31-24 (sent 1st!)
-                     ((uint32_t)src[idx + 1] << 16) | // Byte1 → bits 23-16
-                     ((uint32_t)src[idx + 2] << 8);   // Byte2 → bits 15-8
-        }
-    }
-    else if (bytesPerLed == 4)
-    {
-        // 4-byte buffer (RGBW): Pack for MSB-first transmission (PIO shifts left, sends bit 31 first!)
-        // Buffer layout: [Byte0, Byte1, Byte2, Byte3] → Pack as Byte0<<24 | Byte1<<16 | Byte2<<8 | Byte3<<0
-        for (uint16_t i = 0; i < _inst->ledCount; i++)
-        {
-            uint32_t idx = i * 4;
-            dst[i] = ((uint32_t)src[idx] << 24) |     // Byte0 → bits 31-24 (sent 1st!)
-                     ((uint32_t)src[idx + 1] << 16) | // Byte1 → bits 23-16
-                     ((uint32_t)src[idx + 2] << 8) |  // Byte2 → bits 15-8
-                     (uint32_t)src[idx + 3];          // Byte3 → bits 7-0 (sent last!)
-        }
-    }
-    else if (bytesPerLed == 5)
-    {
-        for (size_t i = 0; i < _inst->bufferSize; i++)
-        {
-            dst[i] = (uint32_t)src[i] << 24;
-        }
-    }
+    const size_t wordCount = oneWirePackedWordCount(_inst->bufferSize, _inst->bytesPerLed);
+    for (size_t i = 0; i < wordCount; ++i)
+        dst[i] = oneWirePackedWordAt(_inst->buffer, _inst->bytesPerLed, i);
 }
 
 /**
@@ -1489,16 +1424,13 @@ uint32_t PIO_NeoPixel_Serial::getTransferTimeoutUs() const
     else if (_inst->bytesPerLed == 4) finalWordBits = 32;
     if (finalWordBits == 0) finalWordBits = 32;
 
-    const uint64_t payloadUs = ((uint64_t)_inst->bufferSize * 8ULL * 1000000ULL + bitrate - 1ULL) / bitrate;
-    const uint64_t finalWordUs = ((uint64_t)finalWordBits * 1000000ULL + bitrate - 1ULL) / bitrate;
-    const uint64_t deadlineUs = payloadUs + finalWordUs + _inst->resetTimeUs + 2000ULL;
-    return deadlineUs > UINT32_MAX ? UINT32_MAX : (uint32_t)deadlineUs;
+    return oneWireTransferDeadlineUs(_inst->bufferSize, bitrate, finalWordBits, _inst->resetTimeUs);
 }
 
 uint32_t PIO_NeoPixel_Serial::getFinalWordDrainUs() const
 {
     if (!_inst || _inst->fifoWordBits == 0 || _inst->actual_bitrate <= 1.0f) return 0;
-    return (uint32_t)(((float)_inst->fifoWordBits * 1000000.0f) / _inst->actual_bitrate + 0.999f) + 1U;
+    return oneWireFinalWordDrainUs(_inst->fifoWordBits, (uint32_t)_inst->actual_bitrate);
 }
 
 uint32_t PIO_NeoPixel_Serial::getReadyAtUs() const

@@ -6,6 +6,7 @@
 #if defined(ARDUINO_ARCH_ESP32)
 
     #include "rmt_neopixel_serial.h"
+    #include "../OneWireTimingMath.h"
     #include "../OneWireTimingProfile.h"
     #include "../PhysicalStripConfig.h"
     #include <Arduino.h>
@@ -23,16 +24,6 @@ RMT_NeoPixel_Serial* RMT_NeoPixel_Serial::_instances[8] = {nullptr};
  * RMT cannot emit a zero-duration half-symbol, and this driver only supports
  * symbols that fit in the hardware duration field.
  */
-static bool rmt_ns_to_ticks(uint32_t durationNs, uint16_t& ticks)
-{
-    const uint64_t scaled = (uint64_t)durationNs * RMT_LED_STRIP_RESOLUTION_HZ;
-    uint64_t rounded = (scaled + 500000000ULL) / 1000000000ULL;
-    if (rounded == 0) rounded = 1;
-    if (rounded > RMT_MAX_DURATION_TICKS) return false;
-    ticks = (uint16_t)rounded;
-    return true;
-}
-
 /**
  * Quantise custom symbols without allowing the zero and one bit cells to drift
  * apart. The current ETS frequency controls one serial clock, therefore the
@@ -45,34 +36,23 @@ static bool make_balanced_rmt_symbols(uint16_t t0h, uint16_t t0l,
                                       rmt_symbol_word_t& one,
                                       uint16_t* periodTicksOut = nullptr)
 {
-    const uint32_t zeroPeriodNs = (uint32_t)t0h + t0l;
-    const uint32_t onePeriodNs = (uint32_t)t1h + t1l;
-    const uint32_t targetPeriodNs = (zeroPeriodNs + onePeriodNs + 1U) / 2U;
-
-    uint16_t periodTicks = 0;
-    uint16_t zeroHighTicks = 0;
-    uint16_t oneHighTicks = 0;
-    if (!rmt_ns_to_ticks(targetPeriodNs, periodTicks) ||
-        !rmt_ns_to_ticks(t0h, zeroHighTicks) ||
-        !rmt_ns_to_ticks(t1h, oneHighTicks) ||
-        zeroHighTicks >= periodTicks || oneHighTicks >= periodTicks)
-    {
-        return false;
-    }
+    OneWireBalancedSymbolTicks ticks = {};
+    if (!oneWireMakeBalancedSymbols(t0h, t0l, t1h, t1l, RMT_LED_STRIP_RESOLUTION_HZ,
+                                    RMT_MAX_DURATION_TICKS, ticks)) return false;
 
     zero = {
-        .duration0 = zeroHighTicks,
+        .duration0 = ticks.zeroHigh,
         .level0 = 1,
-        .duration1 = (uint16_t)(periodTicks - zeroHighTicks),
+        .duration1 = ticks.zeroLow,
         .level1 = 0,
     };
     one = {
-        .duration0 = oneHighTicks,
+        .duration0 = ticks.oneHigh,
         .level0 = 1,
-        .duration1 = (uint16_t)(periodTicks - oneHighTicks),
+        .duration1 = ticks.oneLow,
         .level1 = 0,
     };
-    if (periodTicksOut) *periodTicksOut = periodTicks;
+    if (periodTicksOut) *periodTicksOut = ticks.period;
     return true;
 }
 
