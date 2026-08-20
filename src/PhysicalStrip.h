@@ -88,6 +88,9 @@ class PhysicalStrip
     const char* getLastErrorName() const { return physicalStripErrorName(_lastError); }
     uint32_t getSentFrameCount() const { return _sentFrameCount; }
     uint32_t getSkippedFrameCount() const { return _skippedFrameCount; }
+    uint32_t getTimeoutCount() const { return _timeoutCount; }
+    uint32_t getTransportFailureCount() const { return _transportFailureCount; }
+    uint32_t getConfigurationFailureCount() const { return _configurationFailureCount; }
     void markFrameStarted() { _frameInFlight = true; }
     void markFrameSent() { _dirty = false; _frameInFlight = false; _sentFrameCount++; }
     void markFrameFailed() { _frameInFlight = false; }
@@ -257,6 +260,9 @@ class PhysicalStrip
     bool _frameInFlight;
     uint32_t _sentFrameCount;
     uint32_t _skippedFrameCount;
+    uint32_t _timeoutCount;
+    uint32_t _transportFailureCount;
+    uint32_t _configurationFailureCount;
     PhysicalStripError _lastError;
 
     bool createDriver(DriverType driverType); // Create appropriate driver

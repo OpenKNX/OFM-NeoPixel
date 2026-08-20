@@ -9,6 +9,7 @@
  */
 
 #include "NeoPixel.h"
+#include "OneWireTimingProfile.h"
 
 // BStandard library includes
 #include <cstdarg>
@@ -4910,6 +4911,25 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
             TimingMode currentMode = strip->getTimingMode();
             const char* modeName = getTimingModeName(currentMode);
             openknx.logger.logWithValues("  Timing Mode:     %s", modeName);
+
+            const OneWireTimingProfile& profile = getOneWireTimingProfile(protocol);
+            const auto* serialCfg = (strip->getConfig() && strip->getConfig()->isSerialConfig())
+                                        ? static_cast<const SerialStripConfig*>(strip->getConfig())
+                                        : nullptr;
+            const bool hasCustom = serialCfg && serialCfg->getT0H() && serialCfg->getT0L() &&
+                                   serialCfg->getT1H() && serialCfg->getT1L();
+            const uint16_t reqT0H = hasCustom ? serialCfg->getT0H() : profile.t0hNs;
+            const uint16_t reqT0L = hasCustom ? serialCfg->getT0L() : profile.t0lNs;
+            const uint16_t reqT1H = hasCustom ? serialCfg->getT1H() : profile.t1hNs;
+            const uint16_t reqT1L = hasCustom ? serialCfg->getT1L() : profile.t1lNs;
+            const uint32_t resetUs = serialCfg && serialCfg->getResetTime() > 0
+                                         ? serialCfg->getResetTime()
+                                         : profile.resetTimeUs;
+            openknx.logger.logWithValues("  Profile:         %s (%s)", profile.name,
+                                         hasCustom ? "custom pulse override" : "protocol default");
+            openknx.logger.logWithValues("  Polarity:        %s", profile.inverted ? "inverted" : "normal");
+            openknx.logger.logWithValues("  Requested ns:    0=%u/%u, 1=%u/%u, reset=%lu us",
+                                         reqT0H, reqT0L, reqT1H, reqT1L, (unsigned long)resetUs);
         }
         openknx.logger.log("");
 
@@ -4927,15 +4947,51 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
             openknx.logger.logWithValues("  State Machine:   SM%d", pioSerialDriver->getStateMachine());
 
             uint32_t target_freq = pioSerialDriver->getFrequency();
-            float actual_bitrate = pioSerialDriver->getActualBitrate();
             float actual_clkdiv = pioSerialDriver->getActualClkdiv();
+            const uint32_t systemClockHz = clock_get_hz(clk_sys);
+            const uint8_t cycles = pioSerialDriver->getCyclesPerBit();
+            const float actual_bitrate = actual_clkdiv > 0.0f && cycles > 0
+                                             ? systemClockHz / (actual_clkdiv * cycles)
+                                             : 0.0f;
 
-            openknx.logger.logWithValues("  Target Freq:     %.0f kHz", actual_bitrate / 1000.0f);
+            openknx.logger.logWithValues("  Target Freq:     %lu kHz", (unsigned long)(target_freq / 1000U));
             openknx.logger.logWithValues("  Calc. ClkDiv:    %.3f", actual_clkdiv);
+            openknx.logger.logWithValues("  Clock source:    clk_sys=%lu Hz", (unsigned long)systemClockHz);
             openknx.logger.logWithValues("  Actual Bitrate:  %.0f kHz", actual_bitrate / 1000.0f);
 
+            const uint8_t oneHighCycles = pioSerialDriver->getOneHighCycles();
+            const uint8_t zeroHighCycles = cycles == 10 ? 3 : 1;
+            const float cycleNs = (actual_bitrate > 0.0f && cycles > 0)
+                                      ? 1000000000.0f / (actual_bitrate * cycles)
+                                      : 0.0f;
+            const float t0hNs = zeroHighCycles * cycleNs;
+            const float t1hNs = oneHighCycles * cycleNs;
+            const float bitNs = cycles * cycleNs;
+            openknx.logger.logWithValues("  Cadence:         0H=%u/%u, 1H=%u/%u cycles",
+                                         zeroHighCycles, cycles, oneHighCycles, cycles);
+            openknx.logger.logWithValues("  Realized ns:     0=%.0f/%.0f, 1=%.0f/%.0f",
+                                         t0hNs, bitNs - t0hNs, t1hNs, bitNs - t1hNs);
+            openknx.logger.logWithValues("  Reset / tail:    %lu us / %lu us",
+                                         (unsigned long)pioSerialDriver->getResetTimeUs(),
+                                         (unsigned long)pioSerialDriver->getFinalWordDrainUs());
+            openknx.logger.logWithValues("  Ready at:        %lu us (micros clock, 0=ready)",
+                                         (unsigned long)pioSerialDriver->getReadyAtUs());
+            openknx.logger.logWithValues("  Transport:       %s, DMA=%d, FIFO payload=%u bits, %u exact bytes",
+                                         pioSerialDriver->isDmaEnabled() ? "DMA" : "blocking fallback",
+                                         pioSerialDriver->getDmaChannel(), pioSerialDriver->getFifoWordBits(),
+                                         (unsigned)pioSerialDriver->getBufferSize());
+            openknx.logger.logWithValues("  Frame counters:  sent=%lu skipped=%lu last=%s",
+                                         (unsigned long)strip->getSentFrameCount(),
+                                         (unsigned long)strip->getSkippedFrameCount(), strip->getLastErrorName());
+            openknx.logger.logWithValues("  Failures:        timeout=%lu transport=%lu config=%lu",
+                                         (unsigned long)strip->getTimeoutCount(),
+                                         (unsigned long)strip->getTransportFailureCount(),
+                                         (unsigned long)strip->getConfigurationFailureCount());
+            openknx.logger.logWithValues("  Recoveries:      partial/wedged=%lu",
+                                         (unsigned long)pioSerialDriver->getRecoveryCount());
+
             // Timing tolerance (compare actual to protocol target)
-            float deviation = ((actual_bitrate - target_freq) / target_freq) * 100.0f;
+            float deviation = target_freq > 0 ? ((actual_bitrate - target_freq) / target_freq) * 100.0f : 0.0f;
             openknx.logger.logWithValues("  Deviation:       %.1f%%", deviation);
 
             if (fabs(deviation) < 1.0f)
@@ -4986,8 +5042,75 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
         openknx.logger.log("");
         printSectionSeparator();
         openknx.logger.log("");
+#elif defined(ARDUINO_ARCH_ESP32)
+        // Firmware builds disable RTTI; validate the explicit driver type before
+        // the static cast instead of using dynamic_cast.
+        if (!driver || driver->getDriverType() != DriverImplementation::RMT_SERIAL)
+        {
+            openknx.logger.log("ERROR: Timing info is only available for the RMT one-wire driver");
+            return true;
+        }
+        auto* rmtSerialDriver = static_cast<RMT_NeoPixel_Serial*>(driver);
+
+        const OneWireTimingProfile& profile = getOneWireTimingProfile(strip->getProtocol());
+        const auto* serialCfg = (strip->getConfig() && strip->getConfig()->isSerialConfig())
+                                    ? static_cast<const SerialStripConfig*>(strip->getConfig())
+                                    : nullptr;
+        const bool hasCustom = serialCfg && serialCfg->getT0H() && serialCfg->getT0L() &&
+                               serialCfg->getT1H() && serialCfg->getT1L();
+        const uint16_t reqT0H = hasCustom ? serialCfg->getT0H() : profile.t0hNs;
+        const uint16_t reqT0L = hasCustom ? serialCfg->getT0L() : profile.t0lNs;
+        const uint16_t reqT1H = hasCustom ? serialCfg->getT1H() : profile.t1hNs;
+        const uint16_t reqT1L = hasCustom ? serialCfg->getT1L() : profile.t1lNs;
+        const uint32_t resetUs = serialCfg && serialCfg->getResetTime() > 0
+                                     ? serialCfg->getResetTime()
+                                     : profile.resetTimeUs;
+        const uint32_t resolutionHz = rmtSerialDriver->getRmtResolutionHz();
+        const float tickNs = 1000000000.0f / resolutionHz;
+        const uint16_t periodTicks = rmtSerialDriver->getBitPeriodTicks();
+        const uint16_t zeroHighTicks = rmtSerialDriver->getZeroHighTicks();
+        const uint16_t oneHighTicks = rmtSerialDriver->getOneHighTicks();
+        const uint16_t zeroLowTicks = periodTicks > zeroHighTicks ? periodTicks - zeroHighTicks : 0;
+        const uint16_t oneLowTicks = periodTicks > oneHighTicks ? periodTicks - oneHighTicks : 0;
+        const uint32_t periodNs = rmtSerialDriver->getBitPeriodNs();
+
+        openknx.logger.log("");
+        printSectionSeparator();
+        openknx.logger.logWithValues("  Timing Information - Strip [%d]", stripId);
+        printSectionSeparator();
+        openknx.logger.logWithValues("  Backend / profile: RMT / %s (%s)", profile.name,
+                                     hasCustom ? "custom pulse override" : "protocol default");
+        openknx.logger.logWithValues("  Polarity:          %s", rmtSerialDriver->isOutputInverted() ? "inverted" : "normal");
+        openknx.logger.logWithValues("  Requested ns:      0=%u/%u, 1=%u/%u, reset=%lu us",
+                                     reqT0H, reqT0L, reqT1H, reqT1L, (unsigned long)resetUs);
+        openknx.logger.logWithValues("  RMT resolution:    %lu Hz (%.0f ns/tick)",
+                                     (unsigned long)resolutionHz, tickNs);
+        openknx.logger.logWithValues("  Realized ticks:    0=%u/%u, 1=%u/%u",
+                                     zeroHighTicks, zeroLowTicks, oneHighTicks, oneLowTicks);
+        openknx.logger.logWithValues("  Realized ns:       0=%.0f/%.0f, 1=%.0f/%.0f",
+                                     zeroHighTicks * tickNs, zeroLowTicks * tickNs,
+                                     oneHighTicks * tickNs, oneLowTicks * tickNs);
+        openknx.logger.logWithValues("  Bit period/rate:   %lu ns / %.1f kHz",
+                                     (unsigned long)periodNs, periodNs ? 1000000.0f / periodNs : 0.0f);
+        openknx.logger.logWithValues("  Reset / ready:     %lu us / synchronous before show() returns",
+                                     (unsigned long)rmtSerialDriver->getResetTimeUs());
+        openknx.logger.logWithValues("  Transport:         %s, %u exact bytes, timeout=%lu us",
+                                     strip->getCapabilities().supportsDMA ? "DMA" : "non-DMA",
+                                     (unsigned)strip->getBufferSize(),
+                                     (unsigned long)rmtSerialDriver->getTransferTimeoutUs());
+        openknx.logger.logWithValues("  Frame counters:    sent=%lu skipped=%lu last=%s",
+                                     (unsigned long)strip->getSentFrameCount(),
+                                     (unsigned long)strip->getSkippedFrameCount(), strip->getLastErrorName());
+        openknx.logger.logWithValues("  Failures:          timeout=%lu transport=%lu config=%lu",
+                                     (unsigned long)strip->getTimeoutCount(),
+                                     (unsigned long)strip->getTransportFailureCount(),
+                                     (unsigned long)strip->getConfigurationFailureCount());
+        openknx.logger.logWithValues("  Recoveries:        timed-out RMT=%lu",
+                                     (unsigned long)rmtSerialDriver->getRecoveryCount());
+        printSectionSeparator();
+        openknx.logger.log("");
 #else
-        openknx.logger.log("ERROR: Timing info only available on RP2040/RP2350");
+        openknx.logger.log("ERROR: Timing info is not supported on this platform");
 #endif
         return true;
     }

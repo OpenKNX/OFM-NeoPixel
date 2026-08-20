@@ -824,15 +824,18 @@ struct SerialStripConfig : public PhysicalStripConfig
     bool detectRGBW(PhysicalStrip* strip);
 
     /**
-     * @brief Measure actual timing values
+     * @brief Return the timing profile estimate for the active protocol.
+     *
+     * This does not sample the output waveform. Use the timing console report
+     * for the backend's realized values and a logic analyzer for measurement.
      * @param strip PhysicalStrip instance for hardware access
-     * @param t0h Output: measured T0H in ns
-     * @param t0l Output: measured T0L in ns
-     * @param t1h Output: measured T1H in ns
-     * @param t1l Output: measured T1L in ns
-     * @return true if measurement successful
+     * @param t0h Output: estimated T0H in ns
+     * @param t0l Output: estimated T0L in ns
+     * @param t1h Output: estimated T1H in ns
+     * @param t1l Output: estimated T1L in ns
+     * @return true if the profile was resolved
      */
-    bool measureTiming(PhysicalStrip* strip, uint16_t& t0h, uint16_t& t0l, uint16_t& t1h, uint16_t& t1l);
+    bool estimateTiming(PhysicalStrip* strip, uint16_t& t0h, uint16_t& t0l, uint16_t& t1h, uint16_t& t1l);
 
     // ===== Level Shifter =====
 

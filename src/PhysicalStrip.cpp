@@ -32,7 +32,7 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _config(nullptr),
       _timingMode(timingMode),
       _voltage(5),
-      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0), _lastError(PhysicalStripError::NONE)
+      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0), _timeoutCount(0), _transportFailureCount(0), _configurationFailureCount(0), _lastError(PhysicalStripError::NONE)
 {
     createDriver(driverType);
 }
@@ -58,7 +58,7 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _config(nullptr),
       _timingMode(timingMode),
       _voltage(5),
-      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0), _lastError(PhysicalStripError::NONE)
+      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0), _timeoutCount(0), _transportFailureCount(0), _configurationFailureCount(0), _lastError(PhysicalStripError::NONE)
 {
     createDriver(driverType);
 }
@@ -85,7 +85,7 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _config(nullptr),
       _timingMode(TimingMode::AUTO),
       _voltage(5),
-      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0), _lastError(PhysicalStripError::NONE)
+      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0), _timeoutCount(0), _transportFailureCount(0), _configurationFailureCount(0), _lastError(PhysicalStripError::NONE)
 {
 #ifdef ARDUINO_ARCH_RP2040
     // Set default ColorOrder based on protocol (if not already set)
@@ -226,6 +226,7 @@ bool PhysicalStrip::init()
     if (!_driver)
     {
         Serial.println("PhysicalStrip: No driver available");
+        _transportFailureCount++;
         _lastError = PhysicalStripError::RESOURCE_UNAVAILABLE;
         return false;
     }
@@ -241,6 +242,7 @@ bool PhysicalStrip::init()
     if (!_driver->init())
     {
         Serial.println("PhysicalStrip: Driver init failed");
+        _transportFailureCount++;
         _lastError = PhysicalStripError::HARDWARE_ERROR;
         return false;
     }
@@ -250,6 +252,7 @@ bool PhysicalStrip::init()
     if (_config && !_driver->applyConfig(_config))
     {
         Serial.println("PhysicalStrip: Driver configuration failed");
+        _configurationFailureCount++;
         _lastError = PhysicalStripError::INVALID_CONFIG;
         return false;
     }
@@ -517,16 +520,19 @@ bool PhysicalStrip::show()
 {
     if (!_driver || !isInitialized())
     {
+        _transportFailureCount++;
         _lastError = PhysicalStripError::NOT_INITIALIZED;
         return false;
     }
     if (_driver->isBusy())
     {
+        _transportFailureCount++;
         _lastError = PhysicalStripError::BUSY;
         return false;
     }
     if (!_driver->show())
     {
+        _transportFailureCount++;
         _lastError = PhysicalStripError::HARDWARE_ERROR;
         return false;
     }
@@ -543,6 +549,7 @@ bool PhysicalStrip::waitForTransfer(uint32_t timeoutMs)
 {
     if (!_driver || !isInitialized())
     {
+        _transportFailureCount++;
         _lastError = PhysicalStripError::NOT_INITIALIZED;
         return false;
     }
@@ -557,6 +564,7 @@ bool PhysicalStrip::waitForTransfer(uint32_t timeoutMs)
     {
         if (timeoutMs > 0 && (millis() - startTime) >= timeoutMs)
         {
+            _timeoutCount++;
             _lastError = PhysicalStripError::TIMEOUT;
             return false; // Timeout
         }
@@ -769,11 +777,13 @@ bool PhysicalStrip::applyConfig()
 {
     if (!_driver)
     {
+        _configurationFailureCount++;
         _lastError = PhysicalStripError::RESOURCE_UNAVAILABLE;
         return false;
     }
     if (!_config)
     {
+        _configurationFailureCount++;
         _lastError = PhysicalStripError::INVALID_CONFIG;
         return false;
     }
@@ -786,6 +796,7 @@ bool PhysicalStrip::applyConfig()
     }
     else
     {
+        _configurationFailureCount++;
         _lastError = PhysicalStripError::INVALID_CONFIG;
     }
     return applied;

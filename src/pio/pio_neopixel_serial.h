@@ -80,6 +80,7 @@ struct pio_neopixel_serial_inst
     volatile uint32_t fifoEmptyTime; // micros() when FIFO became empty (for reset timing)
     uint32_t resetTimeUs;            // Required reset/latch time (50-300µs depending on protocol)
     volatile bool waitingForReset;   // True after FIFO empty, waiting for reset pulse
+    volatile uint32_t recoveryCount; // Aborted partial/wedged transfers restored to idle-low
 
     LevelShifterType levelShifterType; // Level-shifter type (NONE or TXS0108E)
 };
@@ -157,6 +158,19 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
      * @return Actual clkdiv or 0 if not initialized
      */
     inline float getActualClkdiv() const { return _inst ? _inst->actual_clkdiv : 0.0f; }
+    inline uint8_t getCyclesPerBit() const { return _inst ? _inst->cyclesPerBit : 0; }
+    inline uint8_t getOneHighCycles() const { return _inst ? _inst->oneHighCycles : 0; }
+    inline bool isOutputInverted() const { return _inst && _inst->outputInverted; }
+    inline uint32_t getResetTimeUs() const { return _inst ? _inst->resetTimeUs : 0; }
+    inline uint32_t getFifoEmptyTimeUs() const { return _inst ? _inst->fifoEmptyTime : 0; }
+    inline uint getFifoWordBits() const { return _inst ? _inst->fifoWordBits : 0; }
+    inline uint32_t getRecoveryCount() const { return _inst ? _inst->recoveryCount : 0; }
+
+    /** Conservative drain time for the PIO's final output-shift-register word. */
+    uint32_t getFinalWordDrainUs() const;
+
+    /** Wrap-safe absolute micros() timestamp at which the next frame may start. */
+    uint32_t getReadyAtUs() const;
 
     /**
      * @brief Get LED color byte order (RGB/GRB/etc)

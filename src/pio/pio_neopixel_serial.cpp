@@ -1108,6 +1108,7 @@ bool PIO_NeoPixel_Serial::show()
             // state so the next show() can re-arm cleanly.
             if (_inst->useDMA && _inst->dmaChannel >= 0)
                 dma_channel_abort(_inst->dmaChannel);
+            _inst->recoveryCount++;
             _inst->busy = false;
             _inst->waitingForReset = false;
 
@@ -1214,6 +1215,7 @@ static void recoverDirectPioTransfer(pio_neopixel_serial_inst_t* inst)
     pio_sm_set_pins_with_mask(inst->pio, inst->sm, 0, 1u << inst->pin);
     pio_sm_set_enabled(inst->pio, inst->sm, true);
     delayMicroseconds(inst->resetTimeUs);
+    inst->recoveryCount++;
 }
 
 bool PIO_NeoPixel_Serial::sendDataPIO()
@@ -1491,6 +1493,18 @@ uint32_t PIO_NeoPixel_Serial::getTransferTimeoutUs() const
     const uint64_t finalWordUs = ((uint64_t)finalWordBits * 1000000ULL + bitrate - 1ULL) / bitrate;
     const uint64_t deadlineUs = payloadUs + finalWordUs + _inst->resetTimeUs + 2000ULL;
     return deadlineUs > UINT32_MAX ? UINT32_MAX : (uint32_t)deadlineUs;
+}
+
+uint32_t PIO_NeoPixel_Serial::getFinalWordDrainUs() const
+{
+    if (!_inst || _inst->fifoWordBits == 0 || _inst->actual_bitrate <= 1.0f) return 0;
+    return (uint32_t)(((float)_inst->fifoWordBits * 1000000.0f) / _inst->actual_bitrate + 0.999f) + 1U;
+}
+
+uint32_t PIO_NeoPixel_Serial::getReadyAtUs() const
+{
+    if (!_inst || !_inst->waitingForReset) return 0;
+    return _inst->fifoEmptyTime + getFinalWordDrainUs() + _inst->resetTimeUs;
 }
 
 /**

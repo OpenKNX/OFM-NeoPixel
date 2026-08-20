@@ -179,6 +179,10 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
     _inst->usingDMA = false;
     _inst->resetTimeUs = timing.resetTimeUs;
     _inst->bitPeriodNs = ((uint32_t)timing.t0hNs + timing.t0lNs + timing.t1hNs + timing.t1lNs + 1U) / 2U;
+    _inst->zeroHighTicks = 0;
+    _inst->oneHighTicks = 0;
+    _inst->bitPeriodTicks = 0;
+    _inst->recoveryCount = 0;
 
     // Allocate buffer
     _inst->bufferSize = ledCount * _inst->bytesPerLed;
@@ -342,6 +346,9 @@ bool RMT_NeoPixel_Serial::init()
 
     _inst->initialized = true;
     _inst->bitPeriodNs = (uint32_t)periodTicks * (1000000000UL / RMT_LED_STRIP_RESOLUTION_HZ);
+    _inst->zeroHighTicks = zero.duration0;
+    _inst->oneHighTicks = one.duration0;
+    _inst->bitPeriodTicks = periodTicks;
     return true;
 }
 
@@ -502,6 +509,7 @@ bool RMT_NeoPixel_Serial::show()
         gpio_set_level((gpio_num_t)_inst->pin, 0);
         delayMicroseconds(_inst->resetTimeUs);
         const esp_err_t enableErr = rmt_enable(_inst->channel);
+        _inst->recoveryCount++;
         _inst->busy = false;
         ESP_LOGE("RMT_NeoPixel", "RMT transfer timed out/failed (%d, disable=%d, enable=%d) after %dms",
                  err, disableErr, enableErr, timeoutMs);
@@ -654,8 +662,16 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     _inst->customT1H = completeCustomTiming ? t1h : 0;
     _inst->customT1L = completeCustomTiming ? t1l : 0;
     _inst->bitPeriodNs = (uint32_t)periodTicks * (1000000000UL / RMT_LED_STRIP_RESOLUTION_HZ);
+    _inst->zeroHighTicks = zero.duration0;
+    _inst->oneHighTicks = one.duration0;
+    _inst->bitPeriodTicks = periodTicks;
 
     return true;
+}
+
+bool RMT_NeoPixel_Serial::isOutputInverted() const
+{
+    return _inst && getOneWireTimingProfile(_inst->protocol).inverted;
 }
 
 // ============================================================================

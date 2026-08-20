@@ -58,6 +58,10 @@ struct rmt_neopixel_serial_inst
     bool usingDMA;      // Channel was successfully allocated with RMT DMA
     uint32_t resetTimeUs; // LOW latch interval after the final RMT symbol
     uint32_t bitPeriodNs; // Realised common bit-cell period of the active encoder
+    uint16_t zeroHighTicks; // Realised HIGH duration of an encoded zero bit
+    uint16_t oneHighTicks;  // Realised HIGH duration of an encoded one bit
+    uint16_t bitPeriodTicks; // Realised common zero/one bit-cell duration
+    uint32_t recoveryCount; // Timed-out transfers restored to idle LOW and re-enabled
 
     LevelShifterType levelShifterType; // Level-shifter type (NONE or TXS0108E)
 };
@@ -106,6 +110,14 @@ class RMT_NeoPixel_Serial : public IHardwareDriver
     // ESP32-specific getters for status reporting
     inline rmt_channel_handle_t getRmtChannel() const { return _inst ? _inst->channel : nullptr; }
     inline rmt_encoder_handle_t getRmtEncoder() const { return _inst ? _inst->encoder : nullptr; }
+    inline uint32_t getRmtResolutionHz() const { return 40000000UL; }
+    inline uint32_t getBitPeriodNs() const { return _inst ? _inst->bitPeriodNs : 0; }
+    inline uint32_t getResetTimeUs() const { return _inst ? _inst->resetTimeUs : 0; }
+    inline uint16_t getZeroHighTicks() const { return _inst ? _inst->zeroHighTicks : 0; }
+    inline uint16_t getOneHighTicks() const { return _inst ? _inst->oneHighTicks : 0; }
+    inline uint16_t getBitPeriodTicks() const { return _inst ? _inst->bitPeriodTicks : 0; }
+    inline uint32_t getRecoveryCount() const { return _inst ? _inst->recoveryCount : 0; }
+    bool isOutputInverted() const;
 
     // IHardwareDriver ColorOrder interface
     void setColorOrder(ColorOrder order) override

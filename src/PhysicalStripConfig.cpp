@@ -7,6 +7,7 @@
 
 #include "PhysicalStripConfig.h"
 #include "PhysicalStrip.h"
+#include "OneWireTimingProfile.h"
 #include <Arduino.h>
 
 // =============================================================================
@@ -349,56 +350,20 @@ bool SerialStripConfig::detectRGBW(PhysicalStrip* strip)
 }
 
 /**
- * @brief Measure actual timing values
+ * @brief Return the timing profile estimate for the active protocol.
  *
- * Timing measurement requires hardware timer or logic analyzer.
- * Without access to low-level timing capture, we return
- * standard WS2812B timing values.
- *
- * For accurate measurement, would need:
- * - RP2040 PIO capture mode
- * - GPIO interrupt-based timing
- * - External logic analyzer
- *
- * Standard WS2812B timing (for reference):
- * - T0H: 350ns ±150ns (200-500ns)
- * - T0L: 800ns ±150ns (650-950ns)
- * - T1H: 700ns ±150ns (550-850ns)
- * - T1L: 600ns ±150ns (450-750ns)
- * - Reset: >50µs (typically 280µs)
- *
- * @param strip PhysicalStrip instance for hardware access
- * @param t0h Output: measured T0H in ns (HIGH time for '0' bit)
- * @param t0l Output: measured T0L in ns (LOW time for '0' bit)
- * @param t1h Output: measured T1H in ns (HIGH time for '1' bit)
- * @param t1l Output: measured T1L in ns (LOW time for '1' bit)
- * @return true if measurement successful (always true for estimates)
+ * It intentionally does not claim to measure the output waveform. Hardware
+ * quantization is backend-specific and must be inspected with the timing
+ * console report or a logic analyzer.
  */
-bool SerialStripConfig::measureTiming(PhysicalStrip* strip, uint16_t& t0h, uint16_t& t0l, uint16_t& t1h, uint16_t& t1l)
+bool SerialStripConfig::estimateTiming(PhysicalStrip* strip, uint16_t& t0h, uint16_t& t0l, uint16_t& t1h, uint16_t& t1l)
 {
     if (!strip || !strip->isInitialized()) return false;
 
-    // Return standard WS2812B timing (most common protocol)
-    // These values are industry-standard and work for most strips
-
-    LedProtocol proto = strip->getProtocol();
-
-    if (proto == LedProtocol::WS2811)
-    {
-        // WS2811: 400kHz, slower timing
-        t0h = 500;  // 500ns
-        t0l = 2000; // 2000ns
-        t1h = 1200; // 1200ns
-        t1l = 1300; // 1300ns
-    }
-    else
-    {
-        // WS2812B/SK6812: 800kHz, standard timing
-        t0h = 350; // 350ns (0.35µs)
-        t0l = 800; // 800ns (0.8µs)
-        t1h = 700; // 700ns (0.7µs)
-        t1l = 600; // 600ns (0.6µs)
-    }
-
-    return true; // Return true = timing values are valid (standard values)
+    const OneWireTimingProfile& timing = getOneWireTimingProfile(strip->getProtocol());
+    t0h = timing.t0hNs;
+    t0l = timing.t0lNs;
+    t1h = timing.t1hNs;
+    t1l = timing.t1lNs;
+    return true;
 }
