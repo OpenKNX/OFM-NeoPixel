@@ -193,26 +193,42 @@ RMT_NeoPixel_Serial::~RMT_NeoPixel_Serial()
 {
     if (_inst)
     {
-        if (_inst->initialized)
+        // The ESP-IDF allocator owns the physical channel selection. The
+        // instance registry only tracks this driver's live allocations, and
+        // must be cleared even when initialization failed part way through.
+        for (int i = 0; i < 8; i++)
         {
-            // Unregister callback
-            for (int i = 0; i < 8; i++)
+            if (_instances[i] == this)
             {
-                if (_instances[i] == this)
-                {
-                    _instances[i] = nullptr;
-                }
+                _instances[i] = nullptr;
             }
+        }
 
-            // Cleanup RMT resources
-            if (_inst->encoder)
+        // Delete every acquired object, including an encoder/channel held by
+        // a failed init(). This prevents later RMT allocations from failing
+        // mysteriously after a configuration or resource error.
+        if (_inst->channel)
+        {
+            const esp_err_t disableErr = rmt_disable(_inst->channel);
+            if (disableErr != ESP_OK && disableErr != ESP_ERR_INVALID_STATE)
             {
-                rmt_del_encoder(_inst->encoder);
+                ESP_LOGW("RMT_NeoPixel", "Failed to disable RMT channel during cleanup: %d", disableErr);
             }
-            if (_inst->channel)
+        }
+        if (_inst->encoder)
+        {
+            const esp_err_t encoderErr = rmt_del_encoder(_inst->encoder);
+            if (encoderErr != ESP_OK)
             {
-                rmt_disable(_inst->channel);
-                rmt_del_channel(_inst->channel);
+                ESP_LOGW("RMT_NeoPixel", "Failed to delete RMT encoder during cleanup: %d", encoderErr);
+            }
+        }
+        if (_inst->channel)
+        {
+            const esp_err_t channelErr = rmt_del_channel(_inst->channel);
+            if (channelErr != ESP_OK)
+            {
+                ESP_LOGW("RMT_NeoPixel", "Failed to delete RMT channel during cleanup: %d", channelErr);
             }
         }
 
@@ -230,31 +246,21 @@ bool RMT_NeoPixel_Serial::init()
     if (!_inst || !_inst->buffer) return false;
     if (_inst->initialized) return true;
 
-    // Find a free slot in our instance tracking array (0..maxChannels-1)
-    int channel = -1;
-
-    // Count available channels depending on variant
-    int maxChannels = 8; // ESP32 Original
-
-    #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C5)
-    maxChannels = 4;
-    #elif defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
-    maxChannels = 2;
-    #endif
-
-    // Search for a free software slot in our instance tracking array
-    // Note: rmt_new_tx_channel() allocates HW channels automatically (new ESP-IDF 5 API).
-    // _instances[] is only used to track how many strips are active and enforce the per-chip limit.
-    for (int i = 0; i < maxChannels; i++)
+    // rmt_new_tx_channel() chooses the actual hardware channel. Keep only a
+    // separate bookkeeping slot for this driver's live instances; do not
+    // mistake it for a peripheral channel number.
+    int instanceSlot = -1;
+    const int maxInstances = (int)get_total_rmt_channels();
+    for (int i = 0; i < maxInstances && i < 8; i++)
     {
         if (_instances[i] == nullptr)
         {
-            channel = i;
+            instanceSlot = i;
             break;
         }
     }
 
-    if (channel < 0)
+    if (instanceSlot < 0)
     {
         ESP_LOGE("RMT_NeoPixel", "No free RMT channels available!");
         return false;
@@ -316,6 +322,7 @@ bool RMT_NeoPixel_Serial::init()
     {
         ESP_LOGE("RMT_NeoPixel", "Failed to create RMT encoder");
         rmt_del_channel(_inst->channel);
+        _inst->channel = nullptr;
         return false;
     }
 
@@ -324,12 +331,14 @@ bool RMT_NeoPixel_Serial::init()
     {
         ESP_LOGE("RMT_NeoPixel", "Failed to enable RMT channel");
         rmt_del_encoder(_inst->encoder);
+        _inst->encoder = nullptr;
         rmt_del_channel(_inst->channel);
+        _inst->channel = nullptr;
         return false;
     }
 
     // Register Instanz
-    registerInstance(channel, this);
+    registerInstance(instanceSlot, this);
 
     _inst->initialized = true;
     _inst->bitPeriodNs = (uint32_t)periodTicks * (1000000000UL / RMT_LED_STRIP_RESOLUTION_HZ);
