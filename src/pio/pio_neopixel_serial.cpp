@@ -1070,6 +1070,8 @@ void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
     }
 }
 
+static void recoverDirectPioTransfer(pio_neopixel_serial_inst_t* inst);
+
 /**
  * @brief Sends color data to LED strip
  *
@@ -1129,12 +1131,18 @@ bool PIO_NeoPixel_Serial::show()
 
     if (_inst->useDMA && _inst->dmaChannel >= 0)
     {
-        sendDataDMA();
+        if (!sendDataDMA())
+        {
+            _inst->busy = false;
+            _inst->waitingForReset = false;
+            return false;
+        }
     }
     else
     {
         if (!sendDataPIO())
         {
+            recoverDirectPioTransfer(_inst);
             _inst->busy = false;
             _inst->waitingForReset = false;
             return false;
@@ -1150,7 +1158,7 @@ bool PIO_NeoPixel_Serial::show()
         {
             if ((uint32_t)(micros() - completionStartUs) > completionTimeoutUs)
             {
-                pio_sm_clear_fifos(_inst->pio, _inst->sm);
+                recoverDirectPioTransfer(_inst);
                 _inst->busy = false;
                 _inst->waitingForReset = false;
                 openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial",
@@ -1189,6 +1197,21 @@ static inline bool neoSerialPutGuarded(PIO pio, uint sm, uint32_t value, uint32_
     }
     pio_sm_put(pio, sm, value);
     return true;
+}
+
+static void recoverDirectPioTransfer(pio_neopixel_serial_inst_t* inst)
+{
+    if (!inst) return;
+
+    // A FIFO timeout leaves only a partial frame queued. Restart at an
+    // idle-low boundary so a later show() cannot continue that bit stream.
+    pio_sm_set_enabled(inst->pio, inst->sm, false);
+    pio_sm_clear_fifos(inst->pio, inst->sm);
+    pio_sm_restart(inst->pio, inst->sm);
+    pio_sm_clkdiv_restart(inst->pio, inst->sm);
+    pio_sm_set_pins_with_mask(inst->pio, inst->sm, 0, 1u << inst->pin);
+    pio_sm_set_enabled(inst->pio, inst->sm, true);
+    delayMicroseconds(inst->resetTimeUs);
 }
 
 bool PIO_NeoPixel_Serial::sendDataPIO()
@@ -1254,13 +1277,13 @@ bool PIO_NeoPixel_Serial::sendDataPIO()
  *
  * Prepares data for DMA and starts the transfer:
  * 1. For RGB/RGBW: Packs color data into DMA buffer, then starts DMA
- * 2. For RGBCCT: Copies byte buffer to dmaBuffer (with padding), bswap handles byte order
+ * 2. For RGBCCT: Expands each byte to an MSB-aligned DMA word for exact 8-bit output
  *
  * The busy flag is cleared by the DMA IRQ handler.
  */
-void PIO_NeoPixel_Serial::sendDataDMA()
+bool PIO_NeoPixel_Serial::sendDataDMA()
 {
-    if (!_inst || _inst->dmaChannel < 0) return;
+    if (!_inst || _inst->dmaChannel < 0) return false;
 
     bool isRGBCCT = (_inst->bytesPerLed == 5);
     void* srcBuffer;
@@ -1269,14 +1292,14 @@ void PIO_NeoPixel_Serial::sendDataDMA()
     {
         // Expand each payload byte to the MSB of its own FIFO word. Combined
         // with 8-bit autopull this preserves the exact 40-bit pixel stream.
-        if (!_inst->buffer || !_inst->dmaBuffer) return;
+        if (!_inst->buffer || !_inst->dmaBuffer) return false;
         packDataToDMABuffer();
         srcBuffer = _inst->dmaBuffer;
     }
     else
     {
         // RGB/RGBW: Pack data into 32-bit words (bswap=false, manual packing)
-        if (!_inst->dmaBuffer) return;
+        if (!_inst->dmaBuffer) return false;
         packDataToDMABuffer();
         srcBuffer = _inst->dmaBuffer;
     }
@@ -1296,6 +1319,7 @@ void PIO_NeoPixel_Serial::sendDataDMA()
     dma_channel_start(_inst->dmaChannel);
 
     // busy flag is cleared by DMA IRQ handler
+    return true;
 }
 
 /**
