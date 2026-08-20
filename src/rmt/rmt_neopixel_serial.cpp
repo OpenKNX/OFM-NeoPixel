@@ -44,13 +44,6 @@ static const rmt_symbol_word_t ws2812_one = {
 };
 
 // Reset Symbol (>50µs LOW)
-static const rmt_symbol_word_t ws2812_reset = {
-    .duration0 = 500, // 50µs
-    .level0 = 0,
-    .duration1 = 0,
-    .level1 = 0,
-};
-
 /**
  * WS2811 Timing for RMT (10MHz Resolution)
  *
@@ -119,6 +112,35 @@ static bool should_request_rmt_dma()
 }
 
 /**
+ * Return a conservative protocol latch interval. The signal is held LOW for
+ * this duration only after RMT confirms that the final data symbol completed.
+ * The full waveform table moves into the shared protocol descriptor work; keep
+ * this switch here until then so no caller can accidentally fall back to zero.
+ */
+static uint32_t get_protocol_reset_time_us(LedProtocol protocol)
+{
+    switch (protocol)
+    {
+        case LedProtocol::SK6812:
+        case LedProtocol::SK6805:
+        case LedProtocol::SK6812_RGBCCT:
+            return 80;
+
+        case LedProtocol::TM1814:
+            return 200;
+
+        case LedProtocol::WS2805_RGBCCT:
+            return 300;
+
+        default:
+            // WS2812x variants are commonly specified at >=50us, but a 300us
+            // latch gives the same clone compatibility margin used by the PIO
+            // backend and by WLED's WS2812x NeoPixelBus methods.
+            return 300;
+    }
+}
+
+/**
  * Get number of available (unclaimed) RMT channels
  * Note: RMT driver doesn't expose channel claim state directly,
  * so we track via our static instance array
@@ -178,6 +200,7 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
     _inst->encoder = nullptr;
     _inst->initialized = false;
     _inst->busy = false;
+    _inst->resetTimeUs = get_protocol_reset_time_us(protocol);
 
     // Allocate buffer
     _inst->bufferSize = ledCount * _inst->bytesPerLed;
@@ -447,7 +470,7 @@ bool RMT_NeoPixel_Serial::show()
     rmt_transmit_config_t tx_config = {
         .loop_count = 0, // No loop
         .flags = {
-            .eot_level = 0, // LOW after transfer (reset)
+            .eot_level = 0, // Hold LOW after the final data symbol
             .queue_nonblocking = 0}};
 
     // Send data via RMT
@@ -459,8 +482,11 @@ bool RMT_NeoPixel_Serial::show()
         return false;
     }
 
-    // Wait for completion (blocking for now)
+    // Wait for the final data symbol, then hold the line LOW for the complete
+    // protocol latch interval. eot_level alone selects the idle level; it does
+    // not create elapsed reset time.
     rmt_tx_wait_all_done(_inst->channel, portMAX_DELAY);
+    delayMicroseconds(_inst->resetTimeUs);
     _inst->busy = false;
 
     return true;
@@ -531,6 +557,11 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
                  (_inst->levelShifterType == LevelShifterType::SN74AHCT125) ? "74AHCT125" : "74HCT125");
     }
 
+    // Reset/latch time is independent of the bit symbols. Apply it even when
+    // this configuration uses the protocol's default waveform.
+    const uint32_t resetUs = serialCfg->getResetTime();
+    if (resetUs > 0) _inst->resetTimeUs = resetUs;
+
     // Apply custom timing if T0H is set.
     // RMT encodes T0H/T0L and T1H/T1L independently via rmt_symbol_word_t.
     // Resolution: 10MHz = 100ns per tick  →  ticks = ns / 100
@@ -577,8 +608,6 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
         _inst->customT1H = t1h;
         _inst->customT1L = t1l;
 
-        // Update reset time if provided
-        // (reset is handled in show() via delay, not via encoder)
     }
 
     return true;

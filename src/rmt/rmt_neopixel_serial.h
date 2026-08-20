@@ -55,6 +55,7 @@ struct rmt_neopixel_serial_inst
 
     bool initialized;   // Initialized?
     volatile bool busy; // Transfer running?
+    uint32_t resetTimeUs; // LOW latch interval after the final RMT symbol
 
     LevelShifterType levelShifterType; // Level-shifter type (NONE or TXS0108E)
 };
