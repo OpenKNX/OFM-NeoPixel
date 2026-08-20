@@ -25,6 +25,32 @@
 #include <stddef.h>
 #include <stdint.h>
 
+enum class PhysicalStripError : uint8_t
+{
+    NONE,
+    NOT_INITIALIZED,
+    BUSY,
+    INVALID_CONFIG,
+    RESOURCE_UNAVAILABLE,
+    TIMEOUT,
+    HARDWARE_ERROR,
+};
+
+inline const char* physicalStripErrorName(PhysicalStripError error)
+{
+    switch (error)
+    {
+        case PhysicalStripError::NONE: return "none";
+        case PhysicalStripError::NOT_INITIALIZED: return "not initialized";
+        case PhysicalStripError::BUSY: return "busy";
+        case PhysicalStripError::INVALID_CONFIG: return "invalid config";
+        case PhysicalStripError::RESOURCE_UNAVAILABLE: return "resource unavailable";
+        case PhysicalStripError::TIMEOUT: return "timeout";
+        case PhysicalStripError::HARDWARE_ERROR: return "hardware error";
+    }
+    return "unknown";
+}
+
 class PhysicalStrip
 {
   public:
@@ -58,6 +84,8 @@ class PhysicalStrip
     uint32_t getTransferTimeoutMs() const;
     bool isDirty() const { return _dirty; }
     bool hasFrameInFlight() const { return _frameInFlight; }
+    PhysicalStripError getLastError() const { return _lastError; }
+    const char* getLastErrorName() const { return physicalStripErrorName(_lastError); }
     uint32_t getSentFrameCount() const { return _sentFrameCount; }
     uint32_t getSkippedFrameCount() const { return _skippedFrameCount; }
     void markFrameStarted() { _frameInFlight = true; }
@@ -229,6 +257,7 @@ class PhysicalStrip
     bool _frameInFlight;
     uint32_t _sentFrameCount;
     uint32_t _skippedFrameCount;
+    PhysicalStripError _lastError;
 
     bool createDriver(DriverType driverType); // Create appropriate driver
 };

@@ -269,6 +269,8 @@ class NeoPixelManager
     uint32_t _lastUpdateTime;                  // Last update time in milliseconds
     uint32_t _updateCount;                     // Number of updates since start
     uint32_t _errorCount;                      // Error counter
+    uint32_t _lastTransferErrorLogTime;        // Rate-limit repeated transport errors
+    PhysicalStripError _lastTransferError;     // Last transport/configuration failure
     PowerManager _powerManager;                // Power/Current management
 
     // Power monitoring cache (per-strip values for PER_CHANNEL mode)
@@ -295,4 +297,5 @@ class NeoPixelManager
     void rebuildPhysToVirtualMapping();                                               // Rebuild Physical→Virtual mapping table
     void applyPowerLimitToStrip(PhysicalStrip* phys, uint32_t stripLimit);            // Apply power limit to a specific PhysicalStrip
     void applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scale);                // Apply brightness scale to PhysicalStrip buffer
+    void reportTransferFailure(uint32_t stripIndex, const PhysicalStrip* strip, const char* operation);
 };

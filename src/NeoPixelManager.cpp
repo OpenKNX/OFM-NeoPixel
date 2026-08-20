@@ -13,6 +13,8 @@ NeoPixelManager::NeoPixelManager()
       _lastUpdateTime(0),
       _updateCount(0),
       _errorCount(0),
+      _lastTransferErrorLogTime(0),
+      _lastTransferError(PhysicalStripError::NONE),
       _powerManager(5000), // Default 5A (5000mA)
       _mappingDirty(true)  // Needs initial build
 {
@@ -1184,8 +1186,9 @@ bool NeoPixelManager::showAll()
     // DMA; phase 2 waits for them all. Frame push time then ≈ the single LONGEST strip
     // instead of the SUM of all strips (≈13 ms vs ≈22 ms for this 6-strip config).
     // (A PIO-fallback strip without DMA blocks inside show() and is simply done by phase 2.)
-    for (auto strip : _strips)
+    for (uint32_t stripIndex = 0; stripIndex < _strips.size(); stripIndex++)
     {
+        auto strip = _strips[stripIndex];
         if (!strip) continue;
         if (!strip->isDirty())
         {
@@ -1194,6 +1197,7 @@ bool NeoPixelManager::showAll()
         }
         if (!strip->show())
         {
+            reportTransferFailure(stripIndex, strip, "start");
             allSuccess = false;
             _errorCount++;
         }
@@ -1205,8 +1209,9 @@ bool NeoPixelManager::showAll()
     // Phase 2: wait for every in-flight transfer to finish. The deadline is
     // derived by the driver from its actual serial rate and frame size, rather
     // than imposing a fixed maximum strip length.
-    for (auto strip : _strips)
+    for (uint32_t stripIndex = 0; stripIndex < _strips.size(); stripIndex++)
     {
+        auto strip = _strips[stripIndex];
         // Only transfers started in phase 1 need completion tracking.  A failed
         // wait deliberately leaves the strip dirty so its complete frame is
         // retried on the next update instead of being silently dropped.
@@ -1215,6 +1220,7 @@ bool NeoPixelManager::showAll()
         if (!strip->waitForTransfer(strip->getTransferTimeoutMs()))
         {
             strip->markFrameFailed();
+            reportTransferFailure(stripIndex, strip, "complete");
             allSuccess = false;
             _errorCount++;
         }
@@ -1228,6 +1234,21 @@ bool NeoPixelManager::showAll()
     if (allSuccess) _updateCount++;
 
     return allSuccess;
+}
+
+void NeoPixelManager::reportTransferFailure(uint32_t stripIndex, const PhysicalStrip* strip, const char* operation)
+{
+    if (!strip) return;
+
+    const PhysicalStripError error = strip->getLastError();
+    const uint32_t now = millis();
+    if (error != _lastTransferError || (uint32_t)(now - _lastTransferErrorLogTime) >= 1000U)
+    {
+        logErrorP("NeoPixelManager: strip %u %s failed: %s", stripIndex, operation,
+                  physicalStripErrorName(error));
+        _lastTransferError = error;
+        _lastTransferErrorLogTime = now;
+    }
 }
 
 /**
@@ -1472,6 +1493,10 @@ void NeoPixelManager::printDebugInfo()
             logDebugP("  Driver:  %s", strip->getDriverName());
             logDebugP("  Init:    %s", strip->isInitialized() ? "Yes" : "No");
             logDebugP("  Busy:    %s", strip->isBusy() ? "Yes" : "No");
+            logDebugP("  Frames:  sent=%lu skipped=%lu error=%s",
+                      (unsigned long)strip->getSentFrameCount(),
+                      (unsigned long)strip->getSkippedFrameCount(),
+                      strip->getLastErrorName());
 
             auto caps = strip->getCapabilities();
             logDebugP("  Caps:    RGBW=%s DMA=%s Async=%s",

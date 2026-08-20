@@ -32,7 +32,7 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _config(nullptr),
       _timingMode(timingMode),
       _voltage(5),
-      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0)
+      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0), _lastError(PhysicalStripError::NONE)
 {
     createDriver(driverType);
 }
@@ -58,7 +58,7 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _config(nullptr),
       _timingMode(timingMode),
       _voltage(5),
-      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0)
+      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0), _lastError(PhysicalStripError::NONE)
 {
     createDriver(driverType);
 }
@@ -85,7 +85,7 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _config(nullptr),
       _timingMode(TimingMode::AUTO),
       _voltage(5),
-      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0)
+      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0), _lastError(PhysicalStripError::NONE)
 {
 #ifdef ARDUINO_ARCH_RP2040
     // Set default ColorOrder based on protocol (if not already set)
@@ -226,6 +226,7 @@ bool PhysicalStrip::init()
     if (!_driver)
     {
         Serial.println("PhysicalStrip: No driver available");
+        _lastError = PhysicalStripError::RESOURCE_UNAVAILABLE;
         return false;
     }
 
@@ -240,14 +241,21 @@ bool PhysicalStrip::init()
     if (!_driver->init())
     {
         Serial.println("PhysicalStrip: Driver init failed");
+        _lastError = PhysicalStripError::HARDWARE_ERROR;
         return false;
     }
 
     // Apply config now that the driver is up (CUSTOM-timing in applyConfig is gated on
     // initialized; a setCustomTiming() before init() only lands in _config until here).
-    if (_config) _driver->applyConfig(_config);
+    if (_config && !_driver->applyConfig(_config))
+    {
+        Serial.println("PhysicalStrip: Driver configuration failed");
+        _lastError = PhysicalStripError::INVALID_CONFIG;
+        return false;
+    }
 
     _initialized = true;
+    _lastError = PhysicalStripError::NONE;
     return true;
 }
 
@@ -507,8 +515,23 @@ void PhysicalStrip::clear()
  */
 bool PhysicalStrip::show()
 {
-    if (!_driver || !isInitialized()) return false;
-    return _driver->show();
+    if (!_driver || !isInitialized())
+    {
+        _lastError = PhysicalStripError::NOT_INITIALIZED;
+        return false;
+    }
+    if (_driver->isBusy())
+    {
+        _lastError = PhysicalStripError::BUSY;
+        return false;
+    }
+    if (!_driver->show())
+    {
+        _lastError = PhysicalStripError::HARDWARE_ERROR;
+        return false;
+    }
+    _lastError = PhysicalStripError::NONE;
+    return true;
 }
 
 /**
@@ -518,7 +541,11 @@ bool PhysicalStrip::show()
  */
 bool PhysicalStrip::waitForTransfer(uint32_t timeoutMs)
 {
-    if (!_driver || !isInitialized()) return false;
+    if (!_driver || !isInitialized())
+    {
+        _lastError = PhysicalStripError::NOT_INITIALIZED;
+        return false;
+    }
 
     // A caller which does not specify a deadline uses the driver's calculated
     // frame time. This is still bounded, so a wedged peripheral cannot spin
@@ -530,11 +557,13 @@ bool PhysicalStrip::waitForTransfer(uint32_t timeoutMs)
     {
         if (timeoutMs > 0 && (millis() - startTime) >= timeoutMs)
         {
+            _lastError = PhysicalStripError::TIMEOUT;
             return false; // Timeout
         }
         delayMicroseconds(10);
     }
 
+    _lastError = PhysicalStripError::NONE;
     return true;
 }
 
@@ -738,9 +767,26 @@ bool PhysicalStrip::isSerialStrip() const
 
 bool PhysicalStrip::applyConfig()
 {
-    if (!_driver || !_config) return false;
+    if (!_driver)
+    {
+        _lastError = PhysicalStripError::RESOURCE_UNAVAILABLE;
+        return false;
+    }
+    if (!_config)
+    {
+        _lastError = PhysicalStripError::INVALID_CONFIG;
+        return false;
+    }
     if (isInitialized() && !waitForTransfer()) return false;
     const bool applied = _driver->applyConfig(_config);
-    if (applied) _dirty = true;
+    if (applied)
+    {
+        _dirty = true;
+        _lastError = PhysicalStripError::NONE;
+    }
+    else
+    {
+        _lastError = PhysicalStripError::INVALID_CONFIG;
+    }
     return applied;
 }

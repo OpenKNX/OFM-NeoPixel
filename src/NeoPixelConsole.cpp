@@ -1388,6 +1388,10 @@ bool NeoPixel::processInfoCommand()
                 // Display protocol and ColorOrder
                 openknx.logger.logWithValues("      Protocol: %s, ColorOrder: %s",
                                              protocolName, colorOrder);
+                openknx.logger.logWithValues("      Frames: sent=%lu, skipped=%lu, last error=%s",
+                                             (unsigned long)strip->getSentFrameCount(),
+                                             (unsigned long)strip->getSkippedFrameCount(),
+                                             strip->getLastErrorName());
 
 #ifdef ARDUINO_ARCH_RP2040
                 // RP2040: Show PIO/SM/DMA info
