@@ -168,14 +168,14 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
     _inst->pin = pin;
     _inst->ledCount = ledCount;
     _inst->protocol = protocol;
-    _inst->bytesPerLed = ProtocolHelper::getBytesPerLed(protocol);
-    _inst->colorOrder = ProtocolHelper::getColorOrder(protocol);
+    const OneWireTimingProfile& timing = getOneWireTimingProfile(protocol);
+    _inst->bytesPerLed = timing.channelCount;
+    _inst->colorOrder = timing.defaultColorOrder;
     _inst->channel = nullptr;
     _inst->encoder = nullptr;
     _inst->initialized = false;
     _inst->busy = false;
-    _inst->resetTimeUs = getOneWireTimingProfile(protocol).resetTimeUs;
-    const OneWireTimingProfile& timing = getOneWireTimingProfile(protocol);
+    _inst->resetTimeUs = timing.resetTimeUs;
     _inst->bitPeriodNs = ((uint32_t)timing.t0hNs + timing.t0lNs + timing.t1hNs + timing.t1lNs + 1U) / 2U;
 
     // Allocate buffer

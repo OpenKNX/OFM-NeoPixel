@@ -283,10 +283,11 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     _inst->oneHighCycles = 0;
     _inst->outputInverted = false;
 
-    // Determine bytes per LED and color order
-    _inst->bytesPerLed = ProtocolHelper::getBytesPerLed(protocol);
-    _inst->colorOrder = ProtocolHelper::getColorOrder(protocol);
-    _inst->frequency = getOneWireTimingProfile(protocol).bitRateHz;
+    // Protocol selection owns timing, channel count and byte order together.
+    const OneWireTimingProfile& profile = getOneWireTimingProfile(protocol);
+    _inst->bytesPerLed = profile.channelCount;
+    _inst->colorOrder = profile.defaultColorOrder;
+    _inst->frequency = profile.bitRateHz;
 
     // Allocate buffers
     // CRITICAL: Cast to size_t to prevent overflow (e.g., 22000 * 3 = 66000 > uint16_t max 65535)

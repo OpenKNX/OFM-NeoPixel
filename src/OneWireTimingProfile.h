@@ -32,6 +32,9 @@ struct OneWireTimingProfile
     uint32_t resetTimeUs;
     bool inverted;
     OneWirePioCadence pioCadence;
+    uint8_t channelCount;
+    ColorOrder defaultColorOrder;
+    bool refreshRequired;
 };
 
 /**
@@ -44,24 +47,34 @@ struct OneWireTimingProfile
 inline const OneWireTimingProfile& getOneWireTimingProfile(LedProtocol protocol)
 {
     static constexpr OneWireTimingProfile ws2812x = {
-        "WS2812x", 800000, 400, 850, 800, 450, 300, false, OneWirePioCadence::CANONICAL_10};
-    static constexpr OneWireTimingProfile sk6812 = {
-        "SK6812", 800000, 400, 850, 800, 450, 80, false, OneWirePioCadence::CANONICAL_10};
+        "WS2812x", 800000, 400, 850, 800, 450, 300, false, OneWirePioCadence::CANONICAL_10,
+        3, ColorOrder::GRB, false};
+    static constexpr OneWireTimingProfile sk6812_rgbw = {
+        "SK6812/SK6805", 800000, 400, 850, 800, 450, 80, false, OneWirePioCadence::CANONICAL_10,
+        4, ColorOrder::GRBW, false};
+    static constexpr OneWireTimingProfile sk6812_rgbcct = {
+        "SK6812/WS2814 RGBCCT", 800000, 400, 850, 800, 450, 80, false, OneWirePioCadence::CANONICAL_10,
+        5, ColorOrder::GRBCCT, false};
     static constexpr OneWireTimingProfile ws2811_400 = {
-        "WS2811-400", 400000, 500, 2000, 1200, 1300, 50, false, OneWirePioCadence::SIX_STEP};
+        "WS2811-400", 400000, 500, 2000, 1200, 1300, 50, false, OneWirePioCadence::SIX_STEP,
+        3, ColorOrder::RGB, false};
     static constexpr OneWireTimingProfile ws2805 = {
-        "WS2805", 917431, 300, 790, 790, 300, 300, false, OneWirePioCadence::FOUR_STEP};
+        "WS2805", 917431, 300, 790, 790, 300, 300, false, OneWirePioCadence::FOUR_STEP,
+        5, ColorOrder::GRBCCT, false};
     static constexpr OneWireTimingProfile tm1814 = {
-        "TM1814", 800000, 360, 890, 720, 530, 200, true, OneWirePioCadence::THREE_STEP};
+        "TM1814", 800000, 360, 890, 720, 530, 200, true, OneWirePioCadence::THREE_STEP,
+        4, ColorOrder::GRBW, false};
 
     switch (protocol)
     {
         case LedProtocol::SK6812:
         case LedProtocol::SK6805:
-        case LedProtocol::SK6812_RGBCCT:
         case LedProtocol::WS2814:
+            return sk6812_rgbw;
+
+        case LedProtocol::SK6812_RGBCCT:
         case LedProtocol::WS2814_RGBCCT:
-            return sk6812;
+            return sk6812_rgbcct;
 
         case LedProtocol::WS2811:
             return ws2811_400;
