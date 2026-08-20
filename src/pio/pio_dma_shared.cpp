@@ -11,7 +11,7 @@
  *       - DMA_IRQ_0: Serial strips (WS2812B, SK6812, etc.)
  *       - DMA_IRQ_1: SPI strips (APA102, SK9822, WS2801, etc.)
  */
-void unifiedDmaIRQHandler()
+void __isr __not_in_flash_func(unifiedDmaIRQHandler)()
 {
     // Check all DMA channels for both IRQ0 and IRQ1
     for (int i = 0; i < MAX_DMA_CHANNELS; i++)
