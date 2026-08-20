@@ -655,24 +655,37 @@ bool PhysicalStrip::setCustomTiming(uint16_t t0h, uint16_t t0l, uint16_t t1h, ui
 {
     if (!_config || !_config->isSerialConfig()) return false;
     auto* sCfg = static_cast<SerialStripConfig*>(_config);
+    const SerialStripConfig previousConfig = *sCfg;
+    const TimingMode previousTimingMode = _timingMode;
     sCfg->setTiming(t0h, t0l, t1h, t1l);
     if (resetUs > 0) sCfg->setResetTime(resetUs);
     sCfg->setTimingMode(TimingMode::CUSTOM);
     _timingMode = TimingMode::CUSTOM;
 
-    if (!_driver) return false;
-    return _driver->applyConfig(_config);
+    if (applyConfig()) return true;
+
+    // A failed hardware change must not leave a configuration object claiming
+    // timing which was never applied. Restore the previous known-good state.
+    *sCfg = previousConfig;
+    _timingMode = previousTimingMode;
+    return false;
 }
 
-void PhysicalStrip::clearCustomTiming()
+bool PhysicalStrip::clearCustomTiming()
 {
-    if (!_config || !_config->isSerialConfig()) return;
+    if (!_config || !_config->isSerialConfig()) return false;
     auto* sCfg = static_cast<SerialStripConfig*>(_config);
+    const SerialStripConfig previousConfig = *sCfg;
+    const TimingMode previousTimingMode = _timingMode;
     sCfg->setTiming(0, 0, 0, 0);
     sCfg->setResetTime(0);
     sCfg->setTimingMode(TimingMode::AUTO);
     _timingMode = TimingMode::AUTO;
-    if (_driver) _driver->applyConfig(_config);
+    if (applyConfig()) return true;
+
+    *sCfg = previousConfig;
+    _timingMode = previousTimingMode;
+    return false;
 }
 
 bool PhysicalStrip::setTimingMode(TimingMode mode)
@@ -760,5 +773,6 @@ bool PhysicalStrip::isSerialStrip() const
 bool PhysicalStrip::applyConfig()
 {
     if (!_driver || !_config) return false;
+    if (isInitialized() && !waitForTransfer()) return false;
     return _driver->applyConfig(_config);
 }

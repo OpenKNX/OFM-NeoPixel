@@ -437,6 +437,28 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     const SerialStripConfig* serialCfg = dynamic_cast<const SerialStripConfig*>(config);
     if (!serialCfg) return false;
 
+    const uint16_t t0h = serialCfg->getT0H();
+    const uint16_t t0l = serialCfg->getT0L();
+    const uint16_t t1h = serialCfg->getT1H();
+    const uint16_t t1l = serialCfg->getT1L();
+    const bool anyCustomTiming = t0h || t0l || t1h || t1l;
+    const bool completeCustomTiming = t0h && t0l && t1h && t1l;
+    if (anyCustomTiming && !completeCustomTiming) return false;
+
+    // Do not alter a divider or GPIO configuration while the state machine is
+    // emitting a frame. The caller can retry after the driver-derived deadline.
+    if (_inst->initialized && isBusy()) return false;
+
+    const OneWireTimingProfile& profile = getOneWireTimingProfile(_inst->protocol);
+    const uint8_t oneHighCycles = _inst->oneHighCycles ? _inst->oneHighCycles : 6;
+    const uint8_t cyclesPerBit = _inst->cyclesPerBit ? _inst->cyclesPerBit : 10;
+    const float sysClk = (float)clock_get_hz(clk_sys);
+    const float targetBitrate = completeCustomTiming
+                                    ? 1000000000.0f / ((float)t1h * (float)cyclesPerBit / (float)oneHighCycles)
+                                    : (float)profile.bitRateHz;
+    const float targetClkdiv = sysClk / (targetBitrate * (float)cyclesPerBit);
+    if (targetClkdiv < 1.0f || targetClkdiv > 65536.0f) return false;
+
     // Apply ColorOrder (never let a NONE config stomp the live driver order)
     const ColorOrder cfgOrder = serialCfg->getColorOrder();
     if (cfgOrder != ColorOrder::NONE) _inst->colorOrder = cfgOrder;
@@ -465,29 +487,22 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
         #endif
     }
 
-    // Apply custom timing if T1H is set (CUSTOM mode). A PIO cadence keeps a
-    // fixed pulse ratio, so T1H sets the divider while the selected protocol
-    // cadence determines the resulting bit-cell length.
-    uint16_t t1h = serialCfg->getT1H();
-    if (t1h > 0 && _inst->initialized)
+    // A PIO cadence keeps a fixed pulse ratio, so T1H selects the divider.
+    // With no complete override, restore the profile divider and latch time;
+    // this makes clearCustomTiming() change the actual hardware as well as
+    // the stored configuration.
+    if (_inst->initialized)
     {
-        const uint8_t oneHighCycles = _inst->oneHighCycles ? _inst->oneHighCycles : 6;
-        const uint8_t cyclesPerBit = _inst->cyclesPerBit ? _inst->cyclesPerBit : 10;
-        float sys_clk = (float)clock_get_hz(clk_sys);
-        float clkdiv  = sys_clk * (float)t1h * 1e-9f / (float)oneHighCycles;
-        clkdiv = (clkdiv < 1.0f) ? 1.0f : clkdiv; // clkdiv < 1 not allowed
-
-        pio_sm_set_clkdiv(_inst->pio, _inst->sm, clkdiv);
-        pio_sm_clkdiv_restart(_inst->pio, _inst->sm); // apply immediately
-
-        _inst->actual_clkdiv = clkdiv;
-        _inst->actual_bitrate = sys_clk / clkdiv / (float)cyclesPerBit;
-        _inst->timingMode = TimingMode::CUSTOM;
-
-        // Update reset time if provided
-        uint32_t resetUs = serialCfg->getResetTime();
-        if (resetUs > 0) _inst->resetTimeUs = resetUs;
+        pio_sm_set_clkdiv(_inst->pio, _inst->sm, targetClkdiv);
+        pio_sm_clkdiv_restart(_inst->pio, _inst->sm);
     }
+
+    _inst->actual_clkdiv = targetClkdiv;
+    _inst->actual_bitrate = sysClk / targetClkdiv / (float)cyclesPerBit;
+    _inst->timingMode = completeCustomTiming ? TimingMode::CUSTOM : TimingMode::AUTO;
+    _inst->resetTimeUs = serialCfg->getResetTime() > 0
+                              ? serialCfg->getResetTime()
+                              : profile.resetTimeUs;
 
     return true;
 }

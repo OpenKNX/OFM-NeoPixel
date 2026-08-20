@@ -533,8 +533,62 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     const SerialStripConfig* serialCfg = config->isSerialConfig() ? static_cast<const SerialStripConfig*>(config) : nullptr;
     if (!serialCfg) return false;
 
+    const uint16_t t0h = serialCfg->getT0H();
+    const uint16_t t0l = serialCfg->getT0L();
+    const uint16_t t1h = serialCfg->getT1H();
+    const uint16_t t1l = serialCfg->getT1L();
+    const bool anyCustomTiming = t0h || t0l || t1h || t1l;
+    const bool completeCustomTiming = t0h && t0l && t1h && t1l;
+    if (anyCustomTiming && !completeCustomTiming) return false;
+    if (_inst->initialized && isBusy()) return false;
+
+    const OneWireTimingProfile& profile = getOneWireTimingProfile(_inst->protocol);
+    const uint16_t activeT0H = completeCustomTiming ? t0h : profile.t0hNs;
+    const uint16_t activeT0L = completeCustomTiming ? t0l : profile.t0lNs;
+    const uint16_t activeT1H = completeCustomTiming ? t1h : profile.t1hNs;
+    const uint16_t activeT1L = completeCustomTiming ? t1l : profile.t1lNs;
+    const uint32_t activeResetUs = serialCfg->getResetTime() > 0
+                                       ? serialCfg->getResetTime()
+                                       : profile.resetTimeUs;
+
+    rmt_symbol_word_t zero = {};
+    rmt_symbol_word_t one = {};
+    uint16_t periodTicks = 0;
+    if (!make_balanced_rmt_symbols(activeT0H, activeT0L, activeT1H, activeT1L,
+                                   zero, one, &periodTicks))
+    {
+        ESP_LOGE("RMT_NeoPixel", "Invalid timing %u/%u/%u/%u ns for %luHz RMT",
+                 activeT0H, activeT0L, activeT1H, activeT1L,
+                 (unsigned long)RMT_LED_STRIP_RESOLUTION_HZ);
+        return false;
+    }
+
+    // Create the replacement before touching the working encoder. A failed
+    // allocation must leave the currently displayed waveform intact.
+    rmt_encoder_handle_t replacementEncoder = nullptr;
+    if (_inst->initialized)
+    {
+        rmt_bytes_encoder_config_t encoderConfig = {
+            .bit0 = zero,
+            .bit1 = one,
+            .flags = { .msb_first = 1 },
+        };
+        if (rmt_new_bytes_encoder(&encoderConfig, &replacementEncoder) != ESP_OK)
+        {
+            ESP_LOGE("RMT_NeoPixel", "Failed to create replacement RMT encoder");
+            return false;
+        }
+        if (_inst->encoder && rmt_del_encoder(_inst->encoder) != ESP_OK)
+        {
+            rmt_del_encoder(replacementEncoder);
+            ESP_LOGE("RMT_NeoPixel", "Failed to retire previous RMT encoder");
+            return false;
+        }
+    }
+
     // Apply ColorOrder
-    _inst->colorOrder = serialCfg->getColorOrder();
+    if (serialCfg->getColorOrder() != ColorOrder::NONE)
+        _inst->colorOrder = serialCfg->getColorOrder();
 
     // Apply level-shifter GPIO optimizations
     _inst->levelShifterType = serialCfg->getLevelShifter();
@@ -558,56 +612,13 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
                  (_inst->levelShifterType == LevelShifterType::SN74AHCT125) ? "74AHCT125" : "74HCT125");
     }
 
-    // Reset/latch time is independent of the bit symbols. Apply it even when
-    // this configuration uses the protocol's default waveform.
-    const uint32_t resetUs = serialCfg->getResetTime();
-    if (resetUs > 0) _inst->resetTimeUs = resetUs;
-
-    // Apply custom timing if T0H is set.
-    // RMT encodes T0H/T0L and T1H/T1L independently via rmt_symbol_word_t.
-    // Quantisation uses 40MHz/25ns ticks and preserves one common bit period
-    // for zero and one symbols.
-    uint16_t t0h = serialCfg->getT0H();
-    uint16_t t0l = serialCfg->getT0L();
-    uint16_t t1h = serialCfg->getT1H();
-    uint16_t t1l = serialCfg->getT1L();
-    if (t0h > 0 && t0l > 0 && t1h > 0 && t1l > 0 && _inst->initialized)
-    {
-        rmt_symbol_word_t custom_zero = {};
-        rmt_symbol_word_t custom_one = {};
-        uint16_t customPeriodTicks = 0;
-        if (!make_balanced_rmt_symbols(t0h, t0l, t1h, t1l, custom_zero, custom_one, &customPeriodTicks))
-        {
-            ESP_LOGE("RMT_NeoPixel", "Invalid custom timing %u/%u/%u/%u ns for %luHz RMT",
-                     t0h, t0l, t1h, t1l, (unsigned long)RMT_LED_STRIP_RESOLUTION_HZ);
-            return false;
-        }
-
-        // Recreate the bytes encoder with the new symbols
-        if (_inst->encoder)
-        {
-            rmt_del_encoder(_inst->encoder);
-            _inst->encoder = nullptr;
-        }
-        rmt_bytes_encoder_config_t encoder_config = {
-            .bit0  = custom_zero,
-            .bit1  = custom_one,
-            .flags = { .msb_first = 1 },
-        };
-        if (rmt_new_bytes_encoder(&encoder_config, &_inst->encoder) != ESP_OK)
-        {
-            ESP_LOGE("RMT_NeoPixel", "Failed to recreate encoder for custom timing");
-            return false;
-        }
-
-        // Store in inst for display
-        _inst->customT0H = t0h;
-        _inst->customT0L = t0l;
-        _inst->customT1H = t1h;
-        _inst->customT1L = t1l;
-        _inst->bitPeriodNs = (uint32_t)customPeriodTicks * (1000000000UL / RMT_LED_STRIP_RESOLUTION_HZ);
-
-    }
+    if (_inst->initialized) _inst->encoder = replacementEncoder;
+    _inst->resetTimeUs = activeResetUs;
+    _inst->customT0H = completeCustomTiming ? t0h : 0;
+    _inst->customT0L = completeCustomTiming ? t0l : 0;
+    _inst->customT1H = completeCustomTiming ? t1h : 0;
+    _inst->customT1L = completeCustomTiming ? t1l : 0;
+    _inst->bitPeriodNs = (uint32_t)periodTicks * (1000000000UL / RMT_LED_STRIP_RESOLUTION_HZ);
 
     return true;
 }

@@ -203,7 +203,7 @@ class PhysicalStrip
     // Pass resetUs = 0 to keep the protocol default.
     // ====================================================================
     bool setCustomTiming(uint16_t t0h, uint16_t t0l, uint16_t t1h, uint16_t t1l, uint32_t resetUs = 0);
-    void clearCustomTiming(); ///< Revert to AUTO timing
+    bool clearCustomTiming(); ///< Revert to AUTO timing and apply it to hardware
 
   private:
     IHardwareDriver* _driver;     // Underlying driver
