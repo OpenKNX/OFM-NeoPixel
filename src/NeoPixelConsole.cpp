@@ -101,18 +101,37 @@ void openknxNeoPixelConsolePrintf(const char* fmt, ...)
 // ============================================================================
 const CloneTimingProfile kCloneProfiles[] = {
 
-    // idx  name            mode               reset  R    G    B    description
-    { "STANDARD",    TimingMode::AUTO,       50,    255,   0,   0, "800kHz, 50µs reset (WS2812B default)" },
-    { "SK6812_STD",  TimingMode::AUTO,       80,      0, 255,   0, "800kHz, 80µs reset (SK6812 default)" },
-    { "SLOW_RESET",  TimingMode::AUTO,      280,      0,   0, 255, "800kHz, 280µs reset (clone long-reset)" },
-    { "SLOW10",      TimingMode::SLOW_10PCT, 80,    255, 255,   0, "720kHz, 80µs  (weak signal chain)" },
-    { "SLOW10_LONG", TimingMode::SLOW_10PCT,280,      0, 255, 255, "720kHz, 280µs (weak chain + long reset)" },
-    { "SLOW20_LONG", TimingMode::SLOW_20PCT,300,    255,   0, 255, "640kHz, 300µs (extreme / WS2811-like)" },
+    // name            T0H  T0L  T1H  T1L  reset  description
+    { "STANDARD",    375, 875, 750, 500, 300, "800kHz canonical waveform, 300us reset" },
+    { "SK6812_STD",  375, 875, 750, 500,  80, "800kHz canonical waveform, 80us reset" },
+    { "SLOW_RESET",  375, 875, 750, 500, 280, "800kHz canonical waveform, 280us reset" },
+    { "SLOW10",      416, 972, 833, 555,  80, "720kHz waveform, 80us reset" },
+    { "SLOW10_LONG", 416, 972, 833, 555, 280, "720kHz waveform, 280us reset" },
+    { "SLOW20_LONG", 469,1094, 938, 625, 300, "640kHz waveform, 300us reset" },
 };
 const uint8_t  kCloneProfileCount   = sizeof(kCloneProfiles) / sizeof(kCloneProfiles[0]);
 const uint32_t kScanColorDurationMs = 2000;  ///< Show each profile for 2 s before prompting
 const uint32_t kScanPauseDurationMs = 300;   ///< Brief blank gap between profiles (ms)
 const uint32_t kScanWaitTimeoutMs   = 10000; ///< Auto-advance if no input after 10 s
+
+bool applyCloneTimingProfile(PhysicalStrip* strip, const CloneTimingProfile& profile)
+{
+    return strip && strip->setCustomTiming(profile.t0hNs, profile.t0lNs,
+                                            profile.t1hNs, profile.t1lNs,
+                                            profile.resetUs);
+}
+
+bool writeCloneTimingStressPayload(PhysicalStrip* strip)
+{
+    if (!strip) return false;
+    uint8_t* buffer = strip->getBuffer();
+    const size_t size = strip->getBufferSize();
+    if (!buffer || size == 0) return false;
+
+    static constexpr uint8_t pattern[] = {0x00, 0xFF, 0xAA, 0x55, 0x80, 0x01};
+    for (size_t i = 0; i < size; i++) buffer[i] = pattern[i % sizeof(pattern)];
+    return true;
+}
 
 // ============================================================================
 // Helper Functions
@@ -4731,18 +4750,12 @@ bool NeoPixel::processPhysTimingsCommand()
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
     openknx.logger.log("Clone Profiles (for non-responding / clone LED strips):");
     openknx.logger.color(0);
-    openknx.logger.log("N │ Name           │ Color   │ Description");
+    openknx.logger.log("N │ Name           │ Payload │ Description");
     openknx.logger.log("──┼────────────────┼─────────┼─────────────────────────────────────────");
     for (uint8_t i = 0; i < kCloneProfileCount; i++)
     {
         const CloneTimingProfile& p = kCloneProfiles[i];
-        const char* colorName = (p.r > 0 && p.g == 0 && p.b == 0) ? "RED    " :
-                                (p.r == 0 && p.g > 0 && p.b == 0) ? "GREEN  " :
-                                (p.r == 0 && p.g == 0 && p.b > 0) ? "BLUE   " :
-                                (p.r > 0 && p.g > 0 && p.b == 0)  ? "YELLOW " :
-                                (p.r == 0 && p.g > 0 && p.b > 0)  ? "CYAN   " :
-                                (p.r > 0 && p.g == 0 && p.b > 0)  ? "MAGENTA" : "WHITE  ";
-        openknx.logger.logWithValues("%d │ %-14s │ %s │ %s", (int)i, p.name, colorName, p.desc);
+        openknx.logger.logWithValues("%d │ %-14s │ stress  │ %s", (int)i, p.name, p.desc);
     }
 
     printSectionSeparator();
@@ -5133,7 +5146,10 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
             openknx.logger.log("ERROR: Failed to set timing! (1-Wire strips only; SPI LEDs use SPI clock)");
             return true;
         }
-        strip->clear();
+        uint8_t* buffer = strip->getBuffer();
+        if (buffer && _scanSavedBuffer.size() == strip->getBufferSize())
+            memcpy(buffer, _scanSavedBuffer.data(), _scanSavedBuffer.size());
+        _scanSavedBuffer.clear();
         strip->show();
         return true;
     }
@@ -5214,37 +5230,38 @@ bool NeoPixel::processPhysTimingScanCommand(uint32_t stripId)
                                  (int)kCloneProfileCount,
                                  (int)(kScanColorDurationMs / 1000),
                                  (int)(kScanWaitTimeoutMs / 1000));
-    openknx.logger.log("  Watch the ENTIRE STRIP — note the COLOR when ALL LEDs light up.");
+    openknx.logger.log("  Watch the ENTIRE STRIP while every candidate sends the same stress pattern.");
     openknx.logger.log("  Commands: neo scan next | neo scan apply | neo scan stop");
     openknx.logger.log("");
-    openknx.logger.log("  Profile │ Color   │ Mode/Reset");
+    openknx.logger.log("  Profile │ Payload │ Waveform/Reset");
     openknx.logger.log("  ────────┼─────────┼──────────────────────────────────────");
     for (uint8_t i = 0; i < kCloneProfileCount; i++)
     {
         const CloneTimingProfile& p = kCloneProfiles[i];
-        const char* colorName = (p.r > 0 && p.g == 0 && p.b == 0) ? "RED    " :
-                                (p.r == 0 && p.g > 0 && p.b == 0) ? "GREEN  " :
-                                (p.r == 0 && p.g == 0 && p.b > 0) ? "BLUE   " :
-                                (p.r > 0 && p.g > 0 && p.b == 0)  ? "YELLOW " :
-                                (p.r == 0 && p.g > 0 && p.b > 0)  ? "CYAN   " :
-                                (p.r > 0 && p.g == 0 && p.b > 0)  ? "MAGENTA" : "WHITE  ";
-        openknx.logger.logWithValues("    %d     │ %s │ %s", (int)i, colorName, p.desc);
+        openknx.logger.logWithValues("    %d     │ stress │ %s", (int)i, p.desc);
     }
     openknx.logger.log("");
     openknx.logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     openknx.logger.log("");
 
+    uint8_t* buffer = strip->getBuffer();
+    const size_t bufferSize = strip->getBufferSize();
+    if (!buffer || bufferSize == 0)
+    {
+        openknx.logger.log("ERROR: Strip has no writable frame buffer.");
+        return true;
+    }
+    _scanSavedBuffer.assign(buffer, buffer + bufferSize);
+
     // Apply profile 0 immediately; the state machine will start from SHOW_COLOR
     const CloneTimingProfile& first = kCloneProfiles[0];
-    strip->setTimingMode(first.mode);
-    if (first.resetUs > 0) sCfg->setResetTime(first.resetUs);
-    auto* initDrv = strip->getDriver();
-    if (initDrv) initDrv->applyConfig(cfg);
-
-    uint16_t ledCount = strip->getLedCount();
-    for (uint16_t i = 0; i < ledCount; i++)
-        strip->setPixel(i, first.r, first.g, first.b);
-    strip->show();
+    if (!applyCloneTimingProfile(strip, first) ||
+        !writeCloneTimingStressPayload(strip) || !strip->show())
+    {
+        openknx.logger.log("ERROR: Failed to apply or transmit the first timing candidate.");
+        _scanSavedBuffer.clear();
+        return true;
+    }
 
     openknx.logger.logWithValues("Profile 1/%d: %s — %s",
                                  (int)kCloneProfileCount, first.name, first.desc);
@@ -5283,23 +5300,13 @@ bool NeoPixel::processPhysTimingProfileCommand(uint32_t stripId, uint8_t profile
                                  (int)profileIdx, p.name, (int)stripId);
     openknx.logger.logWithValues("  %s", p.desc);
 
-    if (!strip->setTimingMode(p.mode))
+    if (!applyCloneTimingProfile(strip, p))
     {
         openknx.logger.log("ERROR: This timing profile is not supported by the selected backend.");
         return true;
     }
-    if (p.resetUs > 0)
-    {
-        sCfg->setResetTime(p.resetUs);
-        if (!strip->applyConfig())
-        {
-            openknx.logger.log("ERROR: Failed to apply the profile reset time.");
-            return true;
-        }
-    }
 
-    strip->clear();
-    if (!strip->show())
+    if (!writeCloneTimingStressPayload(strip) || !strip->show())
     {
         openknx.logger.log("ERROR: Profile applied, but the test frame could not be transmitted.");
         return true;

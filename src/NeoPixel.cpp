@@ -171,8 +171,8 @@ void NeoPixel::loop(bool configured)
  * @brief Non-blocking state machine for clone timing scan.
  *
  * Called every loop() iteration while _scanPhase != IDLE.
- * Cycles through all kCloneProfiles, lighting up LEDs 0-2 in the
- * profile's color for kScanColorDurationMs ms, then blanks them
+ * Cycles through all kCloneProfiles with the same byte-pattern stress frame
+ * for kScanColorDurationMs ms, then blanks the line
  * for kScanPauseDurationMs ms before moving to the next profile.
  *
  * After all profiles, restores the original timing and prints a summary.
@@ -207,7 +207,7 @@ void NeoPixel::loopTimingScan()
                 openknx.logger.logWithValues("  (auto-advance in %ds — or type a command)",
                                              (int)(kScanWaitTimeoutMs / 1000));
                 openknx.logger.log("  'neo scan next'  -> next profile");
-                openknx.logger.log("  'neo scan apply' -> save this profile & finish");
+                openknx.logger.log("  'neo scan apply' -> keep this profile for this boot & finish");
                 openknx.logger.log("  'neo scan stop'  -> abort, restore original timing");
                 _scanPromptPrinted = true;
             }
@@ -232,24 +232,15 @@ void NeoPixel::loopTimingScan()
                 return;
             }
 
-            // Apply next profile and light the FULL strip
+            // Apply the next complete waveform and the same stress payload.
             const CloneTimingProfile& p = kCloneProfiles[_scanProfileIdx];
-            strip->setTimingMode(p.mode);
-
-            auto* cfg  = strip->getConfig();
-            SerialStripConfig* sCfg = (cfg && cfg->isSerialConfig())
-                                          ? static_cast<SerialStripConfig*>(cfg) : nullptr;
-            if (sCfg && p.resetUs > 0)
+            if (!applyCloneTimingProfile(strip, p) ||
+                !writeCloneTimingStressPayload(strip) || !strip->show())
             {
-                sCfg->setResetTime(p.resetUs);
-                auto* drv = strip->getDriver();
-                if (drv) drv->applyConfig(cfg);
+                openknx.logger.log("ERROR: Timing candidate could not be applied or transmitted; restoring original state.");
+                processScanControlCommand("stop");
+                return;
             }
-
-            uint16_t ledCount = strip->getLedCount();
-            for (uint16_t i = 0; i < ledCount; i++)
-                strip->setPixel(i, p.r, p.g, p.b);
-            strip->show();
 
             _scanPhaseStart    = now;
             _scanPromptPrinted = false;

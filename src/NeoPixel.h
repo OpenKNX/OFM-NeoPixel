@@ -13,6 +13,7 @@
 #include "NeoPixelManager.h"
 #include "OpenKNX.h"
 #include "effects/EffectPool.h" // Effect Pool for LED effects
+#include <vector>
 
 #define NeoPixel_Display_Name "NeoPixel" // Display name
 #define NeoPixel_Display_Version "1.0.0" // Display version
@@ -212,6 +213,7 @@ class NeoPixel : public OpenKNX::Module
     uint16_t   _scanSavedT1L   = 0;
     uint32_t   _scanSavedReset = 0;
     TimingMode _scanSavedMode  = TimingMode::AUTO;
+    std::vector<uint8_t> _scanSavedBuffer;
     bool       _scanPromptPrinted = false; ///< true once the WAIT_INPUT prompt has been printed
 
     // ── Clone timing live-tuner ──────────────────────────────────────────────

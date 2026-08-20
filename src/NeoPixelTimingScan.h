@@ -1,17 +1,21 @@
 #pragma once
-#include "PhysicalStripConfig.h" // TimingMode
+#include <stdint.h>
+
+class PhysicalStrip;
 
 /**
- * Predefined timing presets for diagnosing non-responsive or clone LED strips.
- * Qualify cycles through all profiles in sequence, showing a distinct color per
- * profile on the FULL strip — user applies whichever profile lights up all LEDs.
+ * Complete, backend-neutral timing candidates for qualification. Every profile
+ * carries all four symbols, so PIO and RMT exercise a genuinely distinct
+ * waveform rather than retaining a stale custom configuration.
  */
 struct CloneTimingProfile
 {
     const char* name;
-    TimingMode  mode;     ///< BASE timing mode (controls clkdiv / bitrate)
+    uint16_t    t0hNs;
+    uint16_t    t0lNs;
+    uint16_t    t1hNs;
+    uint16_t    t1lNs;
     uint32_t    resetUs;  ///< Reset/latch time in µs (0 = protocol default)
-    uint8_t     r, g, b; ///< Visual feedback color for this profile
     const char* desc;     ///< Human-readable description
 };
 
@@ -20,3 +24,6 @@ extern const uint8_t            kCloneProfileCount;
 extern const uint32_t           kScanColorDurationMs;
 extern const uint32_t           kScanPauseDurationMs;
 extern const uint32_t           kScanWaitTimeoutMs;   ///< Auto-advance timeout while waiting for user input (ms)
+
+bool applyCloneTimingProfile(PhysicalStrip* strip, const CloneTimingProfile& profile);
+bool writeCloneTimingStressPayload(PhysicalStrip* strip);
