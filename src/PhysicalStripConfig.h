@@ -18,6 +18,7 @@
 #pragma once
 
 #include "IHardwareDriver.h"
+#include "OneWireTimingProfile.h"
 #include "TimingMode.h"
 #include <cmath>
 #include <stdint.h>
@@ -793,28 +794,17 @@ struct SerialStripConfig : public PhysicalStripConfig
      */
     EffectiveTimingNs getEffectiveTimings(LedProtocol protocol) const
     {
+        const OneWireTimingProfile& profile = getOneWireTimingProfile(protocol);
         if (_t0h > 0)
         {
-            // Custom values set — return as-is
-            return { _t0h, _t0l, _t1h, _t1l, _resetTime, true };
+            // Custom values set — return them as-is, but retain the protocol
+            // reset when the expert override did not explicitly provide one.
+            return { _t0h, _t0l, _t1h, _t1l,
+                     _resetTime > 0 ? _resetTime : profile.resetTimeUs, true };
         }
 
-        // Protocol defaults
-        switch (protocol)
-        {
-            case LedProtocol::SK6812:
-            case LedProtocol::SK6812_RGBCCT:
-                return { 300, 900, 600, 600, _resetTime > 0 ? _resetTime : 80, false };
-
-            case LedProtocol::WS2811:
-                return { 500, 2000, 1200, 1300, _resetTime > 0 ? _resetTime : 50, false };
-
-            case LedProtocol::WS2812:
-            case LedProtocol::WS2812B:
-            case LedProtocol::WS2805_RGBCCT:
-            default:
-                return { 300, 900, 750, 600, _resetTime > 0 ? _resetTime : 50, false };
-        }
+        return { profile.t0hNs, profile.t0lNs, profile.t1hNs, profile.t1lNs,
+                 _resetTime > 0 ? _resetTime : profile.resetTimeUs, false };
     }
 
     // ===== Test Routines =====

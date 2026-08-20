@@ -58,6 +58,10 @@ struct pio_neopixel_serial_inst
     TimingMode timingMode; // Timing mode for PIO clock divider calculation
     float actual_bitrate;  // Actual bitrate used (may differ for AUTO_LEGACY)
     float actual_clkdiv;   // Actual clock divider used
+    const pio_program_t* program; // Program claimed by this instance
+    uint8_t cyclesPerBit;          // Cadence length of the claimed program
+    uint8_t oneHighCycles;         // HIGH cycles used for a logical one bit
+    bool outputInverted;           // Physical output polarity required by protocol
 
     uint8_t* buffer;        // LED data buffer (RGB/RGBW bytes) - user writes here
     uint8_t* bufferSending; // RGBCCT only: DMA reads from here (double-buffer)

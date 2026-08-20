@@ -1,6 +1,7 @@
 #if defined(ARDUINO_ARCH_RP2040)
 
     #include "pio_neopixel_serial.h"
+    #include "../OneWireTimingProfile.h"
     #include "../PhysicalStripConfig.h"
     #include "OpenKNX.h"
     #include "pio_dma_shared.h"
@@ -58,6 +59,68 @@ static const pio_program_t neopixel_serial_program = {
     .origin = -1,
 };
 
+// Compact cadence variants for protocols whose HIGH pulse ratios differ from
+// the canonical WS2812x/SK6812 3:7:6:4 waveform. Each program has the same
+// control flow and four instructions, so it can use the common setup path.
+static const uint16_t neopixel_three_step_program_instructions[] = {
+    0x6021, // out x, 1 side 0 [0]  -> one LOW cycle
+    0x1023, // jmp !x, 3 side 1 [0] -> one HIGH cycle
+    0x1000, // jmp 0      side 1 [0] -> one bit: second HIGH cycle
+    0xa042, // nop        side 0 [0] -> zero bit: second LOW cycle
+};
+static const pio_program_t neopixel_three_step_program = {
+    .instructions = neopixel_three_step_program_instructions,
+    .length = 4,
+    .origin = -1,
+};
+
+static const uint16_t neopixel_four_step_program_instructions[] = {
+    0x6021, // out x, 1 side 0 [0]  -> one LOW cycle
+    0x1023, // jmp !x, 3 side 1 [0] -> one HIGH cycle
+    0x1100, // jmp 0      side 1 [1] -> one bit: two more HIGH cycles
+    0xa142, // nop        side 0 [1] -> zero bit: two more LOW cycles
+};
+static const pio_program_t neopixel_four_step_program = {
+    .instructions = neopixel_four_step_program_instructions,
+    .length = 4,
+    .origin = -1,
+};
+
+static const uint16_t neopixel_six_step_program_instructions[] = {
+    0x6221, // out x, 1 side 0 [2]  -> three LOW cycles
+    0x1023, // jmp !x, 3 side 1 [0] -> one HIGH cycle
+    0x1100, // jmp 0      side 1 [1] -> one bit: two more HIGH cycles
+    0xa142, // nop        side 0 [1] -> zero bit: two more LOW cycles
+};
+static const pio_program_t neopixel_six_step_program = {
+    .instructions = neopixel_six_step_program_instructions,
+    .length = 4,
+    .origin = -1,
+};
+
+struct PioCadenceConfig
+{
+    const pio_program_t* program;
+    uint8_t cyclesPerBit;
+    uint8_t oneHighCycles;
+};
+
+static PioCadenceConfig get_pio_cadence_config(OneWirePioCadence cadence)
+{
+    switch (cadence)
+    {
+        case OneWirePioCadence::THREE_STEP:
+            return {&neopixel_three_step_program, 3, 2};
+        case OneWirePioCadence::FOUR_STEP:
+            return {&neopixel_four_step_program, 4, 3};
+        case OneWirePioCadence::SIX_STEP:
+            return {&neopixel_six_step_program, 6, 3};
+        case OneWirePioCadence::CANONICAL_10:
+        default:
+            return {&neopixel_serial_program, 10, 6};
+    }
+}
+
 // Static member initialization. Our DMA handlers array.
 PIO_NeoPixel_Serial* PIO_NeoPixel_Serial::_dmaHandlers[12] = {nullptr};
 
@@ -70,7 +133,9 @@ PIO_NeoPixel_Serial* PIO_NeoPixel_Serial::_dmaHandlers[12] = {nullptr};
  * @param fifoWordBits For RGBCCT: autopull threshold (8/16/32) matching DMA transfer size
  *                     For RGB/RGBW: ignored (uses 24/32 respectively)
  */
-static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, uint pin, float clkdiv, bool rgbw, bool rgbcct, uint fifoWordBits = 32)
+static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, uint pin, float clkdiv,
+                                                bool rgbw, bool rgbcct, bool inverted,
+                                                uint fifoWordBits = 32)
 {
     // ===== GPIO OPTIMIZATION FOR HIGH-SPEED SERIAL (800 kHz - 1.25 MHz) =====
 
@@ -83,6 +148,7 @@ static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, u
 
     // 2. Transfer pin to PIO control (before setting state!)
     pio_gpio_init(pio, pin);
+    gpio_set_outover(pin, inverted ? GPIO_OVERRIDE_INVERT : GPIO_OVERRIDE_NORMAL);
 
     // 3. Set pin as output under PIO control
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
@@ -119,8 +185,8 @@ static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, u
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_set_enabled(pio, sm, true);
     #ifdef OPENKNX_DEBUG
-    openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "PIO Init: pin=%u, SM=%u, offset=%u, clkdiv=%.2f, RGBW=%d, RGBCCT=%d",
-                                          pin, sm, offset, clkdiv, rgbw, rgbcct);
+    openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "PIO Init: pin=%u, SM=%u, offset=%u, clkdiv=%.2f, RGBW=%d, RGBCCT=%d, inverted=%d",
+                                          pin, sm, offset, clkdiv, rgbw, rgbcct, inverted);
     #endif
 }
 
@@ -212,11 +278,15 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     _inst->fifoEmptyTime = 0;       // No previous transfer
     _inst->resetTimeUs = 0;         // Will be set in initPIO based on protocol
     _inst->waitingForReset = false; // Not waiting for reset yet
+    _inst->program = nullptr;
+    _inst->cyclesPerBit = 0;
+    _inst->oneHighCycles = 0;
+    _inst->outputInverted = false;
 
     // Determine bytes per LED and color order
     _inst->bytesPerLed = ProtocolHelper::getBytesPerLed(protocol);
     _inst->colorOrder = ProtocolHelper::getColorOrder(protocol);
-    _inst->frequency = ProtocolHelper::getDefaultFrequency(protocol);
+    _inst->frequency = getOneWireTimingProfile(protocol).bitRateHz;
 
     // Allocate buffers
     // CRITICAL: Cast to size_t to prevent overflow (e.g., 22000 * 3 = 66000 > uint16_t max 65535)
@@ -309,6 +379,7 @@ PIO_NeoPixel_Serial::~PIO_NeoPixel_Serial()
             if (_inst->pio && _inst->sm < 4)
             {
                 pio_sm_set_enabled(_inst->pio, _inst->sm, false);
+                gpio_set_outover(_inst->pin, GPIO_OVERRIDE_NORMAL);
             }
 
             // Free DMA (IRQ is shared, don't release it)
@@ -328,7 +399,7 @@ PIO_NeoPixel_Serial::~PIO_NeoPixel_Serial()
             if (_inst->pio && _inst->sm < 4)
             {
                 pio_remove_program_and_unclaim_sm(
-                    &neopixel_serial_program,
+                    _inst->program ? _inst->program : &neopixel_serial_program,
                     _inst->pio,
                     _inst->sm,
                     _inst->offset);
@@ -422,21 +493,23 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
         #endif
     }
 
-    // Apply custom timing if T1H is set (CUSTOM mode)
-    // PIO program has fixed 3:7:6:4 cycle ratio → only T1H determines the bit period.
-    // Formula: clkdiv = sys_clk_hz * T1H_ns * 1e-9 / 6.0  (6 HIGH cycles per 10-cycle bit)
+    // Apply custom timing if T1H is set (CUSTOM mode). A PIO cadence keeps a
+    // fixed pulse ratio, so T1H sets the divider while the selected protocol
+    // cadence determines the resulting bit-cell length.
     uint16_t t1h = serialCfg->getT1H();
     if (t1h > 0 && _inst->initialized)
     {
+        const uint8_t oneHighCycles = _inst->oneHighCycles ? _inst->oneHighCycles : 6;
+        const uint8_t cyclesPerBit = _inst->cyclesPerBit ? _inst->cyclesPerBit : 10;
         float sys_clk = (float)clock_get_hz(clk_sys);
-        float clkdiv  = sys_clk * (float)t1h * 1e-9f / 6.0f;
+        float clkdiv  = sys_clk * (float)t1h * 1e-9f / (float)oneHighCycles;
         clkdiv = (clkdiv < 1.0f) ? 1.0f : clkdiv; // clkdiv < 1 not allowed
 
         pio_sm_set_clkdiv(_inst->pio, _inst->sm, clkdiv);
         pio_sm_clkdiv_restart(_inst->pio, _inst->sm); // apply immediately
 
         _inst->actual_clkdiv = clkdiv;
-        _inst->actual_bitrate = sys_clk / clkdiv / 10.0f; // 10 cycles per bit
+        _inst->actual_bitrate = sys_clk / clkdiv / (float)cyclesPerBit;
         _inst->timingMode = TimingMode::CUSTOM;
 
         // Update reset time if provided
@@ -488,8 +561,8 @@ bool PIO_NeoPixel_Serial::init()
  * @brief Initializes PIO state machine for NeoPixel protocol
  *
  * Configures PIO hardware for the selected LED protocol:
- * 1. Loads WS2812B/SK6812 timing program
- * 2. Calculates clock divider for correct timing
+ * 1. Loads the protocol's cadence program
+ * 2. Calculates clock divider for the selected profile
  * 3. Configures GPIO and FIFO settings
  *
  * Timing calculation:
@@ -499,8 +572,8 @@ bool PIO_NeoPixel_Serial::init()
  *
  * Examples:
  * - WS2812B @ 800kHz → 125MHz / (800kHz * 10) = 15.625
- * - WS2811 @ 400kHz → 125MHz / (400kHz * 10) = 31.25
- * - WS2805 @ 800kHz → 125MHz / (800kHz * 10) = 15.625 (uses WS2812B timing)
+ * - WS2811 @ 400kHz with six cycles/bit → 125MHz / (400kHz * 6) = 52.08
+ * - WS2805 @ 917kHz with four cycles/bit → 125MHz / (917kHz * 4) = 34.06
  *
  * @return true if PIO configured, false on error
  */
@@ -511,11 +584,14 @@ bool PIO_NeoPixel_Serial::initPIO()
     bool rgbw = (_inst->bytesPerLed == 4);
     bool rgbcct = (_inst->bytesPerLed == 5);
 
-    // Detect WS2805 protocol (for reset time configuration)
-    bool isWS2805 = (_inst->protocol == LedProtocol::WS2805_RGBCCT);
-
-    // ALL protocols use 10 cycles per bit (standard WS2812B program)
-    const uint8_t cycles_per_bit = 10;
+    const OneWireTimingProfile& timing = getOneWireTimingProfile(_inst->protocol);
+    const PioCadenceConfig cadence = get_pio_cadence_config(timing.pioCadence);
+    const uint8_t cycles_per_bit = cadence.cyclesPerBit;
+    _inst->frequency = timing.bitRateHz;
+    _inst->program = cadence.program;
+    _inst->cyclesPerBit = cadence.cyclesPerBit;
+    _inst->oneHighCycles = cadence.oneHighCycles;
+    _inst->outputInverted = timing.inverted;
 
     // Calculate clock divider based on frequency and timing mode
     // PIO clock = sys_clock / clkdiv
@@ -538,8 +614,7 @@ bool PIO_NeoPixel_Serial::initPIO()
     switch (_inst->timingMode)
     {
         case TimingMode::AUTO_LEGACY:
-            // Target 960 kHz for WS2812C/D (adapts to any CPU frequency)
-            // WS2805 uses standard frequency (800kHz) like other protocols
+            // Expert compatibility override for WS2812C/D-style strips.
             clkdiv = actual_sys_clk / (960000.0f * (float)cycles_per_bit);
             actual_bitrate = (actual_sys_clk / clkdiv) / (float)cycles_per_bit;
             mode_name = "AUTO_LEGACY";
@@ -602,12 +677,12 @@ bool PIO_NeoPixel_Serial::initPIO()
     _inst->actual_bitrate = actual_bitrate;
     _inst->actual_clkdiv = clkdiv;
 
-    // Use standard WS2812B PIO program for ALL protocols
-    const pio_program_t* selected_program = &neopixel_serial_program;
+    const pio_program_t* selected_program = cadence.program;
 
     #ifdef OPENKNX_DEBUG
-    openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "GPIO%u: sys_clk=%.0f MHz, clkdiv=%.3f, bitrate=%.0f kHz [%s], cycles=%d",
-                                          _inst->pin, actual_sys_clk / 1e6f, clkdiv, actual_bitrate / 1000.0f, mode_name, cycles_per_bit);
+    openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "GPIO%u: %s, sys_clk=%.0f MHz, clkdiv=%.3f, bitrate=%.0f kHz [%s], cycles=%d, inverted=%d",
+                                          _inst->pin, timing.name, actual_sys_clk / 1e6f, clkdiv,
+                                          actual_bitrate / 1000.0f, mode_name, cycles_per_bit, timing.inverted);
     #endif
 
     #if PICO_PIO_USE_GPIO_BASE
@@ -621,7 +696,7 @@ bool PIO_NeoPixel_Serial::initPIO()
     uint32_t gpio_count = 1;
 
     bool success = pio_claim_free_sm_and_add_program_for_gpio_range(
-        selected_program, // PIO program (WS2812B for all protocols)
+        selected_program, // PIO program selected by protocol cadence
         &pio_temp,        // Return PIO instance
         &sm_temp,         // Return state machine index
         &offset_temp,     // Return program offset
@@ -647,7 +722,7 @@ bool PIO_NeoPixel_Serial::initPIO()
     uint offset_temp = 0;
 
     bool success = pio_claim_free_sm_and_add_program(
-        selected_program, // PIO program (WS2812B for all protocols)
+        selected_program, // PIO program selected by protocol cadence
         &pio_temp,        // Return PIO instance
         &sm_temp,         // Return state machine index
         &offset_temp      // Return program offset
@@ -673,7 +748,8 @@ bool PIO_NeoPixel_Serial::initPIO()
     pio_sm_clkdiv_restart(_inst->pio, _inst->sm);     // Reset clock divider
 
     // Initialize the PIO program with calculated clock divider
-    neopixel_serial_program_init(_inst->pio, _inst->sm, _inst->offset, _inst->pin, clkdiv, rgbw, rgbcct, _inst->fifoWordBits);
+    neopixel_serial_program_init(_inst->pio, _inst->sm, _inst->offset, _inst->pin, clkdiv,
+                                 rgbw, rgbcct, timing.inverted, _inst->fifoWordBits);
 
     #ifdef OPENKNX_DEBUG
     const char* pioName = (_inst->pio == pio0) ? "PIO0" : (_inst->pio == pio1) ? "PIO1"
@@ -683,18 +759,7 @@ bool PIO_NeoPixel_Serial::initPIO()
                                           pioName, _inst->sm, _inst->pin, _inst->actual_bitrate / 1000.0f, channelType);
     #endif
 
-    // Set reset/latch time based on protocol
-    // Intentionally longer than spec for compatibility
-    if (isWS2805)
-    {
-        _inst->resetTimeUs = 300; // WS2805 spec is 280µs, use 300µs for margin
-    }
-    else
-    {
-        // WS2812B/SK6812: spec is 50µs, but use 300µs for compatibility
-        // with older/clone chips that may need longer reset
-        _inst->resetTimeUs = 300;
-    }
+    _inst->resetTimeUs = timing.resetTimeUs;
 
     return true;
 }

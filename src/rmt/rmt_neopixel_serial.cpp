@@ -6,6 +6,7 @@
 #if defined(ARDUINO_ARCH_ESP32)
 
     #include "rmt_neopixel_serial.h"
+    #include "../OneWireTimingProfile.h"
     #include "../PhysicalStripConfig.h"
     #include <Arduino.h>
     #include <esp_log.h>
@@ -15,62 +16,6 @@
 
 // Static instance mapping
 RMT_NeoPixel_Serial* RMT_NeoPixel_Serial::_instances[8] = {nullptr};
-
-/**
- * WS2812 Timing for RMT (40MHz Resolution)
- *
- * WS2812 Timing:
- * - 0-Bit: 0.4µs HIGH, 0.85µs LOW
- * - 1-Bit: 0.8µs HIGH, 0.45µs LOW
- * - Reset: >50µs LOW
- *
- * At 40MHz (25ns per tick):
- * - 0.4µs = 16 ticks
- * - 0.85µs = 34 ticks
- * - 0.8µs = 32 ticks
- * - 0.45µs = 18 ticks
- */
-static const rmt_symbol_word_t ws2812_zero = {
-    .duration0 = 16, // T0H = 0.4µs
-    .level0 = 1,
-    .duration1 = 34, // T0L = 0.85µs
-    .level1 = 0,
-};
-
-static const rmt_symbol_word_t ws2812_one = {
-    .duration0 = 32, // T1H = 0.8µs
-    .level0 = 1,
-    .duration1 = 18, // T1L = 0.45µs
-    .level1 = 0,
-};
-
-/**
- * WS2811 Timing for RMT (40MHz Resolution)
- *
- * WS2811 operates at 400kHz (much slower than WS2812):
- * - 0-Bit: 0.5µs HIGH, 2.0µs LOW
- * - 1-Bit: 1.2µs HIGH, 1.3µs LOW
- * - Reset: >50µs LOW
- *
- * At 40MHz (25ns per tick):
- * - 0.5µs = 20 ticks
- * - 2.0µs = 80 ticks
- * - 1.2µs = 48 ticks
- * - 1.3µs = 52 ticks
- */
-static const rmt_symbol_word_t ws2811_zero = {
-    .duration0 = 20, // T0H = 0.5µs
-    .level0 = 1,
-    .duration1 = 80, // T0L = 2.0µs
-    .level1 = 0,
-};
-
-static const rmt_symbol_word_t ws2811_one = {
-    .duration0 = 48, // T1H = 1.2µs
-    .level0 = 1,
-    .duration1 = 52, // T1L = 1.3µs
-    .level1 = 0,
-};
 
 /**
  * Convert a duration to an RMT tick count with round-to-nearest semantics.
@@ -168,35 +113,6 @@ static bool should_request_rmt_dma()
 }
 
 /**
- * Return a conservative protocol latch interval. The signal is held LOW for
- * this duration only after RMT confirms that the final data symbol completed.
- * The full waveform table moves into the shared protocol descriptor work; keep
- * this switch here until then so no caller can accidentally fall back to zero.
- */
-static uint32_t get_protocol_reset_time_us(LedProtocol protocol)
-{
-    switch (protocol)
-    {
-        case LedProtocol::SK6812:
-        case LedProtocol::SK6805:
-        case LedProtocol::SK6812_RGBCCT:
-            return 80;
-
-        case LedProtocol::TM1814:
-            return 200;
-
-        case LedProtocol::WS2805_RGBCCT:
-            return 300;
-
-        default:
-            // WS2812x variants are commonly specified at >=50us, but a 300us
-            // latch gives the same clone compatibility margin used by the PIO
-            // backend and by WLED's WS2812x NeoPixelBus methods.
-            return 300;
-    }
-}
-
-/**
  * Get number of available (unclaimed) RMT channels
  * Note: RMT driver doesn't expose channel claim state directly,
  * so we track via our static instance array
@@ -256,7 +172,7 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
     _inst->encoder = nullptr;
     _inst->initialized = false;
     _inst->busy = false;
-    _inst->resetTimeUs = get_protocol_reset_time_us(protocol);
+    _inst->resetTimeUs = getOneWireTimingProfile(protocol).resetTimeUs;
 
     // Allocate buffer
     _inst->bufferSize = ledCount * _inst->bytesPerLed;
@@ -337,6 +253,8 @@ bool RMT_NeoPixel_Serial::init()
         return false;
     }
 
+    const OneWireTimingProfile& timing = getOneWireTimingProfile(_inst->protocol);
+
     // Configure TX channel
     rmt_tx_channel_config_t tx_chan_config = {
         .gpio_num = (gpio_num_t)_inst->pin,
@@ -345,7 +263,7 @@ bool RMT_NeoPixel_Serial::init()
         .mem_block_symbols = 64, // 64 symbols per block
         .trans_queue_depth = 4,  // 4 transaction queue
         .flags = {
-            .invert_out = false,
+            .invert_out = timing.inverted,
             .with_dma = should_request_rmt_dma(),
         }};
 
@@ -364,14 +282,25 @@ bool RMT_NeoPixel_Serial::init()
         return false;
     }
 
-    // Create encoder (bytes encoder for LED data)
-    // Select timing based on protocol – WS2811 uses 400kHz, all others use 800kHz
-    bool isWS2811 = (_inst->protocol == LedProtocol::WS2811);
+    // Create an encoder from the selected protocol profile. Its two symbols
+    // are quantised together so a payload's bit pattern cannot change its
+    // effective serial clock.
+    rmt_symbol_word_t zero = {};
+    rmt_symbol_word_t one = {};
+    if (!make_balanced_rmt_symbols(timing.t0hNs, timing.t0lNs,
+                                   timing.t1hNs, timing.t1lNs,
+                                   zero, one))
+    {
+        ESP_LOGE("RMT_NeoPixel", "Invalid built-in timing profile %s", timing.name);
+        rmt_del_channel(_inst->channel);
+        _inst->channel = nullptr;
+        return false;
+    }
     rmt_bytes_encoder_config_t encoder_config = {
-        .bit0 = isWS2811 ? ws2811_zero : ws2812_zero,
-        .bit1 = isWS2811 ? ws2811_one  : ws2812_one,
+        .bit0 = zero,
+        .bit1 = one,
         .flags = {
-            .msb_first = 1 // MSB first for WS2812/WS2811
+            .msb_first = 1 // All supported clockless profiles are MSB first
         }};
 
     if (rmt_new_bytes_encoder(&encoder_config, &_inst->encoder) != ESP_OK)
