@@ -300,12 +300,12 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("timing <i> qualify",   "Clone qualify: full strip, interactive (next/apply/stop)");
         openknx.console.printHelpLine("timing <i> scan",      "Alias for 'qualify'");
         openknx.console.printHelpLine("neo scan next",        "  During qualify: advance to next profile");
-        openknx.console.printHelpLine("neo scan apply",       "  During qualify: save current profile & finish");
+        openknx.console.printHelpLine("neo scan apply",       "  During qualify: keep current profile for this boot & finish");
         openknx.console.printHelpLine("neo scan stop",        "  During qualify: abort, restore original timing");
-        openknx.console.printHelpLine("timing <i> profile <N>", "Apply & persist clone profile N (see 'timings')");
+        openknx.console.printHelpLine("timing <i> profile <N>", "Apply clone profile until reboot (set ETS Timing permanently)");
         openknx.console.printHelpLine("timing <i> tune",              "[EXPERT] Enter live-tuner for strip i");
         openknx.console.printHelpLine("timing <i> tune t1h +50",      "  Adjust param while tuner is open");
-        openknx.console.printHelpLine("timing <i> tune show/save/abort", "  Status / persist / restore");
+        openknx.console.printHelpLine("timing <i> tune show/done/abort", "  Status / keep for this boot / restore");
         openknx.console.printHelpLine("config <i> info", "Show config (SPI: APA102/SK9822, Serial: WS2812B/SK6812)");
         openknx.console.printHelpLine("config <i> dummy <0-2>", "Set dummy LED mode (SPI only, 0=none, 1=physical, 2=virtual)");
         openknx.console.printHelpLine("config <i> frames <start> <end>", "Set frame counts (SPI only, start: 1-8, end: 1-80)");
@@ -4690,7 +4690,7 @@ bool NeoPixel::processPhysTimingsCommand()
     openknx.logger.log("  neo phys timing 0 reset       -> Revert to AUTO timing");
     openknx.logger.log("  neo phys timing 0 qualify     -> Interactive clone qualify (full strip, input-driven)");
     openknx.logger.log("  neo phys timing 0 scan        -> Alias for 'qualify'");
-    openknx.logger.log("  neo phys timing 0 profile <N> -> Apply & persist a clone profile");
+    openknx.logger.log("  neo phys timing 0 profile <N> -> Apply a clone profile until reboot");
     openknx.logger.log("  (during qualify): neo scan next | neo scan apply | neo scan stop");
     openknx.logger.log("");
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
@@ -4723,7 +4723,7 @@ bool NeoPixel::processPhysTimingsCommand()
     openknx.logger.log("    neo phys timing 0 tune t0h 350   -> (ESP32) adjust 0-bit high time");
     openknx.logger.log("    neo phys timing 1 tune t1h +50   -> tune strip 1 simultaneously");
     openknx.logger.log("    neo phys timing 0 tune show      -> show current values for strip 0");
-    openknx.logger.log("    neo phys timing 0 tune save      -> persist to flash & exit strip 0");
+    openknx.logger.log("    neo phys timing 0 tune save      -> alias for done (no flash write)");
     openknx.logger.log("    neo phys timing 0 tune done      -> keep timing, exit (no flash write)");
     openknx.logger.log("    neo phys timing 0 tune abort     -> restore original timing & exit");
 
@@ -5063,7 +5063,11 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
     if (strcmp(modeStr, "reset") == 0)
     {
         openknx.logger.logWithValues("Reverting strip [%d] to AUTO timing...", stripId);
-        strip->clearCustomTiming();
+        if (!strip->clearCustomTiming())
+        {
+            openknx.logger.log("ERROR: Failed to restore protocol timing.");
+            return true;
+        }
         openknx.logger.log("Timing reverted to AUTO.");
         strip->clear();
         strip->show();
@@ -5254,7 +5258,7 @@ bool NeoPixel::processPhysTimingScanCommand(uint32_t stripId)
 
 // ============================================================================
 /**
- * @brief Apply a clone timing profile permanently (and persist to flash).
+ * @brief Apply a clone timing profile for the current boot.
  */
 bool NeoPixel::processPhysTimingProfileCommand(uint32_t stripId, uint8_t profileIdx)
 {
@@ -5279,22 +5283,30 @@ bool NeoPixel::processPhysTimingProfileCommand(uint32_t stripId, uint8_t profile
                                  (int)profileIdx, p.name, (int)stripId);
     openknx.logger.logWithValues("  %s", p.desc);
 
-    strip->setTimingMode(p.mode);
+    if (!strip->setTimingMode(p.mode))
+    {
+        openknx.logger.log("ERROR: This timing profile is not supported by the selected backend.");
+        return true;
+    }
     if (p.resetUs > 0)
     {
         sCfg->setResetTime(p.resetUs);
-        auto* profDrv = strip->getDriver();
-        if (profDrv) profDrv->applyConfig(cfg);
+        if (!strip->applyConfig())
+        {
+            openknx.logger.log("ERROR: Failed to apply the profile reset time.");
+            return true;
+        }
     }
 
     strip->clear();
-    strip->show();
+    if (!strip->show())
+    {
+        openknx.logger.log("ERROR: Profile applied, but the test frame could not be transmitted.");
+        return true;
+    }
 
-    // Persist: save all runtime settings to flash
-    openknx.flash.save();
-
-    openknx.logger.log("Profile applied and saved to flash.");
-    openknx.logger.log("  The timing will be restored automatically after a power cycle.");
+    openknx.logger.log("Profile applied for the current boot only.");
+    openknx.logger.log("  Timing overrides are not stored in flash; configure ETS Timing for a permanent setting.");
     openknx.logger.log("  To revert: neo phys timing <id> reset");
 
     return true;
@@ -5398,7 +5410,7 @@ bool NeoPixel::processScanControlCommand(const std::string& cmd)
  *
  *   subArgs empty    → enter tuner (or show status if already active for this strip)
  *   subArgs "show"   → print current live values
- *   subArgs "save"   → persist to flash, exit
+ *   subArgs "save"   → compatibility alias for done; timing remains RAM-only
  *   subArgs "done"   → keep timing (no flash write), exit
  *   subArgs "abort"  → restore original timing, exit
  *   subArgs "t1h +50"→ adjust T1H by +50 ns (absolute or +/- relative)
@@ -5491,7 +5503,7 @@ bool NeoPixel::processPhysTimingTuneCommand(uint32_t stripId, const std::string&
         openknx.logger.logWithValues("    neo phys timing %d tune t1h +50", (int)stripId);
         openknx.logger.logWithValues("    neo phys timing %d tune reset <µs>", (int)stripId);
         openknx.logger.logWithValues("    neo phys timing %d tune show", (int)stripId);
-        openknx.logger.logWithValues("    neo phys timing %d tune save", (int)stripId);
+        openknx.logger.logWithValues("    neo phys timing %d tune save (alias for done)", (int)stripId);
         openknx.logger.logWithValues("    neo phys timing %d tune done", (int)stripId);
         openknx.logger.logWithValues("    neo phys timing %d tune abort", (int)stripId);
         openknx.logger.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -5521,19 +5533,26 @@ bool NeoPixel::processPhysTimingTuneCommand(uint32_t stripId, const std::string&
     // ── save ──────────────────────────────────────────────────────────────────
     if (subArgs == "save")
     {
-        strip->setCustomTiming(ts.liveT0H, ts.liveT0L, ts.liveT1H, ts.liveT1L, ts.liveResetUs);
-        openknx.flash.save();
+        if (!strip->setCustomTiming(ts.liveT0H, ts.liveT0L, ts.liveT1H, ts.liveT1L, ts.liveResetUs))
+        {
+            openknx.logger.log("ERROR: Failed to apply timing; tuner remains open.");
+            return true;
+        }
         _activeTuners.erase(stripId);
         _lastUpdateTime = millis();
-        openknx.logger.logWithValues("Strip [%d]: timing saved to flash. Tuner closed.", (int)stripId);
-        openknx.logger.logWithValues("  To revert later: neo phys timing %d reset", (int)stripId);
+        openknx.logger.logWithValues("Strip [%d]: timing kept for this boot. Tuner closed.", (int)stripId);
+        openknx.logger.log("  Timing overrides are not stored in flash; configure ETS Timing permanently.");
         return true;
     }
 
     // ── done ──────────────────────────────────────────────────────────────────
     if (subArgs == "done")
     {
-        strip->setCustomTiming(ts.liveT0H, ts.liveT0L, ts.liveT1H, ts.liveT1L, ts.liveResetUs);
+        if (!strip->setCustomTiming(ts.liveT0H, ts.liveT0L, ts.liveT1H, ts.liveT1L, ts.liveResetUs))
+        {
+            openknx.logger.log("ERROR: Failed to apply timing; tuner remains open.");
+            return true;
+        }
         _activeTuners.erase(stripId);
         _lastUpdateTime = millis();
         openknx.logger.logWithValues("Strip [%d]: tuner closed, timing kept (not written to flash).", (int)stripId);
