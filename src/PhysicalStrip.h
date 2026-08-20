@@ -56,6 +56,14 @@ class PhysicalStrip
     bool show();
     bool waitForTransfer(uint32_t timeoutMs = 0);
     uint32_t getTransferTimeoutMs() const;
+    bool isDirty() const { return _dirty; }
+    bool hasFrameInFlight() const { return _frameInFlight; }
+    uint32_t getSentFrameCount() const { return _sentFrameCount; }
+    uint32_t getSkippedFrameCount() const { return _skippedFrameCount; }
+    void markFrameStarted() { _frameInFlight = true; }
+    void markFrameSent() { _dirty = false; _frameInFlight = false; _sentFrameCount++; }
+    void markFrameFailed() { _frameInFlight = false; }
+    void markFrameSkipped() { _skippedFrameCount++; }
     bool isBusy() const;
 
     // ====================================================================
@@ -217,6 +225,10 @@ class PhysicalStrip
     PhysicalStripConfig* _config; // Hardware configuration (SpiStripConfig or SerialStripConfig)
     TimingMode _timingMode;       // Timing mode for clock divider calculation
     uint8_t _voltage;             // Operating voltage (5V, 12V, 24V) - default: 5V
+    bool _dirty;
+    bool _frameInFlight;
+    uint32_t _sentFrameCount;
+    uint32_t _skippedFrameCount;
 
     bool createDriver(DriverType driverType); // Create appropriate driver
 };

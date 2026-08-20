@@ -1186,10 +1186,20 @@ bool NeoPixelManager::showAll()
     // (A PIO-fallback strip without DMA blocks inside show() and is simply done by phase 2.)
     for (auto strip : _strips)
     {
-        if (strip && !strip->show())
+        if (!strip) continue;
+        if (!strip->isDirty())
+        {
+            strip->markFrameSkipped();
+            continue;
+        }
+        if (!strip->show())
         {
             allSuccess = false;
             _errorCount++;
+        }
+        else
+        {
+            strip->markFrameStarted();
         }
     }
     // Phase 2: wait for every in-flight transfer to finish. The deadline is
@@ -1197,10 +1207,20 @@ bool NeoPixelManager::showAll()
     // than imposing a fixed maximum strip length.
     for (auto strip : _strips)
     {
-        if (strip && !strip->waitForTransfer(strip->getTransferTimeoutMs()))
+        // Only transfers started in phase 1 need completion tracking.  A failed
+        // wait deliberately leaves the strip dirty so its complete frame is
+        // retried on the next update instead of being silently dropped.
+        if (!strip || !strip->hasFrameInFlight()) continue;
+
+        if (!strip->waitForTransfer(strip->getTransferTimeoutMs()))
         {
+            strip->markFrameFailed();
             allSuccess = false;
             _errorCount++;
+        }
+        else
+        {
+            strip->markFrameSent();
         }
     }
 

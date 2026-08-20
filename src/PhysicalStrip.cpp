@@ -31,7 +31,8 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _hasColorOrder(false),
       _config(nullptr),
       _timingMode(timingMode),
-      _voltage(5)
+      _voltage(5),
+      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0)
 {
     createDriver(driverType);
 }
@@ -56,7 +57,8 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _hasColorOrder(false),
       _config(nullptr),
       _timingMode(timingMode),
-      _voltage(5)
+      _voltage(5),
+      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0)
 {
     createDriver(driverType);
 }
@@ -82,7 +84,8 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _hasColorOrder(false),
       _config(nullptr),
       _timingMode(TimingMode::AUTO),
-      _voltage(5)
+      _voltage(5),
+      _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0)
 {
 #ifdef ARDUINO_ARCH_RP2040
     // Set default ColorOrder based on protocol (if not already set)
@@ -311,7 +314,9 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 
     // Pass RGB directly to driver
     // Driver handles ColorOrder mapping and brightness from config
-    return _driver->setPixel(index, r, g, b);
+    const bool updated = _driver->setPixel(index, r, g, b);
+    if (updated) _dirty = true;
+    return updated;
 }
 
 /**
@@ -368,7 +373,9 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, ui
 
     // Pass RGB directly to driver - driver handles ColorOrder mapping
     // No conversion here to avoid double-mapping!
-    return _driver->setPixel(index, r, g, b, w);
+    const bool updated = _driver->setPixel(index, r, g, b, w);
+    if (updated) _dirty = true;
+    return updated;
 }
 
 /**
@@ -460,7 +467,9 @@ bool PhysicalStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, ui
     }
 
     // Pass RGBCCT directly to driver - driver handles ColorOrder mapping
-    return _driver->setPixel(index, r, g, b, ww, cw);
+    const bool updated = _driver->setPixel(index, r, g, b, ww, cw);
+    if (updated) _dirty = true;
+    return updated;
 }
 
 /**
@@ -488,6 +497,7 @@ void PhysicalStrip::clear()
 {
     if (!_driver || !isInitialized()) return;
     _driver->clear();
+    _dirty = true;
 }
 
 /**
@@ -731,5 +741,7 @@ bool PhysicalStrip::applyConfig()
 {
     if (!_driver || !_config) return false;
     if (isInitialized() && !waitForTransfer()) return false;
-    return _driver->applyConfig(_config);
+    const bool applied = _driver->applyConfig(_config);
+    if (applied) _dirty = true;
+    return applied;
 }
