@@ -87,7 +87,6 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
       _voltage(5),
       _dirty(true), _frameInFlight(false), _sentFrameCount(0), _skippedFrameCount(0), _timeoutCount(0), _transportFailureCount(0), _configurationFailureCount(0), _lastError(PhysicalStripError::NONE)
 {
-#ifdef ARDUINO_ARCH_RP2040
     // Set default ColorOrder based on protocol (if not already set)
     // Note: _colorOrder is always NONE here (set in initializer), but we keep this
     // check for consistency with createDriver() and future extensibility
@@ -110,15 +109,20 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
         }
     }
 
+#ifdef ARDUINO_ARCH_RP2040
     // Pass ColorOrder to driver (NONE = driver uses protocol default)
     _driver = new PIO_NeoPixel_SPI(sckPin, pin, ledCount, protocol, frequencyHz, csPin, true, _colorOrder);
+#elif defined(ARDUINO_ARCH_ESP32)
+    // Hardware SPI with explicit pins/frequency (DriverFactory has no frequency parameter, so bypass it here)
+    _driver = new HW_NeoPixel_SPI(pin, sckPin, ledCount, protocol, frequencyHz, csPin);
+    if (_driver) _driver->setColorOrder(_colorOrder);
+#endif
 
     // Create default config from driver
     if (_driver)
     {
         _config = _driver->createDefaultConfig();
     }
-#endif
 }
 
 /**
