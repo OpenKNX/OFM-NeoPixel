@@ -252,13 +252,24 @@ bool RMT_NeoPixel_Serial::init()
 
     const OneWireTimingProfile& timing = getOneWireTimingProfile(_inst->protocol);
 
+    // A non-DMA channel allocates RMT RAM in whole blocks of SOC_RMT_MEM_WORDS_PER_CHANNEL
+    // (48 on ESP32-S3). Asking for more than one block per channel silently consumes the
+    // neighbouring channel's memory, which halves the number of usable strips and makes the
+    // 3rd one fail with "no free tx channels".
+    #ifdef SOC_RMT_MEM_WORDS_PER_CHANNEL
+    constexpr size_t kNoDmaSymbols = SOC_RMT_MEM_WORDS_PER_CHANNEL;
+    #else
+    constexpr size_t kNoDmaSymbols = 48;
+    #endif
+    constexpr size_t kDmaSymbols = 64;
+
     // Configure TX channel
     rmt_tx_channel_config_t tx_chan_config = {
         .gpio_num = (gpio_num_t)_inst->pin,
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .resolution_hz = RMT_LED_STRIP_RESOLUTION_HZ,
-        .mem_block_symbols = 64, // 64 symbols per block
-        .trans_queue_depth = 4,  // 4 transaction queue
+        .mem_block_symbols = should_request_rmt_dma() ? kDmaSymbols : kNoDmaSymbols,
+        .trans_queue_depth = 4, // 4 transaction queue
         .flags = {
             .invert_out = timing.inverted,
             .with_dma = should_request_rmt_dma(),
@@ -269,6 +280,7 @@ bool RMT_NeoPixel_Serial::init()
     {
         ESP_LOGW("RMT_NeoPixel", "RMT DMA unsupported on GPIO %lu, retrying without DMA", (unsigned long)_inst->pin);
         tx_chan_config.flags.with_dma = false;
+        tx_chan_config.mem_block_symbols = kNoDmaSymbols;
         err = rmt_new_tx_channel(&tx_chan_config, &_inst->channel);
     }
 
