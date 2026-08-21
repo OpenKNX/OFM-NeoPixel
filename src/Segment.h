@@ -362,6 +362,7 @@ class Segment
     inline bool setPrimaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t w)
     {
         _config.primaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)w;
+        _config.primaryCW = 0;
         return true;
     } // Set primary color (4-channel RGBW)
 
@@ -375,6 +376,7 @@ class Segment
     inline bool setSecondaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t w)
     {
         _config.secondaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)w;
+        _config.secondaryCW = 0;
         return true;
     } // Set secondary color (4-channel RGBW)
 

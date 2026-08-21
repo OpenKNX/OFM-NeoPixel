@@ -138,6 +138,22 @@ PhysicalStrip::~PhysicalStrip()
     }
 }
 
+void PhysicalStrip::setColorOrder(ColorOrder order)
+{
+    const ColorOrder normalized = ProtocolHelper::normalizeColorOrder(_protocol, order);
+    if (normalized != order)
+    {
+        Serial.printf("PhysicalStrip: ColorOrder %u (%u channels) exceeds protocol %u (%u channels); using %u\n",
+                      (unsigned)order, (unsigned)ProtocolHelper::getChannelCount(order),
+                      (unsigned)_protocol, (unsigned)ProtocolHelper::getBytesPerLed(_protocol),
+                      (unsigned)normalized);
+    }
+
+    _colorOrder = normalized;
+    if (_config) _config->setColorOrder(normalized);
+    if (_driver) _driver->setColorOrder(normalized);
+}
+
 /**
  * @brief Create driver via DriverFactory
  * @param driverType Type of driver to create
@@ -181,6 +197,7 @@ bool PhysicalStrip::createDriver(DriverType driverType)
         switch (_protocol)
         {
             case LedProtocol::APA102:
+            case LedProtocol::APA102_CLONE:
                 setColorOrder(ColorOrder::BGR); // APA102: Official BGR
                 break;
 
@@ -189,8 +206,11 @@ bool PhysicalStrip::createDriver(DriverType driverType)
                 break;
 
             case LedProtocol::WS2812B:
-            case LedProtocol::SK6812:
                 setColorOrder(ColorOrder::GRB); // WS2812B: GRB
+                break;
+
+            case LedProtocol::SK6812:
+                setColorOrder(ColorOrder::GRBW); // SK6812 RGBW: GRBW
                 break;
 
             case LedProtocol::WS2801:
@@ -198,7 +218,7 @@ bool PhysicalStrip::createDriver(DriverType driverType)
                 break;
 
             default:
-                // Keep NONE - driver uses protocol default from ProtocolHelper
+                setColorOrder(ProtocolHelper::getColorOrder(_protocol));
                 break;
         }
     }
@@ -786,6 +806,10 @@ bool PhysicalStrip::applyConfig()
         _configurationFailureCount++;
         _lastError = PhysicalStripError::INVALID_CONFIG;
         return false;
+    }
+    if (_config->getColorOrder() != ColorOrder::NONE)
+    {
+        setColorOrder(_config->getColorOrder());
     }
     if (isInitialized() && !waitForTransfer()) return false;
     const bool applied = _driver->applyConfig(_config);

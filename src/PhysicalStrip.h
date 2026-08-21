@@ -116,22 +116,7 @@ class PhysicalStrip
     // ====================================================================
     // Color Order
     // ====================================================================
-    void setColorOrder(ColorOrder order)
-    {
-        _colorOrder = order;
-
-        // Keep _config in sync, else a later applyConfig(_config) reverts to the stale default (R/G swap).
-        if (_config)
-        {
-            _config->setColorOrder(order);
-        }
-
-        // Pass ColorOrder to driver (all drivers support this now via interface)
-        if (_driver)
-        {
-            _driver->setColorOrder(order);
-        }
-    }
+    void setColorOrder(ColorOrder order);
     ColorOrder getColorOrder() const { return _colorOrder; }
 
     /**
@@ -140,7 +125,7 @@ class PhysicalStrip
      */
     bool hasWhiteChannel() const
     {
-        return ProtocolHelper::hasWhiteChannel(_colorOrder);
+        return ProtocolHelper::hasWhiteChannel(_colorOrder) && getCapabilities().supportsRGBW;
     }
 
     /**
@@ -149,7 +134,7 @@ class PhysicalStrip
      */
     bool hasDualWhiteChannel() const
     {
-        return ProtocolHelper::hasDualWhiteChannel(_colorOrder);
+        return ProtocolHelper::hasDualWhiteChannel(_colorOrder) && getCapabilities().supportsRGBCCT;
     }
 
     // ====================================================================

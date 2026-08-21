@@ -524,8 +524,8 @@ bool VirtualStrip::syncToPhysical()
         // Read RGB from VirtualStrip buffer, send to PhysicalStrip
         // PhysicalStrip handles ColorOrder conversion based on its hardware
         // Check if this PHYSICAL strip supports RGBW or RGBCCT
-        bool physicalIsRGBW = ProtocolHelper::hasWhiteChannel(pstrip->getColorOrder());
-        bool physicalIsRGBCCT = ProtocolHelper::hasDualWhiteChannel(pstrip->getColorOrder());
+        bool physicalIsRGBW = pstrip->hasWhiteChannel();
+        bool physicalIsRGBCCT = pstrip->hasDualWhiteChannel();
 
         for (uint16_t i = 0; i < count; i++)
         {

@@ -150,7 +150,7 @@ class IHardwareDriver
     virtual bool supportsHardwareBrightness() const { return false; }
 
     // Allow changing ColorOrder after construction (default: no-op for drivers that don't support it)
-    virtual void setColorOrder(ColorOrder order) { /* Default: ignore */ }
+    virtual void setColorOrder(ColorOrder) { /* Default: ignore */ }
     virtual ColorOrder getColorOrder() const { return ColorOrder::RGB; } // Default fallback
 
     // Configuration management (NEW API)
@@ -250,6 +250,14 @@ namespace ProtocolHelper
             case LedProtocol::WS2811:
                 return ColorOrder::RGB;
 
+            case LedProtocol::APA102:
+            case LedProtocol::APA102_CLONE:
+                return ColorOrder::BGR;
+
+            case LedProtocol::SK9822:
+            case LedProtocol::WS2801:
+                return ColorOrder::RGB;
+
             case LedProtocol::SK6812:
             case LedProtocol::SK6805:
             case LedProtocol::WS2814:
@@ -308,6 +316,23 @@ namespace ProtocolHelper
     inline uint8_t getChannelCount(ColorOrder order)
     {
         return getBytesPerLed(order);
+    }
+
+    /**
+     * Check whether a color order fits in the protocol's physical frame.
+     * Narrower orders are valid and intentionally disable unused white channels.
+     */
+    inline bool isColorOrderCompatible(LedProtocol protocol, ColorOrder order)
+    {
+        return order == ColorOrder::NONE || getBytesPerLed(order) <= getBytesPerLed(protocol);
+    }
+
+    /**
+     * Fall back to the protocol default when an order would exceed the frame width.
+     */
+    inline ColorOrder normalizeColorOrder(LedProtocol protocol, ColorOrder order)
+    {
+        return isColorOrderCompatible(protocol, order) ? order : getColorOrder(protocol);
     }
 
     /**

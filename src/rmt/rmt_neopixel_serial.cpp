@@ -378,6 +378,10 @@ void RMT_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
 
     uint32_t offset = index * _inst->bytesPerLed;
 
+    // A narrower logical order is allowed on wider hardware. Clear channels
+    // omitted by that order so an earlier white value cannot leak into a frame.
+    memset(_inst->buffer + offset, 0, _inst->bytesPerLed);
+
     switch (_inst->colorOrder)
     {
         case ColorOrder::RGB:
@@ -528,7 +532,7 @@ void RMT_NeoPixel_Serial::clear()
 DriverCapabilities RMT_NeoPixel_Serial::getCapabilities() const
 {
     DriverCapabilities caps = {};
-    caps.supportsRGBW = (_inst && _inst->bytesPerLed == 4);
+    caps.supportsRGBW = (_inst && _inst->bytesPerLed >= 4);
     caps.supportsRGBCCT = (_inst && _inst->bytesPerLed == 5);
     caps.supportsDMA = (_inst && _inst->usingDMA);
     caps.supportsAsync = false; // show() is blocking (rmt_tx_wait_all_done)

@@ -1001,6 +1001,10 @@ void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
         return;
     }
 
+    // A narrower logical order is allowed on wider hardware. Clear channels
+    // omitted by that order so an earlier white value cannot leak into a frame.
+    memset(_inst->buffer + offset, 0, _inst->bytesPerLed);
+
     switch (_inst->colorOrder)
     {
         case ColorOrder::RGB:

@@ -16,6 +16,17 @@ static void testProfiles()
     assert(tm1814.inverted);
 }
 
+static void testColorOrderCompatibility()
+{
+    assert(ProtocolHelper::isColorOrderCompatible(LedProtocol::SK6812, ColorOrder::GRB));
+    assert(ProtocolHelper::isColorOrderCompatible(LedProtocol::SK6812, ColorOrder::GRBW));
+    assert(!ProtocolHelper::isColorOrderCompatible(LedProtocol::WS2812B, ColorOrder::GRBW));
+    assert(!ProtocolHelper::isColorOrderCompatible(LedProtocol::SK6812, ColorOrder::GRBCCT));
+    assert(ProtocolHelper::normalizeColorOrder(LedProtocol::WS2812B, ColorOrder::GRBW) == ColorOrder::GRB);
+    assert(ProtocolHelper::normalizeColorOrder(LedProtocol::APA102, ColorOrder::GRBW) == ColorOrder::BGR);
+    assert(ProtocolHelper::normalizeColorOrder(LedProtocol::WS2805_RGBCCT, ColorOrder::GRBCCT) == ColorOrder::GRBCCT);
+}
+
 static void testQuantization()
 {
     OneWireBalancedSymbolTicks symbols = {};
@@ -59,6 +70,7 @@ static void testExactPacking()
 int main()
 {
     testProfiles();
+    testColorOrderCompatibility();
     testQuantization();
     testDeadlines();
     testExactPacking();
