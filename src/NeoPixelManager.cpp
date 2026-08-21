@@ -560,15 +560,7 @@ void NeoPixelManager::applyPowerLimit()
             }
 
             // Calculate current from PhysicalStrip buffer (after syncAll())
-            uint16_t ledCount = phys->getLedCount();
-            const uint8_t* buffer = phys->getBuffer();
-            if (!buffer) continue;
-
-            uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
-            uint8_t hardwareBrightness = 255; // syncAll() already applied brightness
-
-            uint32_t stripCurrent = _powerManager.calculateTotalCurrent(
-                buffer, ledCount, bytesPerPixel, hardwareBrightness);
+            uint32_t stripCurrent = calculatePhysicalStripCurrent(phys);
             totalRequestedCurrent += stripCurrent;
         }
 
@@ -627,15 +619,7 @@ void NeoPixelManager::applyPowerLimit()
 
             // Calculate current from PhysicalStrip buffer
             uint16_t ledCount = phys->getLedCount();
-            const uint8_t* buffer = phys->getBuffer();
-            uint32_t stripCurrent = 0;
-
-            if (buffer)
-            {
-                uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
-                stripCurrent = _powerManager.calculateTotalCurrent(
-                    buffer, ledCount, bytesPerPixel, 255);
-            }
+            uint32_t stripCurrent = calculatePhysicalStripCurrent(phys);
 
             // Determine effective limit based on mode
             uint32_t stripLimit = 0;
@@ -694,13 +678,7 @@ void NeoPixelManager::applyPowerLimit()
             if (stripLimit == 0) continue;
 
             // Calculate current from PhysicalStrip buffer
-            uint16_t ledCount = phys->getLedCount();
-            const uint8_t* buffer = phys->getBuffer();
-            if (!buffer) continue;
-
-            uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
-            uint32_t stripRequestedCurrent = _powerManager.calculateTotalCurrent(
-                buffer, ledCount, bytesPerPixel, 255);
+            uint32_t stripRequestedCurrent = calculatePhysicalStripCurrent(phys);
 
             // Get ABL parameters
             uint8_t autoBrLimit = cfg->getAutoBrightnessLimit();
@@ -761,15 +739,7 @@ void NeoPixelManager::applyPowerLimit()
 
             // Calculate current from PhysicalStrip buffer
             uint16_t ledCount = phys->getLedCount();
-            const uint8_t* buffer = phys->getBuffer();
-            uint32_t stripRequestedCurrent = 0;
-
-            if (buffer)
-            {
-                uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
-                stripRequestedCurrent = _powerManager.calculateTotalCurrent(
-                    buffer, ledCount, bytesPerPixel, 255);
-            }
+            uint32_t stripRequestedCurrent = calculatePhysicalStripCurrent(phys);
 
             // Determine strip limit
             uint32_t stripLimit = 0;
@@ -904,15 +874,7 @@ void NeoPixelManager::applyPowerLimit()
 
             // Calculate current from PhysicalStrip buffer
             uint16_t ledCount = phys->getLedCount();
-            const uint8_t* buffer = phys->getBuffer();
-            uint32_t stripRequestedCurrent = 0;
-
-            if (buffer)
-            {
-                uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
-                stripRequestedCurrent = _powerManager.calculateTotalCurrent(
-                    buffer, ledCount, bytesPerPixel, 255);
-            }
+            uint32_t stripRequestedCurrent = calculatePhysicalStripCurrent(phys);
 
             // Determine strip limit
             uint32_t stripLimit = 0;
@@ -1071,14 +1033,78 @@ void NeoPixelManager::applyScaleToBuffer(VirtualStrip* vstrip, float scale)
  * Used by applyPowerLimit() when working on PhysicalStrip buffers (after syncAll())
  * @private
  */
+/**
+ * @brief Calculate requested current (mA) for a PhysicalStrip's current buffer content
+ * @note SPI strips (APA102/SK9822) use a framed buffer (start frames + optional dummy LED +
+ *       [brightness,R,G,B] per LED + end frames), not a flat RGB(W) array from offset 0 - read
+ *       the correct per-LED offset and fold in that LED's hardware brightness byte.
+ */
+uint32_t NeoPixelManager::calculatePhysicalStripCurrent(PhysicalStrip* phys)
+{
+    if (!phys) return 0;
+    const uint8_t* buffer = phys->getBuffer();
+    if (!buffer) return 0;
+
+    uint16_t ledCount = phys->getLedCount();
+
+    if (phys->isSpiStrip())
+    {
+        auto* cfg = phys->getConfig();
+        SpiStripConfig* spiCfg = cfg && cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
+        if (!spiCfg) return 0;
+
+        size_t bufferSize = phys->getBufferSize();
+        size_t dataOffset = (size_t)spiCfg->getStartFrameCount() * 4 + (spiCfg->getDummyLedMode() == 1 ? 4 : 0);
+        uint32_t totalCurrent = 0;
+
+        for (uint16_t i = 0; i < ledCount; i++)
+        {
+            size_t offset = dataOffset + (size_t)i * 4;
+            if (offset + 4 > bufferSize) break;
+
+            uint8_t hwBrightness255 = (uint8_t)(((uint16_t)(buffer[offset] & 0x1F) * 255) / 31);
+            totalCurrent += _powerManager.calculateTotalCurrent(&buffer[offset + 1], 1, 3, hwBrightness255);
+        }
+        return totalCurrent;
+    }
+
+    uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+    return _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, 255);
+}
+
 void NeoPixelManager::applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scale)
 {
     if (!phys || !phys->getBuffer()) return;
 
     uint16_t ledCount = phys->getLedCount();
-    uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
     uint8_t* buffer = phys->getBuffer();
     size_t bufferSize = phys->getBufferSize();
+
+    if (phys->isSpiStrip())
+    {
+        // SPI buffers are framed as [start frames][optional dummy LED][brightness,R,G,B]*N[end
+        // frames], not a flat RGB(W) array from offset 0 - the generic path below would scale
+        // the wrong bytes (corrupting/blanking APA102/SK9822 output). Scale via the dedicated
+        // 5-bit hardware brightness byte instead, which leaves the RGB bytes untouched.
+        auto* cfg = phys->getConfig();
+        SpiStripConfig* spiCfg = cfg && cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
+        if (!spiCfg) return;
+
+        size_t dataOffset = (size_t)spiCfg->getStartFrameCount() * 4 + (spiCfg->getDummyLedMode() == 1 ? 4 : 0);
+
+        for (uint16_t i = 0; i < ledCount; i++)
+        {
+            size_t offset = dataOffset + (size_t)i * 4;
+            if (offset >= bufferSize) break;
+
+            uint8_t curBrightness = buffer[offset] & 0x1F;
+            uint8_t newBrightness = (uint8_t)(curBrightness * scale);
+            buffer[offset] = 0xE0 | (newBrightness & 0x1F);
+        }
+        return;
+    }
+
+    uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
 
     // Scale all pixels in this PhysicalStrip
     for (uint16_t i = 0; i < ledCount; i++)
