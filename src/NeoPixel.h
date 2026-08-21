@@ -113,6 +113,7 @@ class NeoPixel : public OpenKNX::Module
     bool processUpdateCommand(const std::string& args);
     bool processClearCommand();
     bool processTestCommand(const std::string& args);
+    bool processBitbangCommand(const std::string& args);
     bool processSpeedCommand(const std::string& args);
     bool processAutoCommand(const std::string& args);
     bool processPerformanceCommand();
@@ -189,33 +190,33 @@ class NeoPixel : public OpenKNX::Module
     bool processPhysTimingScanCommand(uint32_t stripId);
     bool processPhysTimingProfileCommand(uint32_t stripId, uint8_t profileIdx);
     bool processScanControlCommand(const std::string& cmd); ///< next/apply/stop during active qualify scan
-    void loopTimingScan(); ///< Called from loop() — advances qualify-scan state machine
+    void loopTimingScan();                                  ///< Called from loop() — advances qualify-scan state machine
 
     // Scan state (lives in NeoPixel, driven via loop())
     /** @brief States of the non-blocking clone timing qualify scan */
     enum class ScanPhase : uint8_t
     {
-        IDLE       = 0, ///< No scan running
+        IDLE = 0,       ///< No scan running
         SHOW_COLOR = 1, ///< Cycling the current profile's qualification payload
         WAIT_INPUT = 2, ///< Waiting for next/apply/stop or auto-advance timeout
-        PAUSE      = 3, ///< Brief blank gap between profiles
-        DONE       = 4, ///< Transient end state (→ IDLE)
+        PAUSE = 3,      ///< Brief blank gap between profiles
+        DONE = 4,       ///< Transient end state (→ IDLE)
     };
-    ScanPhase  _scanPhase      = ScanPhase::IDLE;
-    uint32_t   _scanStripId    = 0;
-    uint8_t    _scanProfileIdx = 0;
-    uint32_t   _scanPhaseStart = 0;
-    uint8_t    _scanPayloadPhase = 0;
+    ScanPhase _scanPhase = ScanPhase::IDLE;
+    uint32_t _scanStripId = 0;
+    uint8_t _scanProfileIdx = 0;
+    uint32_t _scanPhaseStart = 0;
+    uint8_t _scanPayloadPhase = 0;
 
     // Saved timing state to restore if user calls 'scan' without applying a profile
-    uint16_t   _scanSavedT0H   = 0;
-    uint16_t   _scanSavedT0L   = 0;
-    uint16_t   _scanSavedT1H   = 0;
-    uint16_t   _scanSavedT1L   = 0;
-    uint32_t   _scanSavedReset = 0;
-    TimingMode _scanSavedMode  = TimingMode::AUTO;
+    uint16_t _scanSavedT0H = 0;
+    uint16_t _scanSavedT0L = 0;
+    uint16_t _scanSavedT1H = 0;
+    uint16_t _scanSavedT1L = 0;
+    uint32_t _scanSavedReset = 0;
+    TimingMode _scanSavedMode = TimingMode::AUTO;
     std::vector<uint8_t> _scanSavedBuffer;
-    bool       _scanPromptPrinted = false; ///< true once the WAIT_INPUT prompt has been printed
+    bool _scanPromptPrinted = false; ///< true once the WAIT_INPUT prompt has been printed
 
     // ── Clone timing live-tuner ──────────────────────────────────────────────
     // Each strip has its own independent tuner state.
@@ -225,10 +226,10 @@ class NeoPixel : public OpenKNX::Module
 
     struct TunerState
     {
-        uint16_t   liveT0H, liveT0L, liveT1H, liveT1L; ///< currently requested values (ns)
-        uint32_t   liveResetUs;                          ///< currently requested reset (µs)
-        uint16_t   savedT0H, savedT0L, savedT1H, savedT1L;
-        uint32_t   savedResetUs;
+        uint16_t liveT0H, liveT0L, liveT1H, liveT1L; ///< currently requested values (ns)
+        uint32_t liveResetUs;                        ///< currently requested reset (µs)
+        uint16_t savedT0H, savedT0L, savedT1H, savedT1L;
+        uint32_t savedResetUs;
         TimingMode savedMode;
     };
     std::map<uint32_t, TunerState> _activeTuners; ///< key=stripId; entry present ⟺ tuner active

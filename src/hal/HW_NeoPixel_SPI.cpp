@@ -5,11 +5,12 @@
 #if defined(ARDUINO_ARCH_RP2040)
     #include <hardware/gpio.h>
 #elif defined(ARDUINO_ARCH_ESP32)
+    #include <driver/gpio.h>
     #include <esp_log.h>
 #endif
 
-bool HW_NeoPixel_SPI::_spi0Used = false;       // Static tracking variable for SPI0 usage
-bool HW_NeoPixel_SPI::_spi1Used = false;       // Static tracking variable for SPI1 usage
+bool HW_NeoPixel_SPI::_spi0Used = false;            // Static tracking variable for SPI0 usage
+bool HW_NeoPixel_SPI::_spi1Used = false;            // Static tracking variable for SPI1 usage
 SPIClass* HW_NeoPixel_SPI::_spi1Instance = nullptr; // Second SPI bus instance (allocated on demand)
 
 // APA102/SK9822 Brightness Configuration (5-bit hardware brightness)
@@ -46,14 +47,14 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint16_t ledCount, LedProtocol protocol, uint32
 
     // ===== Extended SPI Configuration Defaults =====
     // Optimized for APA102 strips (150 LEDs @ 3 MHz tested stable)
-    _inst->dummyLedMode = 1;                  // Physical dummy LED (sacrifice LED#0) - REQUIRED for SK9822/APA102 clones
-    _inst->startFrameCount = 8;               // 8 start frames (tested stable 1-8, use max for safety)
-    _inst->endFrameCount = 1;                 // 1 end frame for APA102 (SK9822 may need more)
-    _inst->startFrameDelayUs = 0;             // No delay (tested with 0-50µs, not needed)
-    _inst->endFramePattern = 0x00;            // 0x00000000 = APA102, 0xFFFFFFFF = SK9822
-    _inst->detectedChip = protocol;           // Start with protocol assumption
-    _inst->autoDetectChip = false;            // Manual chip type (can enable via API)
-    _inst->hwBrightness = BRIGHTNESS_DEFAULT; // Default to max safe brightness (30)
+    _inst->dummyLedMode = 1;                                     // Physical dummy LED (sacrifice LED#0) - REQUIRED for SK9822/APA102 clones
+    _inst->startFrameCount = 8;                                  // 8 start frames (tested stable 1-8, use max for safety)
+    _inst->endFrameCount = 1;                                    // 1 end frame for APA102 (SK9822 may need more)
+    _inst->startFrameDelayUs = 0;                                // No delay (tested with 0-50µs, not needed)
+    _inst->endFramePattern = 0x00;                               // 0x00000000 = APA102, 0xFFFFFFFF = SK9822
+    _inst->detectedChip = protocol;                              // Start with protocol assumption
+    _inst->autoDetectChip = false;                               // Manual chip type (can enable via API)
+    _inst->hwBrightness = BRIGHTNESS_DEFAULT;                    // Default to max safe brightness (30)
     _inst->colorOrder = ProtocolHelper::getColorOrder(protocol); // Default ColorOrder from protocol
 
     // Allocate buffer: Start frames + Dummy LED (optional) + LED data + End frames
@@ -134,14 +135,14 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint32_t mosiPin, uint32_t sckPin, uint16_t led
     _inst->needs7bit = (protocol == LedProtocol::LPD8806); // LPD8806 needs 7-bit values - Just for Preperation
 
     // ===== Extended SPI Configuration Defaults =====
-    _inst->dummyLedMode = 1;                  // Physical dummy LED (sacrifice LED#0)
-    _inst->startFrameCount = 8;               // 8 start frames
-    _inst->endFrameCount = 1;                 // 1 end frame
-    _inst->startFrameDelayUs = 0;             // No delay
-    _inst->endFramePattern = 0x00;            // 0x00 = APA102
-    _inst->detectedChip = protocol;           // Start with protocol assumption
-    _inst->autoDetectChip = false;            // Manual chip type
-    _inst->hwBrightness = BRIGHTNESS_DEFAULT; // Default to max safe brightness (30)
+    _inst->dummyLedMode = 1;                                     // Physical dummy LED (sacrifice LED#0)
+    _inst->startFrameCount = 8;                                  // 8 start frames
+    _inst->endFrameCount = 1;                                    // 1 end frame
+    _inst->startFrameDelayUs = 0;                                // No delay
+    _inst->endFramePattern = 0x00;                               // 0x00 = APA102
+    _inst->detectedChip = protocol;                              // Start with protocol assumption
+    _inst->autoDetectChip = false;                               // Manual chip type
+    _inst->hwBrightness = BRIGHTNESS_DEFAULT;                    // Default to max safe brightness (30)
     _inst->colorOrder = ProtocolHelper::getColorOrder(protocol); // Default ColorOrder from protocol
 
     // Allocate buffer:
@@ -327,8 +328,45 @@ bool HW_NeoPixel_SPI::init()
     //}
     _inst->spi->begin();
 #elif defined(ARDUINO_ARCH_ESP32)
-    // ESP32: Pass pins to begin()
+    // SPIClass::begin() silently returns if the bus was already started (e.g. by the KNX
+    // platform or another module), leaving our pins unattached. end() first so the requested
+    // SCK/MOSI are always routed.
+    _inst->spi->end();
+
+    // TXS0108E (KNeoPiX) is an auto-direction translator that only latches A->B once it sees
+    // real driven edges, so the pins must be toggled as plain GPIO before SPI takes them over.
+    // Skipped on other boards: the extra clock edges would reach anything else on the bus.
+    if (kHwDefaultLevelShifter == LevelShifterType::TXS0108E)
+    {
+        pinMode(_inst->mosiPin, OUTPUT);
+        pinMode(_inst->sckPin, OUTPUT);
+        for (uint8_t i = 0; i < 4; i++)
+        {
+            digitalWrite(_inst->mosiPin, LOW);
+            digitalWrite(_inst->sckPin, LOW);
+            delayMicroseconds(50);
+            digitalWrite(_inst->mosiPin, HIGH);
+            digitalWrite(_inst->sckPin, HIGH);
+            delayMicroseconds(50);
+        }
+        digitalWrite(_inst->mosiPin, LOW);
+        digitalWrite(_inst->sckPin, LOW);
+    }
+
     _inst->spi->begin(_inst->sckPin, -1, _inst->mosiPin, _inst->csPin);
+    openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI", "Bus attached: SCK=GPIO%u, MOSI=GPIO%u, CS=%d",
+                                          (unsigned)_inst->sckPin, (unsigned)_inst->mosiPin, _inst->csPin);
+
+    // Only the serial drivers used to do this, so SPI strips on a TXS0108E board (KNeoPiX)
+    // kept the weak default drive - the auto-direction translator then never flips.
+    if (kHwDefaultLevelShifter == LevelShifterType::TXS0108E)
+    {
+        gpio_set_drive_capability((gpio_num_t)_inst->mosiPin, GPIO_DRIVE_CAP_3);
+        gpio_set_pull_mode((gpio_num_t)_inst->mosiPin, GPIO_FLOATING);
+        gpio_set_drive_capability((gpio_num_t)_inst->sckPin, GPIO_DRIVE_CAP_3);
+        gpio_set_pull_mode((gpio_num_t)_inst->sckPin, GPIO_FLOATING);
+        openknx.logger.logWithPrefix("HW NeoPixel SPI", "TXS0108E mode - drive=40mA, pull=FLOAT on MOSI+SCK");
+    }
 #else
     // Default: Use standard pins
     _inst->spi->begin();
@@ -359,25 +397,25 @@ bool HW_NeoPixel_SPI::init()
     // Log requested vs achievable frequency
     openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
                                           "Init: Protocol=%u, Requested Freq=%lu Hz, SysClock=%lu Hz",
-#if defined(ARDUINO_ARCH_RP2040)
+    #if defined(ARDUINO_ARCH_RP2040)
                                           (uint8_t)_inst->protocol, actualFrequency, clock_get_hz(clk_sys));
-#elif defined(ARDUINO_ARCH_ESP32)
+    #elif defined(ARDUINO_ARCH_ESP32)
                                           (uint8_t)_inst->protocol, actualFrequency, ESP.getCpuFreqMHz() * 1000000UL);
-#else
+    #else
                                           (uint8_t)_inst->protocol, actualFrequency, F_CPU);
-#endif
+    #endif
 
     // Calculate actual achievable frequency based on system clock
     // SPI baudrate = sys_clk / (CPSR * (1 + SCR))
     // where CPSR = 2..254 (even), SCR = 0..255
     // For simplicity, calculate what we can actually achieve
-#if defined(ARDUINO_ARCH_RP2040)
+    #if defined(ARDUINO_ARCH_RP2040)
     uint32_t sys_freq = clock_get_hz(clk_sys);
-#elif defined(ARDUINO_ARCH_ESP32)
+    #elif defined(ARDUINO_ARCH_ESP32)
     uint32_t sys_freq = ESP.getCpuFreqMHz() * 1000000UL;
-#else
+    #else
     uint32_t sys_freq = F_CPU;
-#endif
+    #endif
     float best_div = (float)sys_freq / (float)actualFrequency;
     uint32_t achievable_freq = sys_freq / (uint32_t)(best_div + 0.5f);
     openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
@@ -415,13 +453,41 @@ bool HW_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
     uint8_t r_hw, g_hw, b_hw;
     switch (_inst->colorOrder)
     {
-        case ColorOrder::RGB: r_hw = r; g_hw = g; b_hw = b; break;
-        case ColorOrder::RBG: r_hw = r; g_hw = b; b_hw = g; break;
-        case ColorOrder::GRB: r_hw = g; g_hw = r; b_hw = b; break;
-        case ColorOrder::GBR: r_hw = g; g_hw = b; b_hw = r; break;
-        case ColorOrder::BRG: r_hw = b; g_hw = r; b_hw = g; break;
-        case ColorOrder::BGR: r_hw = b; g_hw = g; b_hw = r; break;
-        default:              r_hw = r; g_hw = g; b_hw = b; break;
+        case ColorOrder::RGB:
+            r_hw = r;
+            g_hw = g;
+            b_hw = b;
+            break;
+        case ColorOrder::RBG:
+            r_hw = r;
+            g_hw = b;
+            b_hw = g;
+            break;
+        case ColorOrder::GRB:
+            r_hw = g;
+            g_hw = r;
+            b_hw = b;
+            break;
+        case ColorOrder::GBR:
+            r_hw = g;
+            g_hw = b;
+            b_hw = r;
+            break;
+        case ColorOrder::BRG:
+            r_hw = b;
+            g_hw = r;
+            b_hw = g;
+            break;
+        case ColorOrder::BGR:
+            r_hw = b;
+            g_hw = g;
+            b_hw = r;
+            break;
+        default:
+            r_hw = r;
+            g_hw = g;
+            b_hw = b;
+            break;
     }
 
     rgbToBuffer(index, r_hw, g_hw, b_hw);
@@ -514,7 +580,7 @@ void HW_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t 
             uint32_t startFrameBytes = _inst->startFrameCount * 4;
             uint32_t dummyLedBytes = (_inst->dummyLedMode == 1) ? 4 : 0;
             uint32_t offset = startFrameBytes + dummyLedBytes + (index * 4);
-            
+
             _inst->buffer[offset] = 0xE0 | (_inst->hwBrightness & 0x1F); // 111xxxxx format (5-bit brightness)
             _inst->buffer[offset + 1] = r;                               // Hardware byte 0
             _inst->buffer[offset + 2] = g;                               // Hardware byte 1

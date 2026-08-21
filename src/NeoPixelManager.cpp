@@ -1084,8 +1084,8 @@ void NeoPixelManager::applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scal
     {
         // SPI buffers are framed as [start frames][optional dummy LED][brightness,R,G,B]*N[end
         // frames], not a flat RGB(W) array from offset 0 - the generic path below would scale
-        // the wrong bytes (corrupting/blanking APA102/SK9822 output). Scale via the dedicated
-        // 5-bit hardware brightness byte instead, which leaves the RGB bytes untouched.
+        // the wrong bytes. Scale the 8-bit RGB bytes at the correct offsets; scaling the 5-bit
+        // brightness byte instead would quantise to 0 (strip goes fully dark) at low scales.
         auto* cfg = phys->getConfig();
         SpiStripConfig* spiCfg = cfg && cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
         if (!spiCfg) return;
@@ -1095,11 +1095,11 @@ void NeoPixelManager::applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scal
         for (uint16_t i = 0; i < ledCount; i++)
         {
             size_t offset = dataOffset + (size_t)i * 4;
-            if (offset >= bufferSize) break;
+            if (offset + 4 > bufferSize) break;
 
-            uint8_t curBrightness = buffer[offset] & 0x1F;
-            uint8_t newBrightness = (uint8_t)(curBrightness * scale);
-            buffer[offset] = 0xE0 | (newBrightness & 0x1F);
+            buffer[offset + 1] = (uint8_t)(buffer[offset + 1] * scale);
+            buffer[offset + 2] = (uint8_t)(buffer[offset + 2] * scale);
+            buffer[offset + 3] = (uint8_t)(buffer[offset + 3] * scale);
         }
         return;
     }

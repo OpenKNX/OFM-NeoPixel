@@ -107,7 +107,10 @@ class HW_NeoPixel_SPI : public IHardwareDriver
     DriverImplementation getDriverType() const override { return DriverImplementation::HARDWARE_SPI; }
 
     // ColorOrder API
-    void setColorOrder(ColorOrder order) override { if (_inst) _inst->colorOrder = order; }
+    void setColorOrder(ColorOrder order) override
+    {
+        if (_inst) _inst->colorOrder = order;
+    }
     ColorOrder getColorOrder() const override { return _inst ? _inst->colorOrder : ColorOrder::RGB; }
 
     /**
@@ -186,7 +189,7 @@ class HW_NeoPixel_SPI : public IHardwareDriver
     void initBufferFraming();
     void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
 
-    static bool _spi0Used;       // Track SPI0 usage
-    static bool _spi1Used;       // Track SPI1 usage
+    static bool _spi0Used;          // Track SPI0 usage
+    static bool _spi1Used;          // Track SPI1 usage
     static SPIClass* _spi1Instance; // Second SPI bus instance (ESP32: HSPI/FSPI, RP2040: SPI1)
 };

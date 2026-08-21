@@ -31,6 +31,7 @@
 #endif
 #ifdef ARDUINO_ARCH_ESP32
     #include "rmt/rmt_neopixel_serial.h"
+    #include <driver/gpio.h>
 #endif
 
 // Test systems (optional)
@@ -103,25 +104,25 @@ void openknxNeoPixelConsolePrintf(const char* fmt, ...)
 const CloneTimingProfile kCloneProfiles[] = {
 
     // name            T0H  T0L  T1H  T1L  reset  description
-    { "STANDARD",    375, 875, 750, 500, 300, "800kHz canonical waveform, 300us reset" },
-    { "SK6812_STD",  375, 875, 750, 500,  80, "800kHz canonical waveform, 80us reset" },
-    { "SLOW_RESET",  375, 875, 750, 500, 280, "800kHz canonical waveform, 280us reset" },
-    { "SLOW10",      416, 972, 833, 555,  80, "720kHz waveform, 80us reset" },
-    { "SLOW10_LONG", 416, 972, 833, 555, 280, "720kHz waveform, 280us reset" },
-    { "SLOW20_LONG", 469,1094, 938, 625, 300, "640kHz waveform, 300us reset" },
+    {"STANDARD", 375, 875, 750, 500, 300, "800kHz canonical waveform, 300us reset"},
+    {"SK6812_STD", 375, 875, 750, 500, 80, "800kHz canonical waveform, 80us reset"},
+    {"SLOW_RESET", 375, 875, 750, 500, 280, "800kHz canonical waveform, 280us reset"},
+    {"SLOW10", 416, 972, 833, 555, 80, "720kHz waveform, 80us reset"},
+    {"SLOW10_LONG", 416, 972, 833, 555, 280, "720kHz waveform, 280us reset"},
+    {"SLOW20_LONG", 469, 1094, 938, 625, 300, "640kHz waveform, 300us reset"},
 };
-const uint8_t  kCloneProfileCount   = sizeof(kCloneProfiles) / sizeof(kCloneProfiles[0]);
-const uint32_t kScanColorDurationMs = 2100;  ///< Show each complete payload sequence for 2.1 s before prompting
-const uint8_t  kScanPayloadPhaseCount = 6;
+const uint8_t kCloneProfileCount = sizeof(kCloneProfiles) / sizeof(kCloneProfiles[0]);
+const uint32_t kScanColorDurationMs = 2100; ///< Show each complete payload sequence for 2.1 s before prompting
+const uint8_t kScanPayloadPhaseCount = 6;
 const uint32_t kScanPayloadPhaseDurationMs = kScanColorDurationMs / kScanPayloadPhaseCount;
-const uint32_t kScanPauseDurationMs = 300;   ///< Brief blank gap between profiles (ms)
-const uint32_t kScanWaitTimeoutMs   = 10000; ///< Auto-advance if no input after 10 s
+const uint32_t kScanPauseDurationMs = 300; ///< Brief blank gap between profiles (ms)
+const uint32_t kScanWaitTimeoutMs = 10000; ///< Auto-advance if no input after 10 s
 
 bool applyCloneTimingProfile(PhysicalStrip* strip, const CloneTimingProfile& profile)
 {
     return strip && strip->setCustomTiming(profile.t0hNs, profile.t0lNs,
-                                            profile.t1hNs, profile.t1lNs,
-                                            profile.resetUs);
+                                           profile.t1hNs, profile.t1lNs,
+                                           profile.resetUs);
 }
 
 bool writeCloneTimingStressPayload(PhysicalStrip* strip, uint8_t phase)
@@ -138,10 +139,12 @@ bool writeCloneTimingStressPayload(PhysicalStrip* strip, uint8_t phase)
         case 2: memset(buffer, 0xAA, size); break; // alternating 1010
         case 3: memset(buffer, 0x55, size); break; // alternating 0101
         case 4:
-            for (size_t i = 0; i < size; i++) buffer[i] = (uint8_t)(1U << (i & 7U));
+            for (size_t i = 0; i < size; i++)
+                buffer[i] = (uint8_t)(1U << (i & 7U));
             break; // walking-one across all bit positions
         case 5:
-            for (size_t i = 0; i < size; i++) buffer[i] = (uint8_t)~(1U << (i & 7U));
+            for (size_t i = 0; i < size; i++)
+                buffer[i] = (uint8_t)~(1U << (i & 7U));
             break; // walking-zero across all bit positions
     }
     return true;
@@ -212,9 +215,9 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     // Scan control: intercept next/apply/stop while a qualify scan is active
     if (_scanPhase != ScanPhase::IDLE)
     {
-        if (command == "neo scan next"  || command == "neo qualify next")  return processScanControlCommand("next");
+        if (command == "neo scan next" || command == "neo qualify next") return processScanControlCommand("next");
         if (command == "neo scan apply" || command == "neo qualify apply") return processScanControlCommand("apply");
-        if (command == "neo scan stop"  || command == "neo qualify stop")  return processScanControlCommand("stop");
+        if (command == "neo scan stop" || command == "neo qualify stop") return processScanControlCommand("stop");
     }
 
     // Check if command starts with "neo"
@@ -237,6 +240,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("neo update", "Force update all strips");
         openknx.console.printHelpLine("neo clear", "Turn off all LEDs");
         openknx.console.printHelpLine("neo test <strip>", "Run test pattern on strip (0-based index)");
+        openknx.console.printHelpLine("neo bitbang <strip>", "Diagnose SPI strip via digitalWrite (bypasses SPI peripheral)");
         openknx.console.printHelpLine("neo speed <mode>", "Set update speed: slow|normal|fast|max|extrameludicrous|ftl");
         openknx.console.printHelpLine("neo auto on|off", "Enable/disable auto-update mode");
         openknx.console.printHelpLine("neo perf", "Show performance statistics (requires auto-update)");
@@ -329,15 +333,15 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("timing <i> info", "Show detailed timing information");
         openknx.console.printHelpLine("timing <i> freq <kHz>", "Set bitrate directly (e.g. 775); like the ETS Timing field");
         openknx.console.printHelpLine("timing <i> custom <t0h> <t0l> <t1h> <t1l>", "Set custom timing in ns");
-        openknx.console.printHelpLine("timing <i> reset",    "Revert to AUTO timing");
-        openknx.console.printHelpLine("timing <i> qualify",   "Clone qualify: full strip, interactive (next/apply/stop)");
-        openknx.console.printHelpLine("timing <i> scan",      "Alias for 'qualify'");
-        openknx.console.printHelpLine("neo scan next",        "  During qualify: advance to next profile");
-        openknx.console.printHelpLine("neo scan apply",       "  During qualify: keep current profile for this boot & finish");
-        openknx.console.printHelpLine("neo scan stop",        "  During qualify: abort, restore original timing");
+        openknx.console.printHelpLine("timing <i> reset", "Revert to AUTO timing");
+        openknx.console.printHelpLine("timing <i> qualify", "Clone qualify: full strip, interactive (next/apply/stop)");
+        openknx.console.printHelpLine("timing <i> scan", "Alias for 'qualify'");
+        openknx.console.printHelpLine("neo scan next", "  During qualify: advance to next profile");
+        openknx.console.printHelpLine("neo scan apply", "  During qualify: keep current profile for this boot & finish");
+        openknx.console.printHelpLine("neo scan stop", "  During qualify: abort, restore original timing");
         openknx.console.printHelpLine("timing <i> profile <N>", "Apply clone profile until reboot (set ETS Timing permanently)");
-        openknx.console.printHelpLine("timing <i> tune",              "[EXPERT] Enter live-tuner for strip i");
-        openknx.console.printHelpLine("timing <i> tune t1h +50",      "  Adjust param while tuner is open");
+        openknx.console.printHelpLine("timing <i> tune", "[EXPERT] Enter live-tuner for strip i");
+        openknx.console.printHelpLine("timing <i> tune t1h +50", "  Adjust param while tuner is open");
         openknx.console.printHelpLine("timing <i> tune show/done/abort", "  Status / keep for this boot / restore");
         openknx.console.printHelpLine("config <i> info", "Show config (SPI: APA102/SK9822, Serial: WS2812B/SK6812)");
         openknx.console.printHelpLine("config <i> dummy <0-2>", "Set dummy LED mode (SPI only, 0=none, 1=physical, 2=virtual)");
@@ -564,6 +568,10 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     else if (command.compare(0, 9, "neo test ") == 0)
     {
         return processTestCommand(command.substr(9));
+    }
+    else if (command.compare(0, 12, "neo bitbang ") == 0)
+    {
+        return processBitbangCommand(command.substr(12));
     }
     else if (command.compare(0, 10, "neo speed ") == 0)
     {
@@ -867,7 +875,11 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
             for (size_t i = quoted ? 1 : 0; i < raw.size(); ++i)
             {
                 const char ch = raw[i];
-                if (ch == '\\' && i + 1 < raw.size()) { txt.push_back(raw[++i]); continue; }
+                if (ch == '\\' && i + 1 < raw.size())
+                {
+                    txt.push_back(raw[++i]);
+                    continue;
+                }
                 if (quoted && ch == '"') break; // closing quote ends the text
                 txt.push_back(ch);
             }
@@ -939,8 +951,10 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
             }
             int modeValue = -1;
             if (strcmp(mode, "off") == 0) modeValue = 0;
-            else if (strcmp(mode, "master") == 0) modeValue = 1;
-            else if (strcmp(mode, "slave") == 0) modeValue = 2;
+            else if (strcmp(mode, "master") == 0)
+                modeValue = 1;
+            else if (strcmp(mode, "slave") == 0)
+                modeValue = 2;
             if (modeValue < 0)
             {
                 openknx.logger.log("Usage: neo chain set <seg> <off|master|slave>");
@@ -1088,8 +1102,8 @@ void NeoPixel::printEmCueTable(int onlySeg)
         static const char* const kRowSep =
             "────┼─────┼───┼────┼───────────────────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼──────┼──────┼──────────────";
         bool headerShown = false;
-        bool firstRow    = true;
-        int  lastCol1    = 0;
+        bool firstRow = true;
+        int lastCol1 = 0;
         auto showHeader = [&headerShown]() {
             if (headerShown) return;
             headerShown = true;
@@ -1182,7 +1196,8 @@ void NeoPixel::printChainStatusTable(int onlySeg)
 
             const char* modeName = "off";
             if (st.syncMode == 1) modeName = "master";
-            else if (st.syncMode == 2) modeName = "slave";
+            else if (st.syncMode == 2)
+                modeName = "slave";
 
             openknx.logger.logWithValues("%3d │ %-6s │ %3d │ %4d │ %3d │ %8lu │ %6d │ %4d",
                                          i,
@@ -1787,6 +1802,93 @@ bool NeoPixel::processTestCommand(const std::string& args)
 
     openknx.logger.log("Test pattern complete");
 
+    return true;
+}
+
+/**
+ * @brief Process 'neo bitbang <strip>' - drive an APA102/SK9822 strip with plain digitalWrite
+ *
+ * Diagnostic only: bypasses the SPI peripheral, DMA and the whole buffer pipeline so a dark
+ * strip can be attributed to either the SPI peripheral setup or the wiring/level shifter.
+ */
+bool NeoPixel::processBitbangCommand(const std::string& args)
+{
+    if (!_initialized || !_manager)
+    {
+        openknx.logger.log("ERROR: NeoPixel module not initialized!");
+        return true;
+    }
+
+    int stripIndex = atoi(args.c_str());
+    auto strip = _manager->getStrip(stripIndex);
+    if (!strip)
+    {
+        openknx.logger.logWithValues("ERROR: Strip %d not found!", stripIndex);
+        return true;
+    }
+    if (!strip->isSpiStrip())
+    {
+        openknx.logger.logWithValues("ERROR: Strip %d is not an SPI strip!", stripIndex);
+        return true;
+    }
+
+    const uint32_t dataPin = strip->getDataPin();
+    const uint32_t clockPin = strip->getClockPin();
+    const uint16_t ledCount = strip->getLedCount();
+
+    openknx.logger.logWithValues("Bit-banging %d LEDs: DATA=GPIO%d, CLOCK=GPIO%d (SPI peripheral bypassed)",
+                                 ledCount, (int)dataPin, (int)clockPin);
+
+#ifdef ARDUINO_ARCH_ESP32
+    // Release the pins from the SPI peripheral, otherwise digitalWrite() is ignored because
+    // the GPIO matrix still routes the pad to the SPI output signal.
+    gpio_reset_pin((gpio_num_t)dataPin);
+    gpio_reset_pin((gpio_num_t)clockPin);
+#endif
+
+    pinMode(dataPin, OUTPUT);
+    pinMode(clockPin, OUTPUT);
+    digitalWrite(clockPin, LOW);
+
+    // ~200 kHz, slow enough for any level shifter to follow
+    auto sendByte = [&](uint8_t value) {
+        for (int8_t bit = 7; bit >= 0; bit--)
+        {
+            digitalWrite(dataPin, (value >> bit) & 0x01);
+            delayMicroseconds(2);
+            digitalWrite(clockPin, HIGH);
+            delayMicroseconds(2);
+            digitalWrite(clockPin, LOW);
+        }
+    };
+
+    auto sendFrame = [&](uint8_t r, uint8_t g, uint8_t b) {
+        for (uint8_t i = 0; i < 4; i++)
+            sendByte(0x00); // start frame
+        for (uint16_t i = 0; i < ledCount; i++)
+        {
+            sendByte(0xFF); // 111 + full 5-bit brightness
+            sendByte(b);
+            sendByte(g);
+            sendByte(r);
+        }
+        for (uint16_t i = 0; i < (ledCount / 16) + 4; i++)
+            sendByte(0xFF); // end frame
+    };
+
+    openknx.logger.log("Red for 2 seconds...");
+    sendFrame(255, 0, 0);
+    delay(2000);
+    openknx.logger.log("Green for 2 seconds...");
+    sendFrame(0, 255, 0);
+    delay(2000);
+    openknx.logger.log("Blue for 2 seconds...");
+    sendFrame(0, 0, 255);
+    delay(2000);
+    openknx.logger.log("Off");
+    sendFrame(0, 0, 0);
+
+    openknx.logger.log("Bit-bang test complete. Strip must be re-initialized ('neo update') for normal operation.");
     return true;
 }
 
@@ -3184,8 +3286,7 @@ bool NeoPixel::processSegListCommand()
                                              (config.primaryRGBW >> 16) & 0xFF, // Green from RGBW
                                              (config.primaryRGBW >> 8) & 0xFF,  // Blue from RGBW
                                              config.primaryRGBW & 0xFF,         // White from RGBW
-                                             geoBuf
-                );
+                                             geoBuf);
             }
         }
     }
@@ -3543,14 +3644,20 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
         // Find where the value starts after "set <idx> "
         size_t pos = 0;
         // Skip segment ID
-        while (pos < args.size() && args[pos] != ' ') pos++;
-        while (pos < args.size() && args[pos] == ' ') pos++;
+        while (pos < args.size() && args[pos] != ' ')
+            pos++;
+        while (pos < args.size() && args[pos] == ' ')
+            pos++;
         // Skip "set"
-        while (pos < args.size() && args[pos] != ' ') pos++;
-        while (pos < args.size() && args[pos] == ' ') pos++;
+        while (pos < args.size() && args[pos] != ' ')
+            pos++;
+        while (pos < args.size() && args[pos] == ' ')
+            pos++;
         // Skip parameter index
-        while (pos < args.size() && args[pos] != ' ') pos++;
-        while (pos < args.size() && args[pos] == ' ') pos++;
+        while (pos < args.size() && args[pos] != ' ')
+            pos++;
+        while (pos < args.size() && args[pos] == ' ')
+            pos++;
 
         const char* valueStart = &args[pos];
 
@@ -5238,10 +5345,14 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
     {
         // Extract everything after "<id> tune " as sub-arguments
         const char* p = args.c_str();
-        while (*p && *p != ' ') p++;   // skip id
-        while (*p == ' ') p++;         // skip spaces
-        while (*p && *p != ' ') p++;   // skip "tune"
-        while (*p == ' ') p++;         // skip spaces
+        while (*p && *p != ' ')
+            p++; // skip id
+        while (*p == ' ')
+            p++; // skip spaces
+        while (*p && *p != ' ')
+            p++; // skip "tune"
+        while (*p == ' ')
+            p++; // skip spaces
         return processPhysTimingTuneCommand((uint32_t)stripId, std::string(p));
     }
 
@@ -5351,14 +5462,14 @@ bool NeoPixel::processPhysTimingScanCommand(uint32_t stripId)
     }
 
     // Save original timing so we can restore it afterwards
-    _scanSavedT0H   = sCfg->getT0H();
-    _scanSavedT0L   = sCfg->getT0L();
-    _scanSavedT1H   = sCfg->getT1H();
-    _scanSavedT1L   = sCfg->getT1L();
+    _scanSavedT0H = sCfg->getT0H();
+    _scanSavedT0L = sCfg->getT0L();
+    _scanSavedT1H = sCfg->getT1H();
+    _scanSavedT1L = sCfg->getT1L();
     _scanSavedReset = sCfg->getResetTime();
-    _scanSavedMode  = sCfg->getTimingMode();
+    _scanSavedMode = sCfg->getTimingMode();
 
-    _scanStripId    = stripId;
+    _scanStripId = stripId;
     _scanProfileIdx = 0; // will be incremented at first PAUSE→SHOW transition
 
     openknx.logger.log("");
@@ -5418,10 +5529,10 @@ bool NeoPixel::processPhysTimingScanCommand(uint32_t stripId)
     openknx.logger.logWithValues("Profile 1/%d: %s — %s",
                                  (int)kCloneProfileCount, first.name, first.desc);
 
-    _scanPayloadPhase  = 0;
-    _scanPhaseStart    = millis();
+    _scanPayloadPhase = 0;
+    _scanPhaseStart = millis();
     _scanPromptPrinted = false;
-    _scanPhase         = ScanPhase::SHOW_COLOR;
+    _scanPhase = ScanPhase::SHOW_COLOR;
 
     return true;
 }
@@ -5441,7 +5552,8 @@ bool NeoPixel::processPhysTimingProfileCommand(uint32_t stripId, uint8_t profile
 
     auto* cfg = strip->getConfig();
     SerialStripConfig* sCfg = (cfg && cfg->isSerialConfig())
-                                  ? static_cast<SerialStripConfig*>(cfg) : nullptr;
+                                  ? static_cast<SerialStripConfig*>(cfg)
+                                  : nullptr;
     if (!sCfg)
     {
         openknx.logger.log("ERROR: Profile command only supported for serial strips.");
@@ -5488,11 +5600,16 @@ bool NeoPixel::processScanControlCommand(const std::string& cmd)
     }
 
     auto strip = _manager ? _manager->getStrip(_scanStripId) : nullptr;
-    if (!strip) { _scanPhase = ScanPhase::IDLE; return true; }
+    if (!strip)
+    {
+        _scanPhase = ScanPhase::IDLE;
+        return true;
+    }
 
-    auto* cfg  = strip->getConfig();
+    auto* cfg = strip->getConfig();
     SerialStripConfig* sCfg = (cfg && cfg->isSerialConfig())
-                                  ? static_cast<SerialStripConfig*>(cfg) : nullptr;
+                                  ? static_cast<SerialStripConfig*>(cfg)
+                                  : nullptr;
 
     auto restoreOriginalTiming = [&]() {
         if (sCfg)
@@ -5519,7 +5636,7 @@ bool NeoPixel::processScanControlCommand(const std::string& cmd)
                                          strip->getLastErrorName());
         }
         _scanSavedBuffer.clear();
-        _scanPhase      = ScanPhase::IDLE;
+        _scanPhase = ScanPhase::IDLE;
         _lastUpdateTime = millis();
     };
 
@@ -5540,7 +5657,7 @@ bool NeoPixel::processScanControlCommand(const std::string& cmd)
             }
         }
         _scanSavedBuffer.clear();
-        _scanPhase      = ScanPhase::IDLE;
+        _scanPhase = ScanPhase::IDLE;
         _lastUpdateTime = millis();
         return true;
     }
@@ -5573,9 +5690,9 @@ bool NeoPixel::processScanControlCommand(const std::string& cmd)
         }
 
         // Brief pause; loopTimingScan/PAUSE will apply the next profile
-        _scanPhaseStart    = millis();
+        _scanPhaseStart = millis();
         _scanPromptPrinted = false;
-        _scanPhase         = ScanPhase::PAUSE;
+        _scanPhase = ScanPhase::PAUSE;
         return true;
     }
 
@@ -5615,7 +5732,8 @@ bool NeoPixel::processPhysTimingTuneCommand(uint32_t stripId, const std::string&
 
     auto* cfg = strip->getConfig();
     SerialStripConfig* sCfg = (cfg && cfg->isSerialConfig())
-                                  ? static_cast<SerialStripConfig*>(cfg) : nullptr;
+                                  ? static_cast<SerialStripConfig*>(cfg)
+                                  : nullptr;
     if (!sCfg)
     {
         openknx.logger.log("ERROR: Live tuner only supported for serial strips (WS2812B/SK6812).");
@@ -5628,17 +5746,17 @@ bool NeoPixel::processPhysTimingTuneCommand(uint32_t stripId, const std::string&
     if (subArgs.empty() && !isActive)
     {
         TunerState ts;
-        ts.savedT0H    = sCfg->getT0H();
-        ts.savedT0L    = sCfg->getT0L();
-        ts.savedT1H    = sCfg->getT1H();
-        ts.savedT1L    = sCfg->getT1L();
+        ts.savedT0H = sCfg->getT0H();
+        ts.savedT0L = sCfg->getT0L();
+        ts.savedT1H = sCfg->getT1H();
+        ts.savedT1L = sCfg->getT1L();
         ts.savedResetUs = sCfg->getResetTime();
-        ts.savedMode   = sCfg->getTimingMode();
+        ts.savedMode = sCfg->getTimingMode();
         auto eff = sCfg->getEffectiveTimings(strip->getProtocol());
-        ts.liveT0H     = eff.t0h;
-        ts.liveT0L     = eff.t0l;
-        ts.liveT1H     = eff.t1h;
-        ts.liveT1L     = eff.t1l;
+        ts.liveT0H = eff.t0h;
+        ts.liveT0L = eff.t0l;
+        ts.liveT1H = eff.t1h;
+        ts.liveT1L = eff.t1l;
         ts.liveResetUs = eff.resetUs;
         _activeTuners[stripId] = ts;
 
@@ -5776,8 +5894,8 @@ bool NeoPixel::processPhysTimingTuneCommand(uint32_t stripId, const std::string&
     }
 
     // ── parameter adjustment: "t1h +50", "reset 280", … ──────────────────────
-    char   paramBuf[16] = {};
-    char   valBuf[16]   = {};
+    char paramBuf[16] = {};
+    char valBuf[16] = {};
     if (sscanf(subArgs.c_str(), "%15s %15s", paramBuf, valBuf) < 2)
     {
         openknx.logger.log("ERROR: Usage: neo phys timing <id> tune <param> <value|+delta|-delta>");
@@ -5786,18 +5904,32 @@ bool NeoPixel::processPhysTimingTuneCommand(uint32_t stripId, const std::string&
     }
 
     bool isRelative = (valBuf[0] == '+' || valBuf[0] == '-');
-    int  delta      = atoi(valBuf);
+    int delta = atoi(valBuf);
 
-    uint16_t* target16  = nullptr;
-    uint32_t* target32  = nullptr;
+    uint16_t* target16 = nullptr;
+    uint32_t* target32 = nullptr;
     const char* paramName = paramBuf;
 
-    if      (strcmp(paramBuf, "t0h")   == 0) { target16 = &ts.liveT0H; }
-    else if (strcmp(paramBuf, "t0l")   == 0) { target16 = &ts.liveT0L; }
-    else if (strcmp(paramBuf, "t1h")   == 0) { target16 = &ts.liveT1H; }
-    else if (strcmp(paramBuf, "t1l")   == 0) { target16 = &ts.liveT1L; }
+    if (strcmp(paramBuf, "t0h") == 0)
+    {
+        target16 = &ts.liveT0H;
+    }
+    else if (strcmp(paramBuf, "t0l") == 0)
+    {
+        target16 = &ts.liveT0L;
+    }
+    else if (strcmp(paramBuf, "t1h") == 0)
+    {
+        target16 = &ts.liveT1H;
+    }
+    else if (strcmp(paramBuf, "t1l") == 0)
+    {
+        target16 = &ts.liveT1L;
+    }
     else if (strcmp(paramBuf, "reset") == 0 || strcmp(paramBuf, "rst") == 0)
-                                             { target32 = &ts.liveResetUs; }
+    {
+        target32 = &ts.liveResetUs;
+    }
     else
     {
         openknx.logger.logWithValues("ERROR: Unknown param '%s'. Use: t0h t0l t1h t1l reset", paramBuf);
@@ -5807,14 +5939,14 @@ bool NeoPixel::processPhysTimingTuneCommand(uint32_t stripId, const std::string&
     if (target16)
     {
         int newVal = isRelative ? ((int)*target16 + delta) : delta;
-        if (newVal <   50) newVal =   50;
+        if (newVal < 50) newVal = 50;
         if (newVal > 5000) newVal = 5000;
         *target16 = (uint16_t)newVal;
     }
     else
     {
         int newVal = isRelative ? ((int)*target32 + delta) : delta;
-        if (newVal <   10) newVal =   10;
+        if (newVal < 10) newVal = 10;
         if (newVal > 1000) newVal = 1000;
         *target32 = (uint32_t)newVal;
     }
@@ -5838,7 +5970,6 @@ bool NeoPixel::processPhysTimingTuneCommand(uint32_t stripId, const std::string&
                                  (int)ts.liveT1H, (int)ts.liveT1L, (int)ts.liveResetUs);
     return true;
 }
-
 
 // ============================================================================
 /**
@@ -6121,10 +6252,10 @@ bool NeoPixel::processPhysConfigInfoCommand(uint32_t stripId)
         const char* lsName;
         switch (ls)
         {
-            case LevelShifterType::TXS0108E:    lsName = "TXS0108E (bidirect., pull=off, drive+)"; break;
-            case LevelShifterType::SN74HCT125:  lsName = "74HCT125 (unidirect. buffer)";          break;
+            case LevelShifterType::TXS0108E: lsName = "TXS0108E (bidirect., pull=off, drive+)"; break;
+            case LevelShifterType::SN74HCT125: lsName = "74HCT125 (unidirect. buffer)"; break;
             case LevelShifterType::SN74AHCT125: lsName = "74AHCT125 (unidirect. buffer, faster)"; break;
-            default:                            lsName = "none";                                    break;
+            default: lsName = "none"; break;
         }
         openknx.logger.logWithValues("Level Shifter:     %s", lsName);
 
@@ -6608,10 +6739,10 @@ bool NeoPixel::processPhysConfigLevelShifterCommand(uint32_t stripId, LevelShift
     const char* typeName;
     switch (type)
     {
-        case LevelShifterType::TXS0108E:    typeName = "TXS0108E";   break;
-        case LevelShifterType::SN74HCT125:  typeName = "74HCT125";   break;
-        case LevelShifterType::SN74AHCT125: typeName = "74AHCT125";  break;
-        default:                            typeName = "none";        break;
+        case LevelShifterType::TXS0108E: typeName = "TXS0108E"; break;
+        case LevelShifterType::SN74HCT125: typeName = "74HCT125"; break;
+        case LevelShifterType::SN74AHCT125: typeName = "74AHCT125"; break;
+        default: typeName = "none"; break;
     }
     openknx.logger.logWithValues("Level-shifter set to: %s (applied)", typeName);
 
