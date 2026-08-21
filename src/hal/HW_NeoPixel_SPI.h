@@ -183,6 +183,7 @@ class HW_NeoPixel_SPI : public IHardwareDriver
     SPIClass* selectSPI();
     void sendStartFrame();
     void sendEndFrame();
+    void initBufferFraming();
     void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
 
     static bool _spi0Used;       // Track SPI0 usage
