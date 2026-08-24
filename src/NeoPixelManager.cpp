@@ -555,6 +555,18 @@ void NeoPixelManager::clearTopology()
  */
 void NeoPixelManager::applyPowerLimit()
 {
+    if (!_powerManager.isEnabled())
+    {
+        // Do not leave stale limited-frame statistics behind when callers
+        // explicitly disable ABL. More importantly, do not modify the physical
+        // buffer in this mode.
+        _stripPowerCache.clear();
+        _globalCurrentMa = 0;
+        _globalLimitMa = 0;
+        _globalLoadPercent = 0;
+        return;
+    }
+
     // Rebuild mapping if needed (for LED count calculations)
     if (_mappingDirty)
     {
@@ -619,7 +631,9 @@ void NeoPixelManager::applyPowerLimit()
             // Cache global stats
             _globalCurrentMa = targetCurrent;
             _globalLimitMa = effectiveLimit;
-            _globalLoadPercent = (uint8_t)((targetCurrent * 100) / effectiveLimit);
+            _globalLoadPercent = effectiveLimit > 0
+                                     ? (uint8_t)((targetCurrent * 100) / effectiveLimit)
+                                     : 0;
         }
         else
         {
@@ -1072,7 +1086,10 @@ uint32_t NeoPixelManager::calculatePhysicalStripCurrent(PhysicalStrip* phys)
 
     uint16_t ledCount = phys->getLedCount();
 
-    if (phys->isSpiStrip())
+    const LedProtocol protocol = phys->getProtocol();
+
+    if (protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE ||
+        protocol == LedProtocol::SK9822)
     {
         auto* cfg = phys->getConfig();
         SpiStripConfig* spiCfg = cfg && cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
@@ -1093,7 +1110,55 @@ uint32_t NeoPixelManager::calculatePhysicalStripCurrent(PhysicalStrip* phys)
         return totalCurrent;
     }
 
-    uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+    if (protocol == LedProtocol::SM16825)
+    {
+        constexpr size_t kBytesPerChannel = 2;
+        constexpr size_t kChannels = 5;
+        constexpr size_t kBytesPerPixel = kBytesPerChannel * kChannels;
+        const size_t pixelDataSize = (size_t)ledCount * kBytesPerPixel;
+        const size_t bufferSize = phys->getBufferSize();
+        uint32_t totalCurrent = 0;
+
+        for (uint16_t i = 0; i < ledCount; ++i)
+        {
+            const size_t offset = (size_t)i * kBytesPerPixel;
+            if (offset + kBytesPerPixel > bufferSize || offset + kBytesPerPixel > pixelDataSize)
+                break;
+
+            // SM16825 channels are 16-bit MSB-first values. OFM expands an
+            // 8-bit logical component as v*257, so the high byte is the exact
+            // logical component used for current estimation.
+            const uint8_t logicalChannels[kChannels] = {
+                buffer[offset], buffer[offset + 2], buffer[offset + 4],
+                buffer[offset + 6], buffer[offset + 8]};
+            totalCurrent += _powerManager.calculateTotalCurrent(logicalChannels, 1, kChannels, 255);
+        }
+        return totalCurrent;
+    }
+
+    if (protocol == LedProtocol::LPD8806)
+    {
+        uint32_t totalCurrent = 0;
+        const size_t bufferSize = phys->getBufferSize();
+        for (uint16_t i = 0; i < ledCount; ++i)
+        {
+            const size_t offset = (size_t)i * 3;
+            if (offset + 3 > bufferSize) break;
+
+            // LPD8806 transports 7-bit components with bit 7 set as the
+            // protocol update marker. Estimate using expanded 8-bit values.
+            const uint8_t channels[3] = {
+                (uint8_t)((((uint16_t)buffer[offset] & 0x7F) * 255U + 63U) / 127U),
+                (uint8_t)((((uint16_t)buffer[offset + 1] & 0x7F) * 255U + 63U) / 127U),
+                (uint8_t)((((uint16_t)buffer[offset + 2] & 0x7F) * 255U + 63U) / 127U)};
+            totalCurrent += _powerManager.calculateTotalCurrent(channels, 1, 3, 255);
+        }
+        return totalCurrent;
+    }
+
+    // A physical buffer uses its protocol's native frame width. ColorOrder is
+    // only a channel permutation and must not shrink that stride.
+    uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(protocol);
     return _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, 255);
 }
 
@@ -1105,7 +1170,10 @@ void NeoPixelManager::applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scal
     uint8_t* buffer = phys->getBuffer();
     size_t bufferSize = phys->getBufferSize();
 
-    if (phys->isSpiStrip())
+    const LedProtocol protocol = phys->getProtocol();
+
+    if (protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE ||
+        protocol == LedProtocol::SK9822)
     {
         // SPI buffers are framed as [start frames][optional dummy LED][brightness,R,G,B]*N[end
         // frames], not a flat RGB(W) array from offset 0 - the generic path below would scale
@@ -1129,7 +1197,52 @@ void NeoPixelManager::applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scal
         return;
     }
 
-    uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+    if (protocol == LedProtocol::SM16825)
+    {
+        constexpr size_t kBytesPerChannel = 2;
+        constexpr size_t kChannels = 5;
+        constexpr size_t kBytesPerPixel = kBytesPerChannel * kChannels;
+        const size_t pixelDataSize = (size_t)ledCount * kBytesPerPixel;
+
+        for (uint16_t i = 0; i < ledCount; ++i)
+        {
+            const size_t offset = (size_t)i * kBytesPerPixel;
+            if (offset + kBytesPerPixel > bufferSize || offset + kBytesPerPixel > pixelDataSize)
+                break;
+
+            // Scale a complete 16-bit value and leave the four-byte SM16825
+            // settings trailer immediately after pixelDataSize untouched.
+            for (size_t channel = 0; channel < kChannels; ++channel)
+            {
+                uint8_t* value = buffer + offset + channel * kBytesPerChannel;
+                const uint16_t original = ((uint16_t)value[0] << 8) | value[1];
+                const uint16_t scaled = (uint16_t)((float)original * scale);
+                value[0] = (uint8_t)(scaled >> 8);
+                value[1] = (uint8_t)scaled;
+            }
+        }
+        return;
+    }
+
+    if (protocol == LedProtocol::LPD8806)
+    {
+        for (uint16_t i = 0; i < ledCount; ++i)
+        {
+            const size_t offset = (size_t)i * 3;
+            if (offset + 3 > bufferSize) break;
+
+            // Preserve the mandatory update marker while scaling the 7-bit
+            // payload; scaling the raw byte would clear that marker.
+            for (size_t channel = 0; channel < 3; ++channel)
+            {
+                const uint8_t level = buffer[offset + channel] & 0x7F;
+                buffer[offset + channel] = 0x80 | (uint8_t)((float)level * scale);
+            }
+        }
+        return;
+    }
+
+    uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(protocol);
 
     // Scale all pixels in this PhysicalStrip
     for (uint16_t i = 0; i < ledCount; i++)
