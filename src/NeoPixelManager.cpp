@@ -379,6 +379,23 @@ PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, u
  */
 PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder, uint32_t frequencyHz)
 {
+#if NEOPIXEL_ENFORCE_LIMITS
+    if (_strips.size() >= NEOPIXEL_MAX_PHYSICAL_STRIPS)
+    {
+        logDebugP("NeoPixelManager: Maximum physical strips limit reached (%d/%d)",
+                  _strips.size(), NEOPIXEL_MAX_PHYSICAL_STRIPS);
+        _errorCount++;
+        return nullptr;
+    }
+#endif
+
+    if (!checkResourcesAvailable(protocol))
+    {
+        logDebugP("NeoPixelManager: No resources available for SPI protocol %d", (int)protocol);
+        _errorCount++;
+        return nullptr;
+    }
+
     PhysicalStrip* strip = new PhysicalStrip(mosiPin, ledCount, protocol, sckPin, -1, frequencyHz);
     if (!strip)
     {
@@ -1611,7 +1628,7 @@ ManagerStats NeoPixelManager::getStats() const
 
     for (const auto strip : _strips)
     {
-        if (strip && strip->isInitialized())
+        if (strip)
         {
             stats.activeStrips++;
             stats.totalLeds += strip->getLedCount();
@@ -1743,17 +1760,13 @@ bool NeoPixelManager::checkResourcesAvailable(LedProtocol protocol)
     bool isSpi = ProtocolHelper::isSPI(protocol);
 
 #if defined(ARDUINO_ARCH_RP2040)
-    if (is1Wire)
+    if (is1Wire || isSpi)
     {
     #ifdef PICO_RP2350
         return pioUsed < 11; // RP2350: max 11
     #else
         return pioUsed < 7; // RP2040: max 7
     #endif
-    }
-    else if (isSpi)
-    {
-        return spiUsed < 2;
     }
 #elif defined(ARDUINO_ARCH_ESP32)
     if (is1Wire)
@@ -1808,7 +1821,13 @@ void NeoPixelManager::countResourceUsage(uint32_t& pioUsed, uint32_t& spiUsed, u
             }
             else if (isSpi)
             {
+#if defined(ARDUINO_ARCH_RP2040)
+                // RP SPI is implemented by PIO as well, so reserve one state
+                // machine before initialization just like a 1-Wire strip.
+                pioUsed++;
+#else
                 spiUsed++;
+#endif
             }
         }
     }
