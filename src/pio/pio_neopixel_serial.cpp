@@ -465,7 +465,7 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     const OneWireTimingProfile& profile = getOneWireTimingProfile(_inst->protocol);
     const uint8_t oneHighCycles = _inst->oneHighCycles ? _inst->oneHighCycles : 6;
     const uint8_t cyclesPerBit = _inst->cyclesPerBit ? _inst->cyclesPerBit : 10;
-    const float sysClk = (float)clock_get_hz(clk_sys);
+    const uint32_t sysClk = clock_get_hz(clk_sys);
     const TimingMode requestedMode = completeCustomTiming
                                          ? TimingMode::CUSTOM
                                          : serialCfg->getTimingMode();
@@ -494,8 +494,11 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
             default: break;
         }
     }
-    const float targetClkdiv = sysClk / (targetBitrate * (float)cyclesPerBit);
-    if (targetClkdiv < 1.0f || targetClkdiv > 65536.0f) return false;
+    float targetClkdiv = 0.0f;
+    float actualBitrate = 0.0f;
+    if (!oneWireMakePioClockDivider(sysClk, targetBitrate, cyclesPerBit,
+                                    targetClkdiv, actualBitrate))
+        return false;
 
     // Apply ColorOrder (never let a NONE config stomp the live driver order)
     const ColorOrder cfgOrder = serialCfg->getColorOrder();
@@ -536,7 +539,7 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     }
 
     _inst->actual_clkdiv = targetClkdiv;
-    _inst->actual_bitrate = sysClk / targetClkdiv / (float)cyclesPerBit;
+    _inst->actual_bitrate = actualBitrate;
     _inst->timingMode = requestedMode;
     _inst->resetTimeUs = serialCfg->getResetTime() > 0
                               ? serialCfg->getResetTime()
@@ -630,9 +633,10 @@ bool PIO_NeoPixel_Serial::initPIO()
     // Targets 960 kHz bitrate which works better for newer LED chips that prefer
     // slightly faster timing than standard 800 kHz. Automatically calculates the
     // correct clkdiv for any CPU frequency to maintain consistent 960 kHz output.
-    float actual_sys_clk = (float)clock_get_hz(clk_sys);
-    float clkdiv = 1.0f;         // Initialize to safe default
-    float actual_bitrate = 0.0f; // Initialize to safe default
+    const uint32_t actual_sys_clk = clock_get_hz(clk_sys);
+    float clkdiv = 1.0f;
+    float actual_bitrate = 0.0f;
+    float target_bitrate = (float)_inst->frequency;
     float bitrate_multiplier = 1.0f;
     const char* mode_name = "AUTO";
 
@@ -640,8 +644,7 @@ bool PIO_NeoPixel_Serial::initPIO()
     {
         case TimingMode::AUTO_LEGACY:
             // Expert compatibility override for WS2812C/D-style strips.
-            clkdiv = actual_sys_clk / (960000.0f * (float)cycles_per_bit);
-            actual_bitrate = (actual_sys_clk / clkdiv) / (float)cycles_per_bit;
+            target_bitrate = 960000.0f;
             mode_name = "AUTO_LEGACY";
             break;
 
@@ -690,13 +693,12 @@ bool PIO_NeoPixel_Serial::initPIO()
             break;
     }
 
-    // Calculate clkdiv for all modes except AUTO_LEGACY (which has custom calculation)
     if (_inst->timingMode != TimingMode::AUTO_LEGACY)
-    {
-        float target_bitrate = (float)_inst->frequency * bitrate_multiplier;
-        clkdiv = actual_sys_clk / (target_bitrate * (float)cycles_per_bit);
-        actual_bitrate = target_bitrate;
-    }
+        target_bitrate *= bitrate_multiplier;
+
+    if (!oneWireMakePioClockDivider(actual_sys_clk, target_bitrate, cycles_per_bit,
+                                    clkdiv, actual_bitrate))
+        return false;
 
     // Store actual values for debugging/info display
     _inst->actual_bitrate = actual_bitrate;

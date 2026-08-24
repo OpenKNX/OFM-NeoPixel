@@ -88,6 +88,30 @@ static void testBitrateOverrides()
     assert(!oneWireMakeBitrateOverride(ws2805, 0U, timing));
 }
 
+static void testPioDivider()
+{
+    float divider = 0.0f;
+    float realizedBitrate = 0.0f;
+
+    // WS2805 uses the FOUR_STEP cadence: four PIO cycles per serial bit.
+    assert(oneWireMakePioClockDivider(125000000U, 800000.0f, 4,
+                                      divider, realizedBitrate));
+    assert(divider == 39.0625f && realizedBitrate == 800000.0f);
+    assert(oneWireMakePioClockDivider(150000000U, 800000.0f, 4,
+                                      divider, realizedBitrate));
+    assert(divider == 46.875f && realizedBitrate == 800000.0f);
+
+    // The custom bitrate path must use the same cadence calculation.
+    assert(oneWireMakePioClockDivider(125000000U, 600000.0f, 4,
+                                      divider, realizedBitrate));
+    assert(divider == (125000000.0f / 2400000.0f) && realizedBitrate == 600000.0f);
+    assert(oneWireMakePioClockDivider(150000000U, 600000.0f, 4,
+                                      divider, realizedBitrate));
+    assert(divider == 62.5f && realizedBitrate == 600000.0f);
+    assert(!oneWireMakePioClockDivider(125000000U, 0.0f, 4,
+                                       divider, realizedBitrate));
+}
+
 static void testDeadlines()
 {
     // 3 RGB bytes at 800 kHz: 30 us payload + 30 us final word + 300 us reset + 2 ms margin.
@@ -173,6 +197,7 @@ int main()
     testColorOrderCompatibility();
     testQuantization();
     testBitrateOverrides();
+    testPioDivider();
     testDeadlines();
     testExactPacking();
     testSpiFrameLayouts();

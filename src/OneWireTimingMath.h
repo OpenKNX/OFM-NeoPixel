@@ -85,6 +85,24 @@ inline bool oneWireMakeBalancedSymbols(uint16_t t0hNs, uint16_t t0lNs,
     return true;
 }
 
+/**
+ * Derive an RP PIO clock divider and realized serial bitrate for a fixed
+ * instruction cadence. Kept hardware-independent so the RP backend's default
+ * and custom timing paths can be regression-tested on a host.
+ */
+inline bool oneWireMakePioClockDivider(uint32_t systemClockHz, float targetBitrateHz,
+                                       uint8_t cyclesPerBit, float& divider,
+                                       float& realizedBitrateHz)
+{
+    if (systemClockHz == 0 || targetBitrateHz <= 0.0f || cyclesPerBit == 0) return false;
+
+    divider = (float)systemClockHz / (targetBitrateHz * (float)cyclesPerBit);
+    if (divider < 1.0f || divider > 65536.0f) return false;
+
+    realizedBitrateHz = (float)systemClockHz / divider / (float)cyclesPerBit;
+    return true;
+}
+
 inline size_t oneWirePackedWordCount(size_t payloadBytes, uint8_t bytesPerLed)
 {
     // A non-24/32-bit pixel width must be streamed byte-by-byte so PIO does
