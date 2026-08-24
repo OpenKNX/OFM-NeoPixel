@@ -20,6 +20,10 @@ static void testProfiles()
     assert(ws2805.t1hNs == 938 && ws2805.t1lNs == 312);
     assert(ws2805.t0hNs + ws2805.t0lNs == 1250);
     assert(ws2805.t1hNs + ws2805.t1lNs == 1250);
+    const OneWireTimingProfile& sm16825 = getOneWireTimingProfile(LedProtocol::SM16825);
+    assert(sm16825.bitRateHz == 800000 && sm16825.channelCount == 5);
+    assert(sm16825.bytesPerChannel == 2 && sm16825.frameSettingsBytes == 4);
+    assert(sm16825.defaultColorOrder == ColorOrder::RGBCTW);
     const OneWireTimingProfile& tm1814 = getOneWireTimingProfile(LedProtocol::TM1814);
     assert(tm1814.inverted);
 }
@@ -33,6 +37,8 @@ static void testColorOrderCompatibility()
     assert(ProtocolHelper::normalizeColorOrder(LedProtocol::WS2812B, ColorOrder::GRBW) == ColorOrder::GRB);
     assert(ProtocolHelper::normalizeColorOrder(LedProtocol::APA102, ColorOrder::GRBW) == ColorOrder::BGR);
     assert(ProtocolHelper::normalizeColorOrder(LedProtocol::WS2805_RGBCCT, ColorOrder::GRBCCT) == ColorOrder::GRBCCT);
+    assert(ProtocolHelper::getBytesPerLed(LedProtocol::SM16825) == 10);
+    assert(ProtocolHelper::isColorOrderCompatible(LedProtocol::SM16825, ColorOrder::RGBCTW));
 }
 
 static void testQuantization()
@@ -107,6 +113,22 @@ static void testExactPacking()
     assert(oneWirePackedWordCount(sizeof(rgbcct), 5) == sizeof(rgbcct));
     for (size_t i = 0; i < sizeof(rgbcct); ++i)
         assert(oneWirePackedWordAt(rgbcct, 5, i) == ((uint32_t)rgbcct[i] << 24));
+
+    uint8_t sm16825[14] = {};
+    // Default RGBCTW ordering: R, G, B, cool white, warm white.
+    oneWireStoreChannel(sm16825, 2, 0, 0x01);
+    oneWireStoreChannel(sm16825, 2, 1, 0x02);
+    oneWireStoreChannel(sm16825, 2, 2, 0x03);
+    oneWireStoreChannel(sm16825, 2, 3, 0x05);
+    oneWireStoreChannel(sm16825, 2, 4, 0x04);
+    oneWireWriteSm16825Settings(sm16825 + 10);
+    const uint8_t expected[] = {0x01, 0x01, 0x02, 0x02, 0x03, 0x03, 0x05, 0x05,
+                                0x04, 0x04, 0x00, 0x00, 0x00, 0x1f};
+    for (size_t i = 0; i < sizeof(sm16825); ++i)
+        assert(sm16825[i] == expected[i]);
+    assert(oneWirePackedWordCount(sizeof(sm16825), 10) == sizeof(sm16825));
+    for (size_t i = 0; i < sizeof(sm16825); ++i)
+        assert(oneWirePackedWordAt(sm16825, 10, i) == ((uint32_t)sm16825[i] << 24));
 }
 
 int main()

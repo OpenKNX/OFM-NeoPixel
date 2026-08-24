@@ -40,7 +40,10 @@ struct rmt_neopixel_serial_inst
 
     uint32_t pin;          // GPIO pin
     uint16_t ledCount;     // Number of LEDs
-    uint8_t bytesPerLed;   // 3 for RGB, 4 for RGBW
+    uint8_t bytesPerLed;   // Physical payload bytes per LED
+    uint8_t channelCount;  // Logical colour channels per LED
+    uint8_t bytesPerChannel; // 1 for standard LEDs, 2 for SM16825
+    uint8_t frameSettingsBytes; // Protocol control bytes appended after pixels
     LedProtocol protocol;  // LED protocol
     ColorOrder colorOrder; // Color order
 

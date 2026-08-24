@@ -51,7 +51,10 @@ struct pio_neopixel_serial_inst
     uint offset;           // Program offset in PIO memory
     uint pin;              // GPIO pin
     uint16_t ledCount;     // Number of LEDs
-    uint8_t bytesPerLed;   // 3 for RGB, 4 for RGBW
+    uint8_t bytesPerLed;   // Physical payload bytes per LED
+    uint8_t channelCount;  // Logical colour channels per LED
+    uint8_t bytesPerChannel; // 1 for standard LEDs, 2 for SM16825
+    uint8_t frameSettingsBytes; // Protocol control bytes appended after pixels
     LedProtocol protocol;  // LED protocol type
     ColorOrder colorOrder; // Color byte order
     uint32_t frequency;    // Update frequency (Hz)
@@ -66,7 +69,7 @@ struct pio_neopixel_serial_inst
     uint8_t* buffer;        // LED data buffer (RGB/RGBW bytes) - user writes here
     size_t bufferSize;      // Buffer size in bytes
 
-    uint32_t* dmaBuffer;  // DMA words; RGBCCT expands every payload byte into one MSB-aligned word
+    uint32_t* dmaBuffer;  // DMA words; non-24/32-bit frames stream one byte per word
     size_t dmaBufferSize; // Number of 32-bit DMA words
     uint fifoWordBits;    // Valid serial bits emitted from each FIFO word (24/32, or 8 for RGBCCT)
 

@@ -87,7 +87,10 @@ inline bool oneWireMakeBalancedSymbols(uint16_t t0hNs, uint16_t t0lNs,
 
 inline size_t oneWirePackedWordCount(size_t payloadBytes, uint8_t bytesPerLed)
 {
-    if (bytesPerLed == 5) return payloadBytes;
+    // A non-24/32-bit pixel width must be streamed byte-by-byte so PIO does
+    // not append FIFO padding to the protocol payload. This includes 40-bit
+    // RGBCCT and 80-bit SM16825 frames (plus their settings trailer).
+    if (bytesPerLed != 3 && bytesPerLed != 4) return payloadBytes;
     return bytesPerLed > 0 && (payloadBytes % bytesPerLed) == 0 ? payloadBytes / bytesPerLed : 0;
 }
 
@@ -95,7 +98,7 @@ inline size_t oneWirePackedWordCount(size_t payloadBytes, uint8_t bytesPerLed)
 inline uint32_t oneWirePackedWordAt(const uint8_t* payload, uint8_t bytesPerLed, size_t wordIndex)
 {
     if (!payload) return 0;
-    if (bytesPerLed == 5) return (uint32_t)payload[wordIndex] << 24;
+    if (bytesPerLed != 3 && bytesPerLed != 4) return (uint32_t)payload[wordIndex] << 24;
 
     const size_t offset = wordIndex * bytesPerLed;
     if (bytesPerLed == 3)
@@ -105,4 +108,32 @@ inline uint32_t oneWirePackedWordAt(const uint8_t* payload, uint8_t bytesPerLed,
         return ((uint32_t)payload[offset] << 24) | ((uint32_t)payload[offset + 1] << 16) |
                ((uint32_t)payload[offset + 2] << 8) | payload[offset + 3];
     return 0;
+}
+
+/** Store an 8-bit logical channel in a one-wire payload. */
+inline void oneWireStoreChannel(uint8_t* payload, uint8_t bytesPerChannel,
+                                uint8_t channelIndex, uint8_t value)
+{
+    if (!payload || bytesPerChannel == 0) return;
+    uint8_t* channel = payload + (size_t)channelIndex * bytesPerChannel;
+    if (bytesPerChannel == 1)
+    {
+        channel[0] = value;
+        return;
+    }
+
+    // SM16825 accepts 16-bit, MSB-first values. Repeating the incoming 8-bit
+    // component retains the exact endpoints and maps v to v * 257.
+    channel[0] = value;
+    channel[1] = value;
+}
+
+/** Write the SM16825 current-control trailer (all channels at minimum gain). */
+inline void oneWireWriteSm16825Settings(uint8_t* settings)
+{
+    if (!settings) return;
+    settings[0] = 0x00;
+    settings[1] = 0x00;
+    settings[2] = 0x00;
+    settings[3] = 0x1F; // action=normal, reserved bits must be one
 }

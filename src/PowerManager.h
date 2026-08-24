@@ -82,6 +82,8 @@ namespace LedProfiles
     static const LedCurrentProfile SK6812_RGBCCT(20, 20, 20, 20, 20);
     static const LedCurrentProfile WS2814_RGBCCT(20, 20, 20, 20, 20);
     static const LedCurrentProfile WS2805_RGBCCT(20, 20, 20, 20, 20);
+    // SM16825's frame trailer selects its documented 10.2mA minimum gain.
+    static const LedCurrentProfile SM16825(11, 11, 11, 11, 11);
 
     // Conservative estimate for 5-channel
     static const LedCurrentProfile CONSERVATIVE_5CH(20, 20, 20, 20, 20);
@@ -784,6 +786,8 @@ class PowerManager
                 return LedProfiles::WS2814_RGBCCT;
             case LedProtocol::WS2805_RGBCCT:
                 return LedProfiles::WS2805_RGBCCT;
+            case LedProtocol::SM16825:
+                return LedProfiles::SM16825;
 
             // SPI protocols
             case LedProtocol::APA102:

@@ -33,6 +33,8 @@ struct OneWireTimingProfile
     bool inverted;
     OneWirePioCadence pioCadence;
     uint8_t channelCount;
+    uint8_t bytesPerChannel;
+    uint8_t frameSettingsBytes;
     ColorOrder defaultColorOrder;
     bool refreshRequired;
 };
@@ -115,24 +117,29 @@ inline const OneWireTimingProfile& getOneWireTimingProfile(LedProtocol protocol)
 {
     static constexpr OneWireTimingProfile ws2812x = {
         "WS2812x", 800000, 400, 850, 800, 450, 300, false, OneWirePioCadence::CANONICAL_10,
-        3, ColorOrder::GRB, false};
+        3, 1, 0, ColorOrder::GRB, false};
     static constexpr OneWireTimingProfile sk6812_rgbw = {
         "SK6812/SK6805", 800000, 400, 850, 800, 450, 80, false, OneWirePioCadence::CANONICAL_10,
-        4, ColorOrder::GRBW, false};
+        4, 1, 0, ColorOrder::GRBW, false};
     static constexpr OneWireTimingProfile sk6812_rgbcct = {
         "SK6812/WS2814 RGBCCT", 800000, 400, 850, 800, 450, 80, false, OneWirePioCadence::CANONICAL_10,
-        5, ColorOrder::GRBCCT, false};
+        5, 1, 0, ColorOrder::GRBCCT, false};
     static constexpr OneWireTimingProfile ws2811_400 = {
         "WS2811-400", 400000, 500, 2000, 1200, 1300, 50, false, OneWirePioCadence::SIX_STEP,
-        3, ColorOrder::RGB, false};
+        3, 1, 0, ColorOrder::RGB, false};
     static constexpr OneWireTimingProfile ws2805 = {
         // WS2805 needs a 1.25 us bit cell. The former 917 kHz profile produced
         // a 1.09 us cell and caused periodic colour corruption and white flashes.
         "WS2805", 800000, 312, 938, 938, 312, 300, false, OneWirePioCadence::FOUR_STEP,
-        5, ColorOrder::GRBCCT, false};
+        5, 1, 0, ColorOrder::GRBCCT, false};
+    static constexpr OneWireTimingProfile sm16825 = {
+        // SM16825 uses the WS2812x waveform, 16-bit MSB-first channels and
+        // a four-byte current-control trailer at the end of each frame.
+        "SM16825", 800000, 400, 850, 800, 450, 300, false, OneWirePioCadence::CANONICAL_10,
+        5, 2, 4, ColorOrder::RGBCTW, false};
     static constexpr OneWireTimingProfile tm1814 = {
         "TM1814", 800000, 360, 890, 720, 530, 200, true, OneWirePioCadence::THREE_STEP,
-        4, ColorOrder::GRBW, false};
+        4, 1, 0, ColorOrder::GRBW, false};
 
     switch (protocol)
     {
@@ -150,6 +157,9 @@ inline const OneWireTimingProfile& getOneWireTimingProfile(LedProtocol protocol)
 
         case LedProtocol::WS2805_RGBCCT:
             return ws2805;
+
+        case LedProtocol::SM16825:
+            return sm16825;
 
         case LedProtocol::TM1814:
             return tm1814;

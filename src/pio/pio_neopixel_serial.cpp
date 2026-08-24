@@ -191,6 +191,13 @@ static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, u
     #endif
 }
 
+static void write_frame_settings(pio_neopixel_serial_inst_t* inst)
+{
+    if (!inst || !inst->buffer || inst->protocol != LedProtocol::SM16825 ||
+        inst->frameSettingsBytes != 4) return;
+    oneWireWriteSm16825Settings(inst->buffer + (size_t)inst->ledCount * inst->bytesPerLed);
+}
+
 // ========== RESOURCE DETECTION (STATIC HELPERS) ==========
 
 /**
@@ -286,18 +293,22 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
 
     // Protocol selection owns timing, channel count and byte order together.
     const OneWireTimingProfile& profile = getOneWireTimingProfile(protocol);
-    _inst->bytesPerLed = profile.channelCount;
+    _inst->channelCount = profile.channelCount;
+    _inst->bytesPerChannel = profile.bytesPerChannel;
+    _inst->bytesPerLed = profile.channelCount * profile.bytesPerChannel;
+    _inst->frameSettingsBytes = profile.frameSettingsBytes;
     _inst->colorOrder = profile.defaultColorOrder;
     _inst->frequency = profile.bitRateHz;
 
     // Allocate buffers
     // CRITICAL: Cast to size_t to prevent overflow (e.g., 22000 * 3 = 66000 > uint16_t max 65535)
-    _inst->bufferSize = (size_t)ledCount * _inst->bytesPerLed;
+    _inst->bufferSize = (size_t)ledCount * _inst->bytesPerLed + _inst->frameSettingsBytes;
     _inst->buffer = new uint8_t[_inst->bufferSize];
 
     if (_inst->buffer)
     {
         memset(_inst->buffer, 0, _inst->bufferSize);
+        write_frame_settings(_inst);
     }
 
     // DMA buffer (if needed)
@@ -312,7 +323,7 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     {
         // Calculate DMA buffer size based on LED type
         // CRITICAL: Cast to size_t to prevent overflow
-        if (_inst->bytesPerLed == 5)
+        if (_inst->bytesPerLed != 3 && _inst->bytesPerLed != 4)
         {
             // Each word contains one byte at bits 31..24. With 8-bit
             // autopull the PIO emits exactly that byte and immediately pulls
@@ -341,7 +352,7 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     {
         _inst->dmaBuffer = nullptr;
         _inst->dmaBufferSize = 0;
-        _inst->fifoWordBits = _inst->bytesPerLed == 5 ? 8 : 0;
+        _inst->fifoWordBits = (_inst->bytesPerLed != 3 && _inst->bytesPerLed != 4) ? 8 : 0;
     }
 }
 
@@ -595,8 +606,8 @@ bool PIO_NeoPixel_Serial::initPIO()
 {
     if (!_inst) return false;
 
-    bool rgbw = (_inst->bytesPerLed == 4);
-    bool rgbcct = (_inst->bytesPerLed == 5);
+    bool rgbw = (_inst->channelCount == 4);
+    bool byteStream = (_inst->bytesPerLed != 3 && _inst->bytesPerLed != 4);
 
     const OneWireTimingProfile& timing = getOneWireTimingProfile(_inst->protocol);
     const PioCadenceConfig cadence = get_pio_cadence_config(timing.pioCadence);
@@ -763,12 +774,12 @@ bool PIO_NeoPixel_Serial::initPIO()
 
     // Initialize the PIO program with calculated clock divider
     neopixel_serial_program_init(_inst->pio, _inst->sm, _inst->offset, _inst->pin, clkdiv,
-                                 rgbw, rgbcct, timing.inverted, _inst->fifoWordBits);
+                                 rgbw, byteStream, timing.inverted, _inst->fifoWordBits);
 
     #ifdef OPENKNX_DEBUG
     const char* pioName = (_inst->pio == pio0) ? "PIO0" : (_inst->pio == pio1) ? "PIO1"
                                                                                : "PIO2";
-    const char* channelType = rgbcct ? "RGBCCT" : (rgbw ? "RGBW" : "RGB");
+    const char* channelType = byteStream ? (ProtocolHelper::is16Bit(_inst->protocol) ? "SM16825" : "RGBCCT") : (rgbw ? "RGBW" : "RGB");
     openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "NeoPixel PIO: %s/SM%d, GPIO%d, %.0fkHz, %s",
                                           pioName, _inst->sm, _inst->pin, _inst->actual_bitrate / 1000.0f, channelType);
     #endif
@@ -801,8 +812,6 @@ bool PIO_NeoPixel_Serial::initDMA()
 {
     // All modes use packed, 32-bit DMA words. RGBCCT uses one word per byte
     // because its 40-bit pixel width is not divisible by a FIFO word.
-    bool isRGBCCT = (_inst->bytesPerLed == 5);
-
     if (!_inst) return false;
     if (!_inst->dmaBuffer) return false;
 
@@ -824,7 +833,7 @@ bool PIO_NeoPixel_Serial::initDMA()
     void* srcBuffer;
     size_t transferCount;
 
-    if (isRGBCCT)
+    if (_inst->bytesPerLed != 3 && _inst->bytesPerLed != 4)
     {
         // RGBCCT: one valid byte in bits 31..24 of each word.
         // The PIO's 8-bit autopull emits the top byte and immediately pulls
@@ -934,7 +943,7 @@ bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
 bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
     if (!_inst || !_inst->buffer || index >= _inst->ledCount) return false;
-    if (_inst->bytesPerLed < 4) return false; // Not RGBW
+    if (_inst->channelCount < 4) return false; // Not RGBW
 
     // CRITICAL: Don't modify buffer while DMA transfer is in progress!
     if (_inst->busy) return false;
@@ -960,7 +969,7 @@ bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
 bool PIO_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
 {
     if (!_inst || !_inst->buffer || index >= _inst->ledCount) return false;
-    if (_inst->bytesPerLed < 5) return false; // Not RGBCCT
+    if (_inst->channelCount < 5) return false; // Not RGBCCT
 
     // CRITICAL: Don't modify buffer while DMA transfer is in progress!
     if (_inst->busy) return false;
@@ -1005,71 +1014,47 @@ void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
     // omitted by that order so an earlier white value cannot leak into a frame.
     memset(_inst->buffer + offset, 0, _inst->bytesPerLed);
 
+    const auto setChannel = [&](uint8_t channel, uint8_t value) {
+        oneWireStoreChannel(_inst->buffer + offset, _inst->bytesPerChannel, channel, value);
+    };
+
     switch (_inst->colorOrder)
     {
         case ColorOrder::RGB:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
+            setChannel(0, r); setChannel(1, g); setChannel(2, b);
             break;
 
         case ColorOrder::GRB:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
+            setChannel(0, g); setChannel(1, r); setChannel(2, b);
             break;
 
         case ColorOrder::BGR:
-            _inst->buffer[offset] = b;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = r;
+            setChannel(0, b); setChannel(1, g); setChannel(2, r);
             break;
 
         case ColorOrder::RGBW:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww; // Use ww as single white
+            setChannel(0, r); setChannel(1, g); setChannel(2, b); setChannel(3, ww);
             break;
 
         case ColorOrder::GRBW:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww; // Use ww as single white
+            setChannel(0, g); setChannel(1, r); setChannel(2, b); setChannel(3, ww);
             break;
 
         // 5-channel color orders (RGBCCT)
         case ColorOrder::RGBCCT:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww;
-            _inst->buffer[offset + 4] = cw;
+            setChannel(0, r); setChannel(1, g); setChannel(2, b); setChannel(3, ww); setChannel(4, cw);
             break;
 
         case ColorOrder::GRBCCT:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww;
-            _inst->buffer[offset + 4] = cw;
+            setChannel(0, g); setChannel(1, r); setChannel(2, b); setChannel(3, ww); setChannel(4, cw);
             break;
 
         case ColorOrder::RGBCTW:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = cw; // Cool white first
-            _inst->buffer[offset + 4] = ww; // Warm white second
+            setChannel(0, r); setChannel(1, g); setChannel(2, b); setChannel(3, cw); setChannel(4, ww);
             break;
 
         case ColorOrder::GRBCTW:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = cw; // Cool white first
-            _inst->buffer[offset + 4] = ww; // Warm white second
+            setChannel(0, g); setChannel(1, r); setChannel(2, b); setChannel(3, cw); setChannel(4, ww);
             break;
 
         default:
@@ -1260,10 +1245,10 @@ bool PIO_NeoPixel_Serial::sendDataDMA()
 {
     if (!_inst || _inst->dmaChannel < 0) return false;
 
-    bool isRGBCCT = (_inst->bytesPerLed == 5);
+    bool byteStream = (_inst->bytesPerLed != 3 && _inst->bytesPerLed != 4);
     void* srcBuffer;
 
-    if (isRGBCCT)
+    if (byteStream)
     {
         // Expand each payload byte to the MSB of its own FIFO word. Combined
         // with 8-bit autopull this preserves the exact 40-bit pixel stream.
@@ -1411,6 +1396,7 @@ void PIO_NeoPixel_Serial::clear()
     if (_inst->busy) return;
 
     memset(_inst->buffer, 0, _inst->bufferSize);
+    write_frame_settings(_inst);
 }
 
 uint32_t PIO_NeoPixel_Serial::getTransferTimeoutUs() const
@@ -1453,8 +1439,8 @@ uint32_t PIO_NeoPixel_Serial::getReadyAtUs() const
 DriverCapabilities PIO_NeoPixel_Serial::getCapabilities() const
 {
     DriverCapabilities caps = {};
-    caps.supportsRGBW = (_inst && _inst->bytesPerLed >= 4);
-    caps.supportsRGBCCT = (_inst && _inst->bytesPerLed == 5);
+    caps.supportsRGBW = (_inst && _inst->channelCount >= 4);
+    caps.supportsRGBCCT = (_inst && _inst->channelCount == 5);
     caps.supportsDMA = (_inst && _inst->useDMA);
     caps.supportsAsync = caps.supportsDMA;
     caps.maxFrequency = _inst ? _inst->frequency : 800000;

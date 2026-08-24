@@ -40,6 +40,7 @@ enum class LedProtocol
     SK6812_RGBCCT, // 5V RGBCCT (5-channel), 800kHz, GRBCCT order
     WS2814_RGBCCT, // 12V RGBCCT (5-channel), 800kHz, GRBCCT order
     WS2805_RGBCCT, // 12V/24V RGBCCT (5-channel), 800kHz, GRBCCT order
+    SM16825,       // 5V/12V RGBCW, 16-bit channels, 800kHz, RGBCTW order
 
     // SPI Protocols (Separate clock and data)
     APA102,       // 5V RGB+Brightness, up to 20MHz (original chip)
@@ -102,7 +103,7 @@ enum class ColorOrder
 struct DriverCapabilities
 {
     bool supportsRGBW;     // Supports 32-bit RGBW (4 channels)
-    bool supportsRGBCCT;   // Supports 40-bit RGBCCT (5 channels)
+    bool supportsRGBCCT;   // Supports five-channel RGBCCT/RGBCW LEDs
     bool supportsDMA;      // DMA transfer available
     bool supportsAsync;    // Non-blocking show() possible
     uint32_t maxFrequency; // Maximum update frequency (Hz)
@@ -186,7 +187,8 @@ namespace ProtocolHelper
         // 5-Channel RGBCCT protocols (also 1-Wire)
         if (protocol == LedProtocol::SK6812_RGBCCT ||
             protocol == LedProtocol::WS2814_RGBCCT ||
-            protocol == LedProtocol::WS2805_RGBCCT)
+            protocol == LedProtocol::WS2805_RGBCCT ||
+            protocol == LedProtocol::SM16825)
             return true;
         return false;
     }
@@ -218,7 +220,14 @@ namespace ProtocolHelper
     {
         return protocol == LedProtocol::SK6812_RGBCCT ||
                protocol == LedProtocol::WS2814_RGBCCT ||
-               protocol == LedProtocol::WS2805_RGBCCT;
+               protocol == LedProtocol::WS2805_RGBCCT ||
+               protocol == LedProtocol::SM16825;
+    }
+
+    /** Check whether a protocol stores each colour channel as 16 bits. */
+    inline bool is16Bit(LedProtocol protocol)
+    {
+        return protocol == LedProtocol::SM16825;
     }
 
     /**
@@ -270,6 +279,9 @@ namespace ProtocolHelper
             case LedProtocol::WS2805_RGBCCT:
                 return ColorOrder::GRBCCT;
 
+            case LedProtocol::SM16825:
+                return ColorOrder::RGBCTW;
+
             case LedProtocol::WS2812:
             case LedProtocol::WS2812B:
             case LedProtocol::WS2813:
@@ -285,7 +297,7 @@ namespace ProtocolHelper
      */
     inline uint8_t getBytesPerLed(LedProtocol protocol)
     {
-        if (isRGBCCT(protocol)) return 5;
+        if (isRGBCCT(protocol)) return is16Bit(protocol) ? 10 : 5;
         if (isRGBW(protocol)) return 4;
         return 3;
     }
@@ -318,13 +330,21 @@ namespace ProtocolHelper
         return getBytesPerLed(order);
     }
 
+    /** Get number of logical colour channels transmitted by a protocol. */
+    inline uint8_t getChannelCount(LedProtocol protocol)
+    {
+        if (isRGBCCT(protocol)) return 5;
+        if (isRGBW(protocol)) return 4;
+        return 3;
+    }
+
     /**
      * Check whether a color order fits in the protocol's physical frame.
      * Narrower orders are valid and intentionally disable unused white channels.
      */
     inline bool isColorOrderCompatible(LedProtocol protocol, ColorOrder order)
     {
-        return order == ColorOrder::NONE || getBytesPerLed(order) <= getBytesPerLed(protocol);
+        return order == ColorOrder::NONE || getChannelCount(order) <= getChannelCount(protocol);
     }
 
     /**

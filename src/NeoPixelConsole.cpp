@@ -175,6 +175,7 @@ static const char* getProtocolName(LedProtocol protocol)
         case LedProtocol::SK6812_RGBCCT: return "SK6812_RGBCCT";
         case LedProtocol::WS2814_RGBCCT: return "WS2814_RGBCCT";
         case LedProtocol::WS2805_RGBCCT: return "WS2805_RGBCCT";
+        case LedProtocol::SM16825: return "SM16825";
         case LedProtocol::APA102: return "APA102";
         case LedProtocol::APA102_CLONE: return "APA102_CLONE";
         case LedProtocol::SK9822: return "SK9822";
@@ -1385,6 +1386,7 @@ bool NeoPixel::processInfoCommand()
                     case LedProtocol::SK6812_RGBCCT: protocolName = "SK6812_RGBCCT"; break;
                     case LedProtocol::WS2814_RGBCCT: protocolName = "WS2814_RGBCCT"; break;
                     case LedProtocol::WS2805_RGBCCT: protocolName = "WS2805_RGBCCT"; break;
+                    case LedProtocol::SM16825: protocolName = "SM16825"; break;
                     default: protocolName = "Unknown"; break;
                 }
 

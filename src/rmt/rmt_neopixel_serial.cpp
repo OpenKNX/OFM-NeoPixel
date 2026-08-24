@@ -56,6 +56,13 @@ static bool make_balanced_rmt_symbols(uint16_t t0h, uint16_t t0l,
     return true;
 }
 
+static void write_frame_settings(rmt_neopixel_serial_inst_t* inst)
+{
+    if (!inst || !inst->buffer || inst->protocol != LedProtocol::SM16825 ||
+        inst->frameSettingsBytes != 4) return;
+    oneWireWriteSm16825Settings(inst->buffer + (size_t)inst->ledCount * inst->bytesPerLed);
+}
+
 // ============================================================================
 // Static Resource Detection Helpers (ESP32)
 // ============================================================================
@@ -150,7 +157,10 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
     _inst->ledCount = ledCount;
     _inst->protocol = protocol;
     const OneWireTimingProfile& timing = getOneWireTimingProfile(protocol);
-    _inst->bytesPerLed = timing.channelCount;
+    _inst->channelCount = timing.channelCount;
+    _inst->bytesPerChannel = timing.bytesPerChannel;
+    _inst->bytesPerLed = timing.channelCount * timing.bytesPerChannel;
+    _inst->frameSettingsBytes = timing.frameSettingsBytes;
     _inst->colorOrder = timing.defaultColorOrder;
     _inst->channel = nullptr;
     _inst->encoder = nullptr;
@@ -165,11 +175,12 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
     _inst->recoveryCount = 0;
 
     // Allocate buffer
-    _inst->bufferSize = ledCount * _inst->bytesPerLed;
+    _inst->bufferSize = (size_t)ledCount * _inst->bytesPerLed + _inst->frameSettingsBytes;
     _inst->buffer = (uint8_t*)malloc(_inst->bufferSize);
     if (_inst->buffer)
     {
         memset(_inst->buffer, 0, _inst->bufferSize);
+        write_frame_settings(_inst);
     }
 }
 
@@ -355,7 +366,7 @@ bool RMT_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
 bool RMT_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
     if (!_inst || !_inst->buffer || index >= _inst->ledCount) return false;
-    if (_inst->bytesPerLed < 4) return false; // Not RGBW
+    if (_inst->channelCount < 4) return false; // Not RGBW
 
     rgbToBuffer(index, r, g, b, w, 0);
     return true;
@@ -378,7 +389,7 @@ bool RMT_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t
 bool RMT_NeoPixel_Serial::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
 {
     if (!_inst || !_inst->buffer || index >= _inst->ledCount) return false;
-    if (_inst->bytesPerLed < 5) return false; // Not RGBCCT
+    if (_inst->channelCount < 5) return false; // Not RGBCCT
 
     rgbToBuffer(index, r, g, b, ww, cw);
     return true;
@@ -394,71 +405,47 @@ void RMT_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
     // omitted by that order so an earlier white value cannot leak into a frame.
     memset(_inst->buffer + offset, 0, _inst->bytesPerLed);
 
+    const auto setChannel = [&](uint8_t channel, uint8_t value) {
+        oneWireStoreChannel(_inst->buffer + offset, _inst->bytesPerChannel, channel, value);
+    };
+
     switch (_inst->colorOrder)
     {
         case ColorOrder::RGB:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
+            setChannel(0, r); setChannel(1, g); setChannel(2, b);
             break;
 
         case ColorOrder::GRB:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
+            setChannel(0, g); setChannel(1, r); setChannel(2, b);
             break;
 
         case ColorOrder::BGR:
-            _inst->buffer[offset] = b;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = r;
+            setChannel(0, b); setChannel(1, g); setChannel(2, r);
             break;
 
         case ColorOrder::RGBW:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww; // Use ww as single white
+            setChannel(0, r); setChannel(1, g); setChannel(2, b); setChannel(3, ww);
             break;
 
         case ColorOrder::GRBW:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww; // Use ww as single white
+            setChannel(0, g); setChannel(1, r); setChannel(2, b); setChannel(3, ww);
             break;
 
         // 5-channel color orders (RGBCCT)
         case ColorOrder::RGBCCT:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww;
-            _inst->buffer[offset + 4] = cw;
+            setChannel(0, r); setChannel(1, g); setChannel(2, b); setChannel(3, ww); setChannel(4, cw);
             break;
 
         case ColorOrder::GRBCCT:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww;
-            _inst->buffer[offset + 4] = cw;
+            setChannel(0, g); setChannel(1, r); setChannel(2, b); setChannel(3, ww); setChannel(4, cw);
             break;
 
         case ColorOrder::RGBCTW:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = cw; // Cool white first
-            _inst->buffer[offset + 4] = ww; // Warm white second
+            setChannel(0, r); setChannel(1, g); setChannel(2, b); setChannel(3, cw); setChannel(4, ww);
             break;
 
         case ColorOrder::GRBCTW:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = cw; // Cool white first
-            _inst->buffer[offset + 4] = ww; // Warm white second
+            setChannel(0, g); setChannel(1, r); setChannel(2, b); setChannel(3, cw); setChannel(4, ww);
             break;
 
         default:
@@ -539,13 +526,14 @@ void RMT_NeoPixel_Serial::clear()
 {
     if (!_inst || !_inst->buffer) return;
     memset(_inst->buffer, 0, _inst->bufferSize);
+    write_frame_settings(_inst);
 }
 
 DriverCapabilities RMT_NeoPixel_Serial::getCapabilities() const
 {
     DriverCapabilities caps = {};
-    caps.supportsRGBW = (_inst && _inst->bytesPerLed >= 4);
-    caps.supportsRGBCCT = (_inst && _inst->bytesPerLed == 5);
+    caps.supportsRGBW = (_inst && _inst->channelCount >= 4);
+    caps.supportsRGBCCT = (_inst && _inst->channelCount == 5);
     caps.supportsDMA = (_inst && _inst->usingDMA);
     caps.supportsAsync = false; // show() is blocking (rmt_tx_wait_all_done)
     caps.maxFrequency = 400;    // ~400Hz update rate
