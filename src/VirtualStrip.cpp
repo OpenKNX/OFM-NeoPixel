@@ -519,6 +519,8 @@ bool VirtualStrip::syncToPhysical()
         return true; // Nothing to synchronize
     }
 
+    bool allSuccess = true;
+
     // Send RGB data to each attached PhysicalStrip
     for (const auto& mapping : _physicalStrips)
     {
@@ -579,23 +581,25 @@ bool VirtualStrip::syncToPhysical()
             if (physicalIsRGBCCT && _bytesPerLed >= 5)
             {
                 // Physical strip supports RGBCCT and virtual buffer has WW+CW channels
-                pstrip->setPixel(i, r, g, b, ww, cw);
+                allSuccess = pstrip->setPixel(i, r, g, b, ww, cw) && allSuccess;
             }
             else if (physicalIsRGBW && _bytesPerLed >= 4)
             {
                 // Physical strip supports RGBW and virtual buffer has W channel
-                pstrip->setPixel(i, r, g, b, ww);
+                allSuccess = pstrip->setPixel(i, r, g, b, ww) && allSuccess;
             }
             else
             {
                 // Physical strip is RGB only, send RGB (ignore W channels if present)
-                pstrip->setPixel(i, r, g, b);
+                allSuccess = pstrip->setPixel(i, r, g, b) && allSuccess;
             }
         }
     }
 
-    _dirty = false;
-    return true;
+    // A failed write must be retried with the complete logical frame.  Clearing
+    // this flag here used to make updateAll() send a stale physical buffer.
+    if (allSuccess) _dirty = false;
+    return allSuccess;
 }
 
 /**

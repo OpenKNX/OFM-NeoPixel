@@ -210,7 +210,7 @@ class Segment
      * @param totalLength  Total length of the virtual band (all devices combined)
      * @param offset       Where this segment starts within the virtual band
      */
-    void setVirtualBand(uint16_t totalLength, uint16_t offset);
+    bool setVirtualBand(uint16_t totalLength, uint16_t offset);
     void clearVirtualBand();
     bool isVirtualBand() const { return _virtualTotalLength > 0; }
     uint16_t getVirtualTotalLength() const { return _virtualTotalLength; }
@@ -267,7 +267,7 @@ class Segment
      * @param height  Number of rows    (y-axis)
      * @param t       Wiring topology (default: ROWS_SERPENTINE — most WS2812B panels)
      */
-    void setGeometry(uint8_t width, uint8_t height,
+    bool setGeometry(uint8_t width, uint8_t height,
                      LedTopology t = LedTopology::ROWS_SERPENTINE);
 
     /**
@@ -277,7 +277,7 @@ class Segment
      * @param depth   Z-layers
      * @param t       Wiring topology
      */
-    void setGeometry(uint8_t width, uint8_t height, uint8_t depth,
+    bool setGeometry(uint8_t width, uint8_t height, uint8_t depth,
                      LedTopology t = LedTopology::ROWS_SERPENTINE_3D);
 
     /** @brief Remove matrix geometry — segment behaves as plain 1D strip. */

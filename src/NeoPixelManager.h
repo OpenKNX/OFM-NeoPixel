@@ -158,7 +158,7 @@ class NeoPixelManager
     void update(uint32_t deltaTime);        // Phase 1-4: Full pipeline (non-blocking)
     void updateEffects(uint32_t deltaTime); // Phase 1: Effect calculations only
     void applyPowerLimit();                 // Phase 2: Global power scaling
-    void syncAll();                         // Phase 3: VirtualStrip → PhysicalStrip
+    bool syncAll();                         // Phase 3: VirtualStrip → PhysicalStrip
     bool showAll();                         // Phase 4: Hardware transfer
     bool updateAll();                       // Phase 2-4: Convenience method
     bool waitForAll(uint32_t timeoutMs = 0);

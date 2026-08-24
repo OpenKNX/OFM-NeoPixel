@@ -64,6 +64,7 @@ class PhysicalStrip
     // ====================================================================
     bool init();
     bool isInitialized() const;
+    bool isValid() const { return _driver != nullptr; }
 
     // ====================================================================
     // Pixel Control

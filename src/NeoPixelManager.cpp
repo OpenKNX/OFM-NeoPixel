@@ -1,6 +1,16 @@
 #include "NeoPixelManager.h"
 #include "OpenKNX/Log/Logger.h"
 #include <Arduino.h>
+#include <algorithm>
+
+namespace
+{
+template <typename T>
+bool managerOwns(const std::vector<T*>& entries, const T* value)
+{
+    return value && std::find(entries.begin(), entries.end(), value) != entries.end();
+}
+}
 
 // ============================================================================
 // Constructor & Destructor
@@ -53,6 +63,11 @@ NeoPixelManager::~NeoPixelManager()
  */
 PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol)
 {
+    if (ledCount == 0)
+    {
+        _errorCount++;
+        return nullptr;
+    }
 #if NEOPIXEL_ENFORCE_LIMITS
     // Check if maximum number of strips reached
     if (_strips.size() >= NEOPIXEL_MAX_PHYSICAL_STRIPS)
@@ -74,8 +89,9 @@ PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedPro
 
     // Create new strip
     PhysicalStrip* strip = new PhysicalStrip(pin, ledCount, protocol);
-    if (!strip)
+    if (!strip || !strip->isValid())
     {
+        delete strip;
         _errorCount++;
         return nullptr;
     }
@@ -96,6 +112,11 @@ PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedPro
  */
 PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType)
 {
+    if (ledCount == 0)
+    {
+        _errorCount++;
+        return nullptr;
+    }
 #if NEOPIXEL_ENFORCE_LIMITS
     // Check if maximum number of strips reached
     if (_strips.size() >= NEOPIXEL_MAX_PHYSICAL_STRIPS)
@@ -127,8 +148,9 @@ PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedPro
 
     // Create new strip with explicit driver selection
     PhysicalStrip* strip = new PhysicalStrip(pin, ledCount, protocol, driverType);
-    if (!strip)
+    if (!strip || !strip->isValid())
     {
+        delete strip;
         logDebugP("NeoPixelManager: Could not create strip (Pin %d, Driver %d)",
                   pin, (int)driverType);
         _errorCount++;
@@ -152,6 +174,11 @@ PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedPro
  */
 PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol)
 {
+    if (ledCount == 0 || mosiPin == sckPin)
+    {
+        _errorCount++;
+        return nullptr;
+    }
 #if NEOPIXEL_ENFORCE_LIMITS
     // Check if maximum number of strips reached
     if (_strips.size() >= NEOPIXEL_MAX_PHYSICAL_STRIPS)
@@ -173,8 +200,9 @@ PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, u
 
     // Create new SPI strip
     PhysicalStrip* strip = new PhysicalStrip(mosiPin, ledCount, protocol, sckPin);
-    if (!strip)
+    if (!strip || !strip->isValid())
     {
+        delete strip;
         _errorCount++;
         return nullptr;
     }
@@ -197,6 +225,11 @@ PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, u
  */
 PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, DriverType driverType)
 {
+    if (ledCount == 0 || mosiPin == sckPin)
+    {
+        _errorCount++;
+        return nullptr;
+    }
 #if NEOPIXEL_ENFORCE_LIMITS
     // Check if maximum number of strips reached
     if (_strips.size() >= NEOPIXEL_MAX_PHYSICAL_STRIPS)
@@ -228,8 +261,9 @@ PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, u
 
     // Erstelle neuen SPI-Strip mit expliziter Driver-Auswahl
     PhysicalStrip* strip = new PhysicalStrip(mosiPin, ledCount, protocol, sckPin, driverType);
-    if (!strip)
+    if (!strip || !strip->isValid())
     {
+        delete strip;
         logDebugP("NeoPixelManager: Konnte SPI-Strip nicht erstellen (MOSI=%d, SCK=%d, Driver=%d)",
                   mosiPin, sckPin, (int)driverType);
         _errorCount++;
@@ -276,6 +310,11 @@ PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedPro
  */
 PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder, TimingMode timingMode)
 {
+    if (ledCount == 0)
+    {
+        _errorCount++;
+        return nullptr;
+    }
 #if NEOPIXEL_ENFORCE_LIMITS
     if (_strips.size() >= NEOPIXEL_MAX_PHYSICAL_STRIPS)
     {
@@ -294,8 +333,9 @@ PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedPro
     }
 
     PhysicalStrip* strip = new PhysicalStrip(pin, ledCount, protocol, DriverType::AUTO, timingMode);
-    if (!strip)
+    if (!strip || !strip->isValid())
     {
+        delete strip;
         _errorCount++;
         return nullptr;
     }
@@ -312,6 +352,11 @@ PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedPro
  */
 PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedProtocol protocol, DriverType driverType, ColorOrder colorOrder, TimingMode timingMode)
 {
+    if (ledCount == 0)
+    {
+        _errorCount++;
+        return nullptr;
+    }
 #if NEOPIXEL_ENFORCE_LIMITS
     if (_strips.size() >= NEOPIXEL_MAX_PHYSICAL_STRIPS)
     {
@@ -330,8 +375,9 @@ PhysicalStrip* NeoPixelManager::addStrip(uint32_t pin, uint16_t ledCount, LedPro
     }
 
     PhysicalStrip* strip = new PhysicalStrip(pin, ledCount, protocol, driverType, timingMode);
-    if (!strip)
+    if (!strip || !strip->isValid())
     {
+        delete strip;
         logDebugP("NeoPixelManager: Could not create strip (Pin %d, Driver %d)",
                   pin, (int)driverType);
         _errorCount++;
@@ -379,6 +425,11 @@ PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, u
  */
 PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, uint16_t ledCount, LedProtocol protocol, ColorOrder colorOrder, uint32_t frequencyHz)
 {
+    if (ledCount == 0 || mosiPin == sckPin || frequencyHz == 0)
+    {
+        _errorCount++;
+        return nullptr;
+    }
 #if NEOPIXEL_ENFORCE_LIMITS
     if (_strips.size() >= NEOPIXEL_MAX_PHYSICAL_STRIPS)
     {
@@ -397,8 +448,9 @@ PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, u
     }
 
     PhysicalStrip* strip = new PhysicalStrip(mosiPin, ledCount, protocol, sckPin, -1, frequencyHz);
-    if (!strip)
+    if (!strip || !strip->isValid())
     {
+        delete strip;
         _errorCount++;
         return nullptr;
     }
@@ -485,6 +537,9 @@ bool NeoPixelManager::init()
     // logDebugP("NeoPixelManager: Initializing %d strips...", _strips.size());
     logDebugP("Initializing NeoPixelManager with %d strips", _strips.size());
 
+    // A previous successful configuration must not remain operational after a
+    // later reconfiguration fails.
+    _initialized = false;
     int successCount = 0;
     for (auto strip : _strips)
     {
@@ -503,7 +558,7 @@ bool NeoPixelManager::init()
         }
     }
 
-    if (successCount == _strips.size())
+    if (!_strips.empty() && successCount == static_cast<int>(_strips.size()))
     {
         _initialized = true;
         logDebugP("NeoPixelManager: All strips initialized successfully");
@@ -1325,9 +1380,11 @@ void NeoPixelManager::rebuildPhysToVirtualMapping()
  * Handles hardware brightness and dirty flag checking
  * Call this BEFORE applyPowerLimit() and before showAll()
  */
-void NeoPixelManager::syncAll()
+bool NeoPixelManager::syncAll()
 {
-    if (!_initialized) return;
+    if (!_initialized) return false;
+
+    bool allSuccess = true;
 
     // Virtual strips are valid without segments. Rebuild every physical frame
     // from its logical virtual buffer before power limiting touches it. ABL
@@ -1338,9 +1395,15 @@ void NeoPixelManager::syncAll()
         if (vstrip)
         {
             // Hardware brightness is managed through PhysicalStripConfig.
-            vstrip->syncToPhysical();
+            if (!vstrip->syncToPhysical())
+            {
+                allSuccess = false;
+                _errorCount++;
+            }
         }
     }
+
+    return allSuccess;
 }
 
 /**
@@ -1440,7 +1503,7 @@ void NeoPixelManager::reportTransferFailure(uint32_t stripIndex, const PhysicalS
  */
 bool NeoPixelManager::updateAll()
 {
-    syncAll();         // Phase 2: VirtualStrip → PhysicalStrip (with brightness)
+    if (!syncAll()) return false; // Never show a stale physical frame.
     applyPowerLimit(); // Phase 3: ABL on PhysicalStrip buffers
     return showAll();  // Phase 4: PhysicalStrip → Hardware
 }
@@ -1729,9 +1792,9 @@ uint32_t NeoPixelManager::getMaxStrips()
 {
 #if defined(ARDUINO_ARCH_RP2040)
     #ifdef PICO_RP2350
-    return 13; // RP2350: 11 PIO + 2 SPI
+    return 11; // RP2350: every supported serial/SPI strip consumes a PIO SM
     #else
-    return 9; // RP2040: 7 PIO + 2 SPI
+    return 7; // RP2040: every supported serial/SPI strip consumes a PIO SM
     #endif
 #elif defined(ARDUINO_ARCH_ESP32)
     #if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C5)
@@ -1760,6 +1823,7 @@ bool NeoPixelManager::checkResourcesAvailable(LedProtocol protocol)
 
     bool is1Wire = ProtocolHelper::is1Wire(protocol);
     bool isSpi = ProtocolHelper::isSPI(protocol);
+    if (!is1Wire && !isSpi) return false;
 
 #if defined(ARDUINO_ARCH_RP2040)
     if (is1Wire || isSpi)
@@ -1808,7 +1872,10 @@ void NeoPixelManager::countResourceUsage(uint32_t& pioUsed, uint32_t& spiUsed, u
 
     for (const auto strip : _strips)
     {
-        if (strip && strip->isInitialized())
+        // A strip claims its hardware slot when it is accepted by the manager,
+        // not only after the later batch init.  This is essential for OAM,
+        // which creates the whole topology before it initializes it.
+        if (strip && strip->isValid())
         {
             bool is1Wire = ProtocolHelper::is1Wire(strip->getProtocol());
             bool isSpi = ProtocolHelper::isSPI(strip->getProtocol());
@@ -1846,6 +1913,12 @@ void NeoPixelManager::countResourceUsage(uint32_t& pioUsed, uint32_t& spiUsed, u
  */
 VirtualStrip* NeoPixelManager::addVirtualStrip(uint16_t totalLeds, ColorOrder colorOrder)
 {
+    if (totalLeds == 0)
+    {
+        logDebugP("NeoPixelManager: Refusing zero-length VirtualStrip");
+        _errorCount++;
+        return nullptr;
+    }
 #if NEOPIXEL_ENFORCE_LIMITS
     // Check if maximum number of virtual strips reached
     if (_virtualStrips.size() >= NEOPIXEL_MAX_VIRTUAL_STRIPS)
@@ -1883,10 +1956,27 @@ VirtualStrip* NeoPixelManager::addVirtualStrip(uint16_t totalLeds, ColorOrder co
  */
 bool NeoPixelManager::attachPhysicalToVirtual(VirtualStrip* vstrip, PhysicalStrip* pstrip, uint16_t offset)
 {
-    if (!vstrip || !pstrip)
+    if (!managerOwns(_virtualStrips, vstrip) || !managerOwns(_strips, pstrip))
     {
         _errorCount++;
         return false;
+    }
+
+    // A physical frame has a single logical producer.  Without explicit
+    // compositing, allowing a second virtual owner makes sync order decide
+    // which pixels survive.
+    for (const auto* existing : _virtualStrips)
+    {
+        if (existing == vstrip) continue;
+        for (uint16_t i = 0; existing && i < existing->getPhysicalStripCount(); ++i)
+        {
+            if (existing->getPhysicalStrip(i) == pstrip)
+            {
+                logDebugP("NeoPixelManager: Physical strip already belongs to another VirtualStrip");
+                _errorCount++;
+                return false;
+            }
+        }
     }
 
     if (!vstrip->attachPhysicalStrip(pstrip, offset)) return false;
@@ -1899,7 +1989,7 @@ bool NeoPixelManager::attachPhysicalToVirtual(VirtualStrip* vstrip, PhysicalStri
 
 bool NeoPixelManager::detachPhysicalFromVirtual(VirtualStrip* vstrip, PhysicalStrip* pstrip)
 {
-    if (!vstrip || !pstrip)
+    if (!managerOwns(_virtualStrips, vstrip) || !managerOwns(_strips, pstrip))
     {
         _errorCount++;
         return false;
@@ -1947,7 +2037,7 @@ Segment* NeoPixelManager::addSegment(VirtualStrip* vstrip, uint16_t startLed, ui
     }
 #endif
 
-    if (!vstrip)
+    if (!managerOwns(_virtualStrips, vstrip))
     {
         _errorCount++;
         return nullptr;
@@ -1993,7 +2083,7 @@ Segment* NeoPixelManager::getSegment(uint32_t index)
  */
 bool NeoPixelManager::attachEffect(Segment* segment, Effect* effect)
 {
-    if (!segment || !effect)
+    if (!managerOwns(_segments, segment) || !effect)
     {
         _errorCount++;
         return false;

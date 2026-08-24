@@ -7,10 +7,20 @@
 // Effektkette helpers
 // ============================================================================
 
-void Segment::setVirtualBand(uint16_t totalLength, uint16_t offset)
+bool Segment::setVirtualBand(uint16_t totalLength, uint16_t offset)
 {
+    // Virtual-band coordinates are logical pixels, so grouping/spacing must
+    // be reflected in the window validation.
+    if (totalLength == 0 || offset >= totalLength ||
+        static_cast<uint32_t>(offset) + _virtualLength > totalLength)
+    {
+        logErrorP("Segment: invalid virtual band total=%u offset=%u length=%u",
+                  totalLength, offset, _virtualLength);
+        return false;
+    }
     _virtualTotalLength = totalLength;
     _virtualOffset      = offset;
+    return true;
 }
 
 void Segment::clearVirtualBand()
@@ -38,7 +48,7 @@ bool Segment::translateVirtualIndex(uint16_t& index) const
     // Virtual band: translate band index → local index
     if (index < _virtualOffset) return false;
     uint16_t local = index - _virtualOffset;
-    if (local >= _physicalLength) return false;
+    if (local >= _virtualLength) return false;
     index = local;
     return true;
 }
@@ -561,8 +571,15 @@ void Segment::recalculateVirtualLength()
     else
     {
         // Calculate how many complete groups fit in physical length
-        uint16_t stepSize = _grouping + _spacing;
-        _virtualLength = (_physicalLength + _spacing) / stepSize; // Round up for partial groups
+        const uint32_t stepSize = static_cast<uint32_t>(_grouping) + _spacing;
+        if (stepSize == 0)
+        {
+            _virtualLength = 0;
+            logErrorP("Segment: grouping/spacing overflow");
+            return;
+        }
+        const uint32_t logicalLength = (static_cast<uint32_t>(_physicalLength) + _spacing) / stepSize;
+        _virtualLength = logicalLength > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(logicalLength);
 
         if (_virtualLength == 0)
         {
@@ -599,8 +616,10 @@ uint16_t Segment::mapVirtualToPhysical(uint16_t virtualIndex) const
     else
     {
         // Calculate physical start position for this virtual pixel
-        uint16_t stepSize = _grouping + _spacing;
-        physicalIndex = virtualIndex * stepSize;
+        const uint32_t stepSize = static_cast<uint32_t>(_grouping) + _spacing;
+        const uint32_t mapped = static_cast<uint32_t>(virtualIndex) * stepSize;
+        if (stepSize == 0 || mapped >= _physicalLength) return _physicalLength;
+        physicalIndex = static_cast<uint16_t>(mapped);
     }
 
     // Apply offset with wrap-around
@@ -616,20 +635,33 @@ uint16_t Segment::mapVirtualToPhysical(uint16_t virtualIndex) const
 // 2D / 3D Matrix Geometry
 // ============================================================================
 
-void Segment::setGeometry(uint8_t width, uint8_t height, LedTopology t)
+bool Segment::setGeometry(uint8_t width, uint8_t height, LedTopology t)
 {
+    if (width == 0 || height == 0 || static_cast<uint32_t>(width) * height > _physicalLength)
+    {
+        logErrorP("Segment: invalid 2D geometry %ux%u for %u LEDs", width, height, _physicalLength);
+        return false;
+    }
     _geo.width    = width;
     _geo.height   = height;
     _geo.depth    = 0;
     _geo.topology = t;
+    return true;
 }
 
-void Segment::setGeometry(uint8_t width, uint8_t height, uint8_t depth, LedTopology t)
+bool Segment::setGeometry(uint8_t width, uint8_t height, uint8_t depth, LedTopology t)
 {
+    if (width == 0 || height == 0 || depth == 0 ||
+        static_cast<uint32_t>(width) * height * depth > _physicalLength)
+    {
+        logErrorP("Segment: invalid 3D geometry %ux%ux%u for %u LEDs", width, height, depth, _physicalLength);
+        return false;
+    }
     _geo.width    = width;
     _geo.height   = height;
     _geo.depth    = depth;
     _geo.topology = t;
+    return true;
 }
 
 /**
@@ -714,22 +746,21 @@ uint16_t Segment::xyToIndex(uint8_t x, uint8_t y) const
 uint16_t Segment::xyzToIndex(uint8_t x, uint8_t y, uint8_t z) const
 {
     if (!_geo.is3D()) return 0xFFFF;
-    if (z >= _geo.depth) return 0xFFFF;
+    if (x >= _geo.width || y >= _geo.height || z >= _geo.depth) return 0xFFFF;
 
-    uint16_t layerSize = (uint16_t)_geo.width * _geo.height;
-
-    // Temporarily treat as 2D for the xy part
-    LedGeometry geo2d = _geo;
-    geo2d.depth = 0;
-
-    // Inline the 2D index calculation (can't call xyToIndex on modified geo)
-    uint16_t xyIdx;
-    if ((y & 1) == 0)
-        xyIdx = (uint16_t)y * _geo.width + x;
-    else
-        xyIdx = (uint16_t)y * _geo.width + (_geo.width - 1 - x);
-
-    uint16_t index = z * layerSize + xyIdx;
+    const uint32_t layerSize = static_cast<uint32_t>(_geo.width) * _geo.height;
+    // xyToIndex applies the configured topology and validates the local layer
+    // against the same physical-length bound.  Calculate it locally so a 3D
+    // segment is not rejected merely because one layer is shorter than total.
+    uint32_t xyIdx;
+    switch (_geo.topology)
+    {
+        case LedTopology::ROWS_SERPENTINE: xyIdx = static_cast<uint32_t>(y) * _geo.width + ((y & 1) ? (_geo.width - 1 - x) : x); break;
+        case LedTopology::COLS_SERPENTINE: xyIdx = static_cast<uint32_t>(x) * _geo.height + ((x & 1) ? (_geo.height - 1 - y) : y); break;
+        case LedTopology::COLS_LINEAR: xyIdx = static_cast<uint32_t>(x) * _geo.height + y; break;
+        default: xyIdx = static_cast<uint32_t>(y) * _geo.width + x; break;
+    }
+    const uint32_t index = static_cast<uint32_t>(z) * layerSize + xyIdx;
     if (index >= _physicalLength) return 0xFFFF;
     return index;
 }
@@ -844,4 +875,3 @@ bool Segment::setPixelXYZ(uint8_t x, uint8_t y, uint8_t z, uint8_t r, uint8_t g,
     if (idx == 0xFFFF) return false;
     return setPixel(idx, r, g, b);
 }
-
