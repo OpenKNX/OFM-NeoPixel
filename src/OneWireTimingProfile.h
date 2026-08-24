@@ -18,7 +18,8 @@ enum class OneWirePioCadence : uint8_t
     CANONICAL_10, // T0H:T0L:T1H:T1L = 3:7:6:4
     THREE_STEP,   // short/long HIGH = 1/3 and 2/3 of one bit cell
     FOUR_STEP,    // short/long HIGH = 1/4 and 3/4 of one bit cell
-    SIX_STEP      // short/long HIGH = 1/6 and 3/6 of one bit cell
+    SIX_STEP,     // short/long HIGH = 1/6 and 3/6 of one bit cell
+    WS2805_10     // WS2805-safe waveform: 3:7:5:5
 };
 
 struct OneWireTimingProfile
@@ -68,6 +69,11 @@ inline bool oneWireMakeBitrateOverride(const OneWireTimingProfile& profile,
     uint8_t oneHighNumerator = 6;
     switch (profile.pioCadence)
     {
+        case OneWirePioCadence::WS2805_10:
+            denominator = 10;
+            zeroHighNumerator = 3;
+            oneHighNumerator = 5;
+            break;
         case OneWirePioCadence::THREE_STEP:
             denominator = 3;
             zeroHighNumerator = 1;
@@ -131,9 +137,10 @@ inline const OneWireTimingProfile& getOneWireTimingProfile(LedProtocol protocol)
         "WS2811-400", 400000, 500, 2000, 1200, 1300, 50, false, OneWirePioCadence::SIX_STEP,
         3, 1, 0, ColorOrder::GRB, false};
     static constexpr OneWireTimingProfile ws2805 = {
-        // Match WLED's NeoPixelBus profile. RMT emits these pulses exactly;
-        // RP2040 uses NeoPixelBus's 917.431 kHz four-step approximation.
-        "WS2805", 917431, 300, 790, 790, 300, 300, false, OneWirePioCadence::FOUR_STEP,
+        // Worldsemi specifies TH+TL >= 1.25 us and every one-bit phase >= 580 ns.
+        // RMT emits the centered 300/950 and 650/600 ns waveform exactly. RP2040
+        // uses a 10-cycle 3:7:5:5 approximation that remains inside every limit.
+        "WS2805", 800000, 300, 950, 650, 600, 300, false, OneWirePioCadence::WS2805_10,
         5, 1, 0, ColorOrder::RGBCCT, false};
     static constexpr OneWireTimingProfile sm16825 = {
         // SM16825 uses the WS2812x waveform, 16-bit MSB-first channels and

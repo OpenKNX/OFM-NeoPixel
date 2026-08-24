@@ -60,6 +60,20 @@ static const pio_program_t neopixel_serial_program = {
     .origin = -1,
 };
 
+// WS2805 requires both halves of a one bit to be at least 580 ns. At 800 kHz,
+// this 3:7:5:5 cadence yields 375/875 ns for zero and 625/625 ns for one.
+static const uint16_t neopixel_ws2805_program_instructions[] = {
+    0x6421, // out x, 1 side 0 [4]  -> five LOW cycles
+    0x1223, // jmp !x, 3 side 1 [2] -> three HIGH cycles
+    0x1100, // jmp 0      side 1 [1] -> one bit: two more HIGH cycles
+    0xa142, // nop        side 0 [1] -> zero bit: two more LOW cycles
+};
+static const pio_program_t neopixel_ws2805_program = {
+    .instructions = neopixel_ws2805_program_instructions,
+    .length = 4,
+    .origin = -1,
+};
+
 // Compact cadence variants for protocols whose HIGH pulse ratios differ from
 // the canonical WS2812x/SK6812 3:7:6:4 waveform. Each program has the same
 // control flow and four instructions, so it can use the common setup path.
@@ -110,6 +124,8 @@ static PioCadenceConfig get_pio_cadence_config(OneWirePioCadence cadence)
 {
     switch (cadence)
     {
+        case OneWirePioCadence::WS2805_10:
+            return {&neopixel_ws2805_program, 10, 5};
         case OneWirePioCadence::THREE_STEP:
             return {&neopixel_three_step_program, 3, 2};
         case OneWirePioCadence::FOUR_STEP:

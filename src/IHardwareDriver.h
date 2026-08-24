@@ -384,7 +384,7 @@ namespace ProtocolHelper
     {
         if (protocol == LedProtocol::WS2805_RGBCCT)
         {
-            return 917431; // WLED/NeoPixelBus WS2805 profile (1.09 us bit cell)
+            return 800000; // Worldsemi minimum 1.25 us bit cell
         }
         if (protocol == LedProtocol::WS2811_400KHZ)
         {
