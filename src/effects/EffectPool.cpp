@@ -886,7 +886,7 @@ Effect* EffectPool::createIsolatedInstance(const Effect* prototype)
 {
     if (!prototype) return nullptr;
 #define NEO_CLONE_EFFECT(getter, type) if (prototype == getter()) return new type()
-    NEO_CLONE_EFFECT(getSolid, EffectSolid);
+    // Solid is genuinely stateless and remains a shared immutable prototype.
 #ifndef NEOPIXEL_DISABLE_WIPE
     NEO_CLONE_EFFECT(getWipe, EffectWipe);
 #endif
