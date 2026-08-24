@@ -1329,11 +1329,13 @@ void NeoPixelManager::syncAll()
 {
     if (!_initialized) return;
 
-    // Virtual strips are valid without segments. Synchronize the owning list
-    // directly, once per strip, before power limiting touches physical frames.
+    // Virtual strips are valid without segments. Rebuild every physical frame
+    // from its logical virtual buffer before power limiting touches it. ABL
+    // scales physical buffers in place, so syncing only dirty virtual strips
+    // would compound a previous limit on static content.
     for (auto vstrip : _virtualStrips)
     {
-        if (vstrip && vstrip->isDirty())
+        if (vstrip)
         {
             // Hardware brightness is managed through PhysicalStripConfig.
             vstrip->syncToPhysical();
