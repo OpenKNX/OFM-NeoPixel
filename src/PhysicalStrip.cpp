@@ -741,6 +741,17 @@ bool PhysicalStrip::setCustomTiming(uint16_t t0h, uint16_t t0l, uint16_t t1h, ui
     return false;
 }
 
+bool PhysicalStrip::setBitrateOverride(uint32_t bitRateHz, uint32_t resetUs)
+{
+    if (!_config || !_config->isSerialConfig()) return false;
+
+    OneWireTimingOverride timing = {};
+    if (!oneWireMakeBitrateOverride(getOneWireTimingProfile(_protocol), bitRateHz, timing))
+        return false;
+
+    return setCustomTiming(timing.t0hNs, timing.t0lNs, timing.t1hNs, timing.t1lNs, resetUs);
+}
+
 bool PhysicalStrip::clearCustomTiming()
 {
     if (!_config || !_config->isSerialConfig()) return false;

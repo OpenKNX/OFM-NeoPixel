@@ -37,6 +37,73 @@ struct OneWireTimingProfile
     bool refreshRequired;
 };
 
+/** A portable, full one-wire waveform generated for a requested bitrate. */
+struct OneWireTimingOverride
+{
+    uint16_t t0hNs;
+    uint16_t t0lNs;
+    uint16_t t1hNs;
+    uint16_t t1lNs;
+};
+
+/**
+ * Convert a requested bitrate to the waveform represented by a profile's PIO
+ * cadence. This makes an override mean the same serial clock on RMT and PIO:
+ * RMT applies all four values, while PIO derives its divider from T1H and
+ * retains the profile-specific cadence.
+ */
+inline bool oneWireMakeBitrateOverride(const OneWireTimingProfile& profile,
+                                       uint32_t bitRateHz,
+                                       OneWireTimingOverride& timing)
+{
+    if (bitRateHz == 0) return false;
+
+    const uint64_t bitCellNs = (1000000000ULL + bitRateHz / 2U) / bitRateHz;
+    if (bitCellNs < 2U || bitCellNs > UINT16_MAX) return false;
+
+    uint8_t denominator = 10;
+    uint8_t zeroHighNumerator = 3;
+    uint8_t oneHighNumerator = 6;
+    switch (profile.pioCadence)
+    {
+        case OneWirePioCadence::THREE_STEP:
+            denominator = 3;
+            zeroHighNumerator = 1;
+            oneHighNumerator = 2;
+            break;
+        case OneWirePioCadence::FOUR_STEP:
+            denominator = 4;
+            zeroHighNumerator = 1;
+            oneHighNumerator = 3;
+            break;
+        case OneWirePioCadence::SIX_STEP:
+            denominator = 6;
+            zeroHighNumerator = 1;
+            oneHighNumerator = 3;
+            break;
+        case OneWirePioCadence::CANONICAL_10:
+        default:
+            break;
+    }
+
+    const uint32_t periodNs = static_cast<uint32_t>(bitCellNs);
+    const uint32_t t0hNs = periodNs * zeroHighNumerator / denominator;
+    // FOUR_STEP encodes one as the complement of zero. Preserve that
+    // relationship after integer conversion so WS2805 at 800 kHz remains the
+    // exact 312/938 ns profile instead of becoming a 937/313 ns variant.
+    const uint32_t t1hNs = (profile.pioCadence == OneWirePioCadence::FOUR_STEP)
+                               ? periodNs - t0hNs
+                               : periodNs * oneHighNumerator / denominator;
+    if (t0hNs == 0 || t1hNs == 0 || t0hNs >= periodNs || t1hNs >= periodNs)
+        return false;
+
+    timing.t0hNs = static_cast<uint16_t>(t0hNs);
+    timing.t0lNs = static_cast<uint16_t>(periodNs - t0hNs);
+    timing.t1hNs = static_cast<uint16_t>(t1hNs);
+    timing.t1lNs = static_cast<uint16_t>(periodNs - t1hNs);
+    return true;
+}
+
 /**
  * Return the signal profile for a supported clockless LED protocol.
  *

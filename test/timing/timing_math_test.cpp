@@ -54,6 +54,33 @@ static void testQuantization()
     assert(symbols.oneHigh == 38 && symbols.oneLow == 12);
 }
 
+static void testBitrateOverrides()
+{
+    OneWireTimingOverride timing = {};
+
+    const OneWireTimingProfile& ws2812 = getOneWireTimingProfile(LedProtocol::WS2812B);
+    assert(oneWireMakeBitrateOverride(ws2812, 800000U, timing));
+    assert(timing.t0hNs == 375 && timing.t0lNs == 875);
+    assert(timing.t1hNs == 750 && timing.t1lNs == 500);
+
+    const OneWireTimingProfile& ws2805 = getOneWireTimingProfile(LedProtocol::WS2805_RGBCCT);
+    assert(oneWireMakeBitrateOverride(ws2805, 800000U, timing));
+    assert(timing.t0hNs == 312 && timing.t0lNs == 938);
+    assert(timing.t1hNs == 938 && timing.t1lNs == 312);
+
+    const OneWireTimingProfile& ws2811 = getOneWireTimingProfile(LedProtocol::WS2811);
+    assert(oneWireMakeBitrateOverride(ws2811, 400000U, timing));
+    assert(timing.t0hNs == 416 && timing.t0lNs == 2084);
+    assert(timing.t1hNs == 1250 && timing.t1lNs == 1250);
+
+    const OneWireTimingProfile& tm1814 = getOneWireTimingProfile(LedProtocol::TM1814);
+    assert(oneWireMakeBitrateOverride(tm1814, 800000U, timing));
+    assert(timing.t0hNs == 416 && timing.t0lNs == 834);
+    assert(timing.t1hNs == 833 && timing.t1lNs == 417);
+
+    assert(!oneWireMakeBitrateOverride(ws2805, 0U, timing));
+}
+
 static void testDeadlines()
 {
     // 3 RGB bytes at 800 kHz: 30 us payload + 30 us final word + 300 us reset + 2 ms margin.
@@ -87,6 +114,7 @@ int main()
     testProfiles();
     testColorOrderCompatibility();
     testQuantization();
+    testBitrateOverrides();
     testDeadlines();
     testExactPacking();
     puts("one-wire timing regression tests passed");

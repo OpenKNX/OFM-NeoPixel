@@ -769,7 +769,7 @@ struct SerialStripConfig : public PhysicalStripConfig
      * @brief Resolved timing values — either from custom override or protocol defaults.
      * Used by drivers and the console to display/apply actual ns values.
      *
-     * For PIO the ratios T0H:T0L:T1H:T1L = 3:7:6:4 are fixed by the PIO program.
+     * For PIO the pulse ratios are fixed by the selected protocol PIO program.
      * Setting T1H overrides the bit period; all other values are derived.
      * For RMT all four values are independent.
      */

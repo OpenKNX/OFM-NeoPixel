@@ -4817,7 +4817,7 @@ bool NeoPixel::processPhysTimingsCommand()
     openknx.logger.log("");
     openknx.logger.log("Frei waehlbar: neo phys timing <id> freq <kHz>   (z.B. freq 783)");
     openknx.logger.log("Experten:      neo phys timing <id> custom <t0h> <t0l> <t1h> <t1l>");
-    openknx.logger.log("               PIO leitet clkdiv aus T1H ab (festes 3:7:6:4-Verhaeltnis).");
+    openknx.logger.log("               PIO leitet clkdiv aus T1H und der Protokoll-Cadence ab.");
     openknx.logger.log("");
 
     openknx.logger.color(CONSOLE_HEADLINE_COLOR);
@@ -4847,8 +4847,8 @@ bool NeoPixel::processPhysTimingsCommand()
     openknx.logger.log("");
 #ifdef ARDUINO_ARCH_RP2040
     openknx.logger.log("  Platform: RP2040/RP2350 (PIO driver)");
-    openknx.logger.log("    Fixed 3:7:6:4 cycle ratio — only T1H sets the bitrate.");
-    openknx.logger.log("    T0H/T0L/T1L are derived automatically.");
+    openknx.logger.log("    Fixed protocol cadence — T1H sets the bitrate.");
+    openknx.logger.log("    PIO derives the other pulse widths from that cadence.");
     openknx.logger.log("    Start here:  neo phys timing 0 tune t1h +50");
     openknx.logger.log("    Latch fix:   neo phys timing 0 tune reset 280");
 #endif
@@ -5279,7 +5279,7 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
         }
 
         openknx.logger.log("Custom timing set successfully!");
-        openknx.logger.log("  RP2040/RP2350 (PIO): derives clkdiv from T1H; T0H/T0L/T1L follow fixed 3:7:6:4 ratio.");
+        openknx.logger.log("  RP2040/RP2350 (PIO): derives clkdiv from T1H and keeps the protocol cadence.");
         openknx.logger.log("  ESP32 (RMT):         all four values applied independently.");
         strip->clear();
         strip->show();
@@ -5300,14 +5300,8 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
             return true;
         }
 
-        // 3:7:6:4 ratio; only T1H matters on PIO (T1H_ns = 600000 / kHz)
-        uint16_t t1h = (uint16_t)(600000UL / freqKhz);
-        uint16_t t0h = (uint16_t)(t1h / 2);
-        uint16_t t0l = (uint16_t)((uint32_t)t1h * 7 / 6);
-        uint16_t t1l = (uint16_t)((uint32_t)t1h * 4 / 6);
-
-        openknx.logger.logWithValues("Setting bitrate for strip [%d]: %u kHz (T1H=%d ns)", stripId, (int)freqKhz, (int)t1h);
-        if (!strip->setCustomTiming(t0h, t0l, t1h, t1l, 0))
+        openknx.logger.logWithValues("Setting protocol-aware bitrate for strip [%d]: %u kHz", stripId, (int)freqKhz);
+        if (!strip->setBitrateOverride(freqKhz * 1000UL, 0))
         {
             openknx.logger.log("ERROR: Failed to set timing!");
             openknx.logger.log("  Only 1-Wire strips (PIO/RMT). SPI LEDs (APA102/...) use their own SPI clock.");
@@ -5386,13 +5380,9 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
             openknx.logger.log("ERROR: Use 0-15 (ETS Timing value) or 400-1200 (direct kHz, e.g. 799).");
             return true;
         }
-        const uint16_t t1h = (uint16_t)(600000UL / freqKhz);
-        const uint16_t t0h = (uint16_t)(t1h / 2);
-        const uint16_t t0l = (uint16_t)((uint32_t)t1h * 7 / 6);
-        const uint16_t t1l = (uint16_t)((uint32_t)t1h * 4 / 6);
-        openknx.logger.logWithValues("Setting timing for strip [%d]: %u kHz (T1H=%d ns)",
-                                     stripId, (int)freqKhz, (int)t1h);
-        if (!strip->setCustomTiming(t0h, t0l, t1h, t1l, 0))
+        openknx.logger.logWithValues("Setting protocol-aware timing for strip [%d]: %u kHz",
+                                     stripId, (int)freqKhz);
+        if (!strip->setBitrateOverride(freqKhz * 1000UL, 0))
         {
             openknx.logger.log("ERROR: Failed to set timing! (1-Wire strips only; SPI LEDs use SPI clock)");
             return true;
@@ -5780,8 +5770,8 @@ bool NeoPixel::processPhysTimingTuneCommand(uint32_t stripId, const std::string&
         openknx.logger.log("");
 #ifdef ARDUINO_ARCH_RP2040
         openknx.logger.log("  Platform: RP2040/RP2350 (PIO driver)");
-        openknx.logger.log("    Fixed 3:7:6:4 cycle ratio — only T1H sets the bitrate.");
-        openknx.logger.log("    T0H/T0L/T1L are derived automatically.");
+        openknx.logger.log("    Fixed protocol cadence — T1H sets the bitrate.");
+        openknx.logger.log("    PIO derives the other pulse widths from that cadence.");
         openknx.logger.log("    Start here:  neo phys timing 0 tune t1h +50");
         openknx.logger.log("    Latch fix:   neo phys timing 0 tune reset 280");
 #endif
