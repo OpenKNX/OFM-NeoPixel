@@ -23,12 +23,12 @@ SPIClass* HW_NeoPixel_SPI::_spi1Instance = nullptr; // Second SPI bus instance (
 
 namespace
 {
-bool isApa102Family(LedProtocol protocol)
-{
-    return protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE ||
-           protocol == LedProtocol::SK9822;
-}
-}
+    bool isApa102Family(LedProtocol protocol)
+    {
+        return protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE ||
+               protocol == LedProtocol::SK9822;
+    }
+} // namespace
 
 /**
  * Constructor
@@ -901,7 +901,7 @@ void HW_NeoPixel_SPI::setStartFrameDelayUs(uint32_t delayUs)
     // Arduino SPI frame without changing the wire framing.
     if (delayUs != 0)
     {
-        logWarningP("HW NeoPixel SPI: startFrameDelayUs is unsupported");
+        logWarning("HW NeoPixel SPI", "startFrameDelayUs is unsupported");
         return;
     }
     _inst->startFrameDelayUs = 0;
