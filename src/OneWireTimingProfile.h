@@ -59,7 +59,9 @@ inline const OneWireTimingProfile& getOneWireTimingProfile(LedProtocol protocol)
         "WS2811-400", 400000, 500, 2000, 1200, 1300, 50, false, OneWirePioCadence::SIX_STEP,
         3, ColorOrder::RGB, false};
     static constexpr OneWireTimingProfile ws2805 = {
-        "WS2805", 917431, 300, 790, 790, 300, 300, false, OneWirePioCadence::FOUR_STEP,
+        // WS2805 needs a 1.25 us bit cell. The former 917 kHz profile produced
+        // a 1.09 us cell and caused periodic colour corruption and white flashes.
+        "WS2805", 800000, 312, 938, 938, 312, 300, false, OneWirePioCadence::FOUR_STEP,
         5, ColorOrder::GRBCCT, false};
     static constexpr OneWireTimingProfile tm1814 = {
         "TM1814", 800000, 360, 890, 720, 530, 200, true, OneWirePioCadence::THREE_STEP,

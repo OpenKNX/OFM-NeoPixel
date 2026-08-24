@@ -12,6 +12,14 @@ static void testProfiles()
     assert(ws2811.bitRateHz == 400000 && ws2811.pioCadence == OneWirePioCadence::SIX_STEP);
     const OneWireTimingProfile& rgbcct = getOneWireTimingProfile(LedProtocol::SK6812_RGBCCT);
     assert(rgbcct.channelCount == 5 && rgbcct.defaultColorOrder == ColorOrder::GRBCCT);
+    const OneWireTimingProfile& ws2805 = getOneWireTimingProfile(LedProtocol::WS2805_RGBCCT);
+    assert(ws2805.bitRateHz == 800000 && ws2805.resetTimeUs >= 300);
+    assert(ws2805.pioCadence == OneWirePioCadence::FOUR_STEP);
+    assert(ws2805.channelCount == 5 && ws2805.defaultColorOrder == ColorOrder::GRBCCT);
+    assert(ws2805.t0hNs == 312 && ws2805.t0lNs == 938);
+    assert(ws2805.t1hNs == 938 && ws2805.t1lNs == 312);
+    assert(ws2805.t0hNs + ws2805.t0lNs == 1250);
+    assert(ws2805.t1hNs + ws2805.t1lNs == 1250);
     const OneWireTimingProfile& tm1814 = getOneWireTimingProfile(LedProtocol::TM1814);
     assert(tm1814.inverted);
 }
@@ -37,6 +45,13 @@ static void testQuantization()
     uint16_t ticks = 0;
     assert(oneWireDurationToTicks(13, 40000000U, 32767U, ticks) && ticks == 1);
     assert(!oneWireDurationToTicks(1000000, 40000000U, 32767U, ticks));
+
+    const OneWireTimingProfile& ws2805 = getOneWireTimingProfile(LedProtocol::WS2805_RGBCCT);
+    assert(oneWireMakeBalancedSymbols(ws2805.t0hNs, ws2805.t0lNs,
+                                      ws2805.t1hNs, ws2805.t1lNs,
+                                      40000000U, 32767U, symbols));
+    assert(symbols.period == 50 && symbols.zeroHigh == 12 && symbols.zeroLow == 38);
+    assert(symbols.oneHigh == 38 && symbols.oneLow == 12);
 }
 
 static void testDeadlines()
