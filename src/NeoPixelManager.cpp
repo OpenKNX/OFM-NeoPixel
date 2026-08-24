@@ -2,6 +2,7 @@
 #include "OpenKNX/Log/Logger.h"
 #include <Arduino.h>
 #include <algorithm>
+#include <new>
 
 namespace
 {
@@ -1695,7 +1696,7 @@ ManagerStats NeoPixelManager::getStats() const
     {
         if (strip)
         {
-            stats.activeStrips++;
+            if (strip->isInitialized()) stats.activeStrips++;
             stats.totalLeds += strip->getLedCount();
         }
     }
@@ -1930,9 +1931,10 @@ VirtualStrip* NeoPixelManager::addVirtualStrip(uint16_t totalLeds, ColorOrder co
     }
 #endif
 
-    VirtualStrip* vstrip = new VirtualStrip(totalLeds, colorOrder);
-    if (!vstrip)
+    VirtualStrip* vstrip = new (std::nothrow) VirtualStrip(totalLeds, colorOrder);
+    if (!vstrip || !vstrip->isValid())
     {
+        delete vstrip;
         _errorCount++;
         return nullptr;
     }

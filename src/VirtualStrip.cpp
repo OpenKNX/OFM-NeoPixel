@@ -20,6 +20,7 @@
 #include <Arduino.h>
 #include <algorithm>
 #include <cmath>
+#include <new>
 #include <string.h>
 
 /**
@@ -47,7 +48,13 @@ VirtualStrip::VirtualStrip(uint16_t totalLeds, ColorOrder colorOrder)
 {
     // Allocate unified buffer (always RGB/RGBW/RGBCCT format)
     _bufferSize = (size_t)totalLeds * _bytesPerLed;
-    _buffer = new uint8_t[_bufferSize];
+    _buffer = new (std::nothrow) uint8_t[_bufferSize];
+    if (!_buffer)
+    {
+        _bufferSize = 0;
+        logErrorP("VirtualStrip buffer allocation failed (%u LEDs, %u bytes/LED)", totalLeds, _bytesPerLed);
+        return;
+    }
     memset(_buffer, 0, _bufferSize);
 
     logDebugP("VirtualStrip initialized: %u LEDs, %u Bytes/LED (%s), Buffer=%u Bytes",
@@ -87,7 +94,7 @@ uint8_t VirtualStrip::getHardwareBrightness() const
         if (pstrip->isSpiStrip())
         {
             auto* cfg = pstrip->getConfig();
-            SpiStripConfig* spiCfg = cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
+            SpiStripConfig* spiCfg = cfg && cfg->isSpiConfig() ? static_cast<SpiStripConfig*>(cfg) : nullptr;
             if (spiCfg)
             {
                 // Convert config brightness to 0-255 scale for power calc
@@ -96,8 +103,9 @@ uint8_t VirtualStrip::getHardwareBrightness() const
                 uint8_t maxBright = spiCfg->getHwBrightnessMax();
 
                 // Scale from [min..max] to [0..255]
+                if (maxBright <= minBright) return 255; // Invalid range: retain legacy full-power fallback.
+                if (hwBright <= minBright) return 0;
                 uint8_t range = maxBright - minBright;
-                if (range == 0) return 255; // Avoid division by zero
 
                 return ((uint32_t)(hwBright - minBright) * 255) / range;
             }
@@ -239,7 +247,7 @@ PhysicalStrip* VirtualStrip::findPhysicalAtIndex(uint16_t virtualIndex, uint16_t
  */
 void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
 {
-    if (index >= _totalLeds) return;
+    if (!_buffer || index >= _totalLeds) return;
 
     size_t offset = (size_t)index * _bytesPerLed;
 
@@ -314,7 +322,7 @@ void VirtualStrip::writePixelToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
  */
 bool VirtualStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
 {
-    if (index >= _totalLeds) return false;
+    if (!_buffer || index >= _totalLeds) return false;
     writePixelToBuffer(index, r, g, b, 0, 0);
     _dirty = true;
     return true;
@@ -330,7 +338,7 @@ bool VirtualStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
  */
 bool VirtualStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
-    if (index >= _totalLeds) return false;
+    if (!_buffer || index >= _totalLeds) return false;
     writePixelToBuffer(index, r, g, b, w, 0);
     _dirty = true; // Mark as dirty for sync!
     return true;
@@ -347,7 +355,7 @@ bool VirtualStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uin
  */
 bool VirtualStrip::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
 {
-    if (index >= _totalLeds) return false;
+    if (!_buffer || index >= _totalLeds) return false;
     writePixelToBuffer(index, r, g, b, ww, cw);
     _dirty = true;
     return true;
@@ -385,6 +393,7 @@ void VirtualStrip::setAll(uint8_t r, uint8_t g, uint8_t b)
  */
 void VirtualStrip::clear()
 {
+    if (!_buffer) return;
     memset(_buffer, 0, _bufferSize);
     _dirty = true;
 }
@@ -401,7 +410,7 @@ void VirtualStrip::clear()
  */
 bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) const
 {
-    if (index >= _totalLeds) return false;
+    if (!_buffer || index >= _totalLeds) return false;
 
     size_t offset = (size_t)index * _bytesPerLed;
 
@@ -429,7 +438,7 @@ bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) 
  */
 bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& w) const
 {
-    if (index >= _totalLeds) return false;
+    if (!_buffer || index >= _totalLeds) return false;
 
     size_t offset = (size_t)index * _bytesPerLed;
 
@@ -467,7 +476,7 @@ bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, 
  */
 bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& ww, uint8_t& cw) const
 {
-    if (index >= _totalLeds) return false;
+    if (!_buffer || index >= _totalLeds) return false;
 
     size_t offset = (size_t)index * _bytesPerLed;
 
@@ -514,6 +523,7 @@ bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, 
  */
 bool VirtualStrip::syncToPhysical()
 {
+    if (!_buffer) return false;
     if (_physicalStrips.empty())
     {
         return true; // Nothing to synchronize
@@ -525,7 +535,11 @@ bool VirtualStrip::syncToPhysical()
     for (const auto& mapping : _physicalStrips)
     {
         PhysicalStrip* pstrip = mapping.physicalStrip;
-        if (!pstrip) continue;
+        if (!pstrip)
+        {
+            allSuccess = false;
+            continue;
+        }
 
         // Hardware brightness is now managed via PhysicalStripConfig
         // VirtualStrip's hardwareBrightness is ignored for SPI strips

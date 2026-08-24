@@ -119,6 +119,7 @@ class VirtualStrip
     // State & Properties
     // ====================================================================
     inline uint16_t getLedCount() const { return _totalLeds; }            // Virtual LED count
+    inline bool isValid() const { return _buffer != nullptr && _bufferSize != 0; }
     inline bool hasWhiteChannel() const { return _bytesPerLed >= 4; }     // True if RGBW/RGBCCT buffer
     inline bool hasDualWhiteChannel() const { return _bytesPerLed >= 5; } // True if RGBCCT buffer (5 channels)
     inline bool isDirty() const { return _dirty; }                        // Is buffer modified?
