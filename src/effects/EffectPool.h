@@ -103,6 +103,8 @@ class EffectPool
     // Dynamic effect registry access
     static uint8_t getEffectCount();
     static Effect* getEffectByIndex(uint8_t index);
+    static Effect* createIsolatedInstance(const Effect* prototype);
+    static uint8_t getEffectIndex(Effect* effect);
 
   private:
     EffectPool() = delete;

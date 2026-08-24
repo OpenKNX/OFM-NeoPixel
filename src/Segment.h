@@ -341,7 +341,7 @@ class Segment
     Effect* getEffect() { return _effect; }                          // Get current effect
     const Effect* getEffect() const { return _effect; }              // Get current effect (const)
     bool hasEffect() const { return _effect != nullptr; }            // Check if effect is set
-    void clearEffect() { _effect = nullptr; }                        // Remove effect
+    void clearEffect();                                               // Remove effect
 
     // ====================================================================
     // Pixel Control
@@ -398,26 +398,8 @@ class Segment
     // DIRECT-state snapshot around an EM run: saveDirectState() captures the manual
     // effect+config before an EM takes over; restoreDirectState() puts it back so
     // stopping the EM returns the segment to its manual light instead of going blank.
-    void saveDirectState()
-    {
-        _savedConfig = _config;
-        _savedEffect = _effect;
-        _hasSavedState = true;
-    }
-    bool restoreDirectState()
-    {
-        if (!_hasSavedState) return false;
-        // Conflict#1 = (b): a brightness/dim set via KO DURING the EM is the LIVE current
-        // brightness and must survive the EM-stop. Keep the live master; restore effect/colour
-        // from the snapshot; render = master (a direct effect has no cue scaling).
-        uint8_t liveMaster = _config.masterBrightness;
-        _config = _savedConfig;
-        _config.masterBrightness = liveMaster;
-        _config.brightness = liveMaster;
-        _effect = _savedEffect;
-        _paused = false;
-        return true;
-    }
+    void saveDirectState();
+    bool restoreDirectState();
     bool isPaused() const { return _paused; }               // Check if effect is paused
     bool isDirty() const { return _dirty; }                 // Check if segment is dirty
     void setDirty(bool dirty) { _dirty = dirty; }           // Set dirty flag
@@ -469,12 +451,14 @@ class Segment
     bool _reverse;                    // Reverse effect direction
     bool _mirror;                     // Mirror effect from center
     Effect* _effect;                  // Current effect (nullptr = none)
+    bool _ownsEffect = false;
     bool _dirty;                      // Pixels changed?
     bool _paused;                     // Effect paused?
     LedState _ledState;               // State machine (IDLE, RUNNING, etc)
     EffectConfig _config;             // Effect configuration (~40 bytes)
     EffectConfig _savedConfig;        // DIRECT-state snapshot taken before an EM started
     Effect* _savedEffect = nullptr;   // DIRECT effect pointer before the EM took over
+    bool _ownsSavedEffect = false;
     bool _hasSavedState = false;      // true once a direct snapshot exists
     EffectState _state;               // Effect runtime variables (~12 bytes)
     LedGeometry _geo;                 // 2D/3D matrix geometry (5 bytes, default = 1D)

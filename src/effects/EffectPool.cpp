@@ -1,4 +1,5 @@
 #include "EffectPool.h"
+#include <cstring>
 
 // ============================================================================
 // Effect Selection - Individual Effect Control
@@ -879,4 +880,123 @@ Effect* EffectPool::getEffectByIndex(uint8_t index)
     #endif
 
     return nullptr; // Index out of range
+}
+
+Effect* EffectPool::createIsolatedInstance(const Effect* prototype)
+{
+    if (!prototype) return nullptr;
+#define NEO_CLONE_EFFECT(getter, type) if (prototype == getter()) return new type()
+    NEO_CLONE_EFFECT(getSolid, EffectSolid);
+#ifndef NEOPIXEL_DISABLE_WIPE
+    NEO_CLONE_EFFECT(getWipe, EffectWipe);
+#endif
+#ifndef NEOPIXEL_DISABLE_RAINBOW
+    NEO_CLONE_EFFECT(getRainbow, RainbowEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_PRIDE
+    NEO_CLONE_EFFECT(getPride, PrideEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_JUGGLE
+    NEO_CLONE_EFFECT(getJuggle, JuggleEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_BPM
+    NEO_CLONE_EFFECT(getBPM, BPMEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_CYLON
+    NEO_CLONE_EFFECT(getCylon, CylonEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_RGBWTEST
+    NEO_CLONE_EFFECT(getRGBWTest, RGBWTestEffect);
+#endif
+#ifndef NEOPIXEL_MINIMAL_EFFECTS
+    #ifndef NEOPIXEL_DISABLE_FIRE
+    NEO_CLONE_EFFECT(getFire, FireEffect);
+    #endif
+    #ifndef NEOPIXEL_DISABLE_THEATERCHASE
+    NEO_CLONE_EFFECT(getTheaterChase, TheaterChaseEffect);
+    #endif
+    #ifndef NEOPIXEL_DISABLE_SPARKLE
+    NEO_CLONE_EFFECT(getSparkle, SparkleEffect);
+    #endif
+    #ifndef NEOPIXEL_DISABLE_BREATHING
+    NEO_CLONE_EFFECT(getBreathing, BreathingEffect);
+    #endif
+    #ifndef NEOPIXEL_DISABLE_STROBE
+    NEO_CLONE_EFFECT(getStrobe, StrobeEffect);
+    #endif
+    #ifndef NEOPIXEL_DISABLE_COMET
+    NEO_CLONE_EFFECT(getComet, CometEffect);
+    #endif
+    #ifndef NEOPIXEL_DISABLE_NOISE
+    NEO_CLONE_EFFECT(getNoise, NoiseEffect);
+    #endif
+    #ifndef NEOPIXEL_DISABLE_PALETTE
+    NEO_CLONE_EFFECT(getPalette, PaletteEffect);
+    #endif
+    #ifndef NEOPIXEL_DISABLE_LIGHTNING
+    NEO_CLONE_EFFECT(getLightning, LightningEffect);
+    #endif
+    #ifndef NEOPIXEL_DISABLE_GRADIENT
+    NEO_CLONE_EFFECT(getGradient, GradientEffect);
+    #endif
+    #ifndef NEOPIXEL_DISABLE_CANDLE
+    NEO_CLONE_EFFECT(getCandle, CandleEffect);
+    #endif
+#endif
+#ifndef NEOPIXEL_DISABLE_SCROLLTEXT
+    NEO_CLONE_EFFECT(getScrollText, ScrollTextEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_CLOCK2D
+    NEO_CLONE_EFFECT(getClock2D, Clock2DEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_SNAKE2D
+    NEO_CLONE_EFFECT(getSnake2D, Snake2DEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_MATRIX2D
+    NEO_CLONE_EFFECT(getMatrix2D, Matrix2DEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_TETRIS2D
+    NEO_CLONE_EFFECT(getTetris2D, Tetris2DEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_TRON2D
+    NEO_CLONE_EFFECT(getTron2D, Tron2DEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_STARFIELDWARP2D
+    NEO_CLONE_EFFECT(getStarfieldWarp2D, StarfieldWarp2DEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_PLASMANEBULA2D
+    NEO_CLONE_EFFECT(getPlasmaNebula2D, PlasmaNebula2DEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_UFOSWARM2D
+    NEO_CLONE_EFFECT(getUfoSwarm2D, UfoSwarm2DEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_GAMEOFLIFE2D
+    NEO_CLONE_EFFECT(getGameOfLife2D, GameOfLife2DEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_DNA2D
+    NEO_CLONE_EFFECT(getDNA2D, DNA2DEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_AURORA2D
+    NEO_CLONE_EFFECT(getAurora2D, Aurora2DEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_LISSAJOUS2D
+    NEO_CLONE_EFFECT(getLissajous2D, Lissajous2DEffect);
+#endif
+#ifndef NEOPIXEL_DISABLE_METABALLS2D
+    NEO_CLONE_EFFECT(getMetaballs2D, Metaballs2DEffect);
+#endif
+#undef NEO_CLONE_EFFECT
+    return nullptr;
+}
+
+uint8_t EffectPool::getEffectIndex(Effect* effect)
+{
+    if (!effect) return 0;
+    for (uint8_t index = 0; index < getEffectCount(); ++index)
+    {
+        Effect* prototype = getEffectByIndex(index);
+        if (effect == prototype || (prototype && std::strcmp(effect->getName(), prototype->getName()) == 0))
+            return index;
+    }
+    return 0;
 }

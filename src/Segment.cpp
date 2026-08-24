@@ -1,6 +1,7 @@
 #include "Segment.h"
 #include "OpenKNX.h"
 #include "effects/Effect.h"
+#include "effects/EffectPool.h"
 #include <Arduino.h>
 
 // ============================================================================
@@ -107,8 +108,10 @@ Segment::Segment(VirtualStrip* virtualStrip, uint16_t startLed, uint16_t endLed)
  */
 Segment::~Segment()
 {
-    // Effect is NOT deleted - user is responsible for cleanup!
-    _effect = nullptr;
+    clearEffect();
+    if (_ownsSavedEffect) delete _savedEffect;
+    _savedEffect = nullptr;
+    _ownsSavedEffect = false;
 }
 
 /**
@@ -117,14 +120,52 @@ Segment::~Segment()
  */
 void Segment::setEffect(Effect* effect, bool initializeDefaults)
 {
-    _effect = effect;
+    Effect* isolated = EffectPool::createIsolatedInstance(effect);
+    clearEffect();
+    _effect = isolated ? isolated : effect;
+    _ownsEffect = isolated != nullptr;
+    _state = EffectState();
 
-    // Initialize parameters with defaults and reset state
-    if (_effect && initializeDefaults)
+    if (_effect)
     {
-        _effect->initializeDefaults(this);
+        if (initializeDefaults) _effect->initializeDefaults(this);
         _effect->reset();
     }
+}
+
+void Segment::clearEffect()
+{
+    if (_ownsEffect) delete _effect;
+    _effect = nullptr;
+    _ownsEffect = false;
+    _state = EffectState();
+}
+
+void Segment::saveDirectState()
+{
+    if (_ownsSavedEffect) delete _savedEffect;
+    _savedConfig = _config;
+    _savedEffect = EffectPool::createIsolatedInstance(_effect);
+    _ownsSavedEffect = _savedEffect != nullptr;
+    if (!_savedEffect) _savedEffect = _effect;
+    _hasSavedState = true;
+}
+
+bool Segment::restoreDirectState()
+{
+    if (!_hasSavedState) return false;
+    const uint8_t liveMaster = _config.masterBrightness;
+    clearEffect();
+    _config = _savedConfig;
+    _config.masterBrightness = liveMaster;
+    _config.brightness = liveMaster;
+    _effect = _savedEffect;
+    _ownsEffect = _ownsSavedEffect;
+    _savedEffect = nullptr;
+    _ownsSavedEffect = false;
+    _hasSavedState = false;
+    _paused = false;
+    return true;
 }
 
 /**
