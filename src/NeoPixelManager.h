@@ -171,6 +171,7 @@ class NeoPixelManager
     // ====================================================================
     VirtualStrip* addVirtualStrip(uint16_t totalLeds, ColorOrder colorOrder = ColorOrder::RGB);
     bool attachPhysicalToVirtual(VirtualStrip* vstrip, PhysicalStrip* pstrip, uint16_t offset);
+    bool detachPhysicalFromVirtual(VirtualStrip* vstrip, PhysicalStrip* pstrip);
     VirtualStrip* getVirtualStrip(uint32_t index);
     uint32_t getVirtualStripCount() const { return _virtualStrips.size(); }
     bool removeVirtualStrip(VirtualStrip* vstrip);

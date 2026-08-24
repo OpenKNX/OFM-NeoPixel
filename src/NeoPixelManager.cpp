@@ -1312,19 +1312,14 @@ void NeoPixelManager::syncAll()
 {
     if (!_initialized) return;
 
-    // Synchronize all Virtual→Physical buffers with Hardware-Brightness
-    // (BEFORE power limiting is applied to PhysicalStrip buffers)
-    for (auto segment : _segments)
+    // Virtual strips are valid without segments. Synchronize the owning list
+    // directly, once per strip, before power limiting touches physical frames.
+    for (auto vstrip : _virtualStrips)
     {
-        if (segment && segment->getVirtualStrip())
+        if (vstrip && vstrip->isDirty())
         {
-            VirtualStrip* vstrip = segment->getVirtualStrip();
-            if (vstrip->isDirty())
-            {
-                // Hardware brightness is now managed via PhysicalStripConfig
-                // Use 'neo phys config <id> brightness <16-30>' to change it for SPI strips
-                vstrip->syncToPhysical();
-            }
+            // Hardware brightness is managed through PhysicalStripConfig.
+            vstrip->syncToPhysical();
         }
     }
 }
@@ -1873,7 +1868,28 @@ bool NeoPixelManager::attachPhysicalToVirtual(VirtualStrip* vstrip, PhysicalStri
         return false;
     }
 
-    return vstrip->attachPhysicalStrip(pstrip, offset);
+    if (!vstrip->attachPhysicalStrip(pstrip, offset)) return false;
+
+    _mappingDirty = true;
+    _physToVirtualMap.clear();
+    _stripPowerCache.erase(pstrip);
+    return true;
+}
+
+bool NeoPixelManager::detachPhysicalFromVirtual(VirtualStrip* vstrip, PhysicalStrip* pstrip)
+{
+    if (!vstrip || !pstrip)
+    {
+        _errorCount++;
+        return false;
+    }
+
+    if (!vstrip->detachPhysicalStrip(pstrip)) return false;
+
+    _mappingDirty = true;
+    _physToVirtualMap.clear();
+    _stripPowerCache.erase(pstrip);
+    return true;
 }
 
 /**
@@ -1912,6 +1928,14 @@ Segment* NeoPixelManager::addSegment(VirtualStrip* vstrip, uint16_t startLed, ui
 
     if (!vstrip)
     {
+        _errorCount++;
+        return nullptr;
+    }
+
+    if (startLed > endLed || endLed >= vstrip->getLedCount())
+    {
+        logDebugP("NeoPixelManager: Invalid segment range (%u-%u, strip length %u)",
+                  startLed, endLed, vstrip->getLedCount());
         _errorCount++;
         return nullptr;
     }
@@ -1993,6 +2017,9 @@ bool NeoPixelManager::removeVirtualStrip(VirtualStrip* vstrip)
         {
             delete *it;
             _virtualStrips.erase(it);
+            _mappingDirty = true;
+            _physToVirtualMap.clear();
+            _stripPowerCache.clear();
             logDebugP("NeoPixelManager: VirtualStrip removed");
             return true;
         }

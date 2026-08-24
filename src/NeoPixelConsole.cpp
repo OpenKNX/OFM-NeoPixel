@@ -3111,7 +3111,7 @@ bool NeoPixel::processVirtDetachCommand(const std::string& args)
             return true;
         }
 
-        if (!vstrip->detachPhysicalStrip(pstrip))
+        if (!_manager->detachPhysicalFromVirtual(vstrip, pstrip))
         {
             openknx.logger.logWithValues("ERROR: Physical strip [%d] not attached to virtual strip [%d]!",
                                          physId, virtId);
@@ -3130,7 +3130,7 @@ bool NeoPixel::processVirtDetachCommand(const std::string& args)
             PhysicalStrip* pstrip = vstrip->getPhysicalStrip(i);
             if (pstrip)
             {
-                vstrip->detachPhysicalStrip(pstrip);
+                _manager->detachPhysicalFromVirtual(vstrip, pstrip);
             }
         }
 

@@ -123,8 +123,11 @@ bool VirtualStrip::attachPhysicalStrip(PhysicalStrip* physicalStrip, uint16_t of
         return false;
     }
 
-    // Check Offset + LED Count vs Total Leds
-    if (offset + physicalStrip->getLedCount() > _totalLeds)
+    const size_t attachStart = offset;
+    const size_t attachEnd = attachStart + physicalStrip->getLedCount();
+
+    // Check Offset + LED Count vs Total Leds without 16-bit wraparound.
+    if (attachEnd > _totalLeds)
     {
         logErrorP("VirtualStrip attach - range overflow! Offset=%u, Count=%u, Total=%u",
                   offset, physicalStrip->getLedCount(), _totalLeds);
@@ -137,6 +140,14 @@ bool VirtualStrip::attachPhysicalStrip(PhysicalStrip* physicalStrip, uint16_t of
         if (mapping.physicalStrip == physicalStrip)
         {
             logErrorP("PhysicalStrip already attached!");
+            return false;
+        }
+
+        const size_t mappedStart = mapping.virtualOffset;
+        const size_t mappedEnd = mappedStart + mapping.physicalLedCount;
+        if (attachStart < mappedEnd && mappedStart < attachEnd)
+        {
+            logErrorP("VirtualStrip attach - range overlaps existing mapping!");
             return false;
         }
     }
