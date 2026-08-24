@@ -124,6 +124,12 @@ bool AnimationTest::init(
         return false;
     }
 
+    if (!runSegmentlessUpdateRegression())
+    {
+        logErrorP("Segment-less updateAll() regression test failed!");
+        return false;
+    }
+
     // Test initial LED
     if (_virtualMode)
     {
@@ -153,6 +159,70 @@ bool AnimationTest::init(
     _running = true;
     logInfoP("AnimationTest Init COMPLETE");
 
+    return true;
+}
+
+/**
+ * Regression test for virtual strips which are not owned by a Segment.
+ *
+ * The test setup creates and attaches _strip8 directly, but intentionally
+ * never creates a Segment for it. updateAll() must still synchronize the
+ * virtual RGB buffer to its physical strip and send that frame.
+ */
+bool AnimationTest::runSegmentlessUpdateRegression()
+{
+    if (!_manager || !_strip8 || !_physStrip1)
+    {
+        logErrorP("Segment-less update test is not initialized");
+        return false;
+    }
+
+    constexpr uint8_t kRed = 0x81;
+    constexpr uint8_t kGreen = 0xA3;
+    constexpr uint8_t kBlue = 0xC7;
+
+    // Start with a known physical frame. Before the syncAll() fix, this
+    // remained black because the virtual strip was not referenced by a Segment.
+    _physStrip1->clear();
+    if (!_strip8->setPixel(0, kRed, kGreen, kBlue))
+    {
+        logErrorP("Segment-less update test could not set virtual pixel");
+        return false;
+    }
+
+    if (!_manager->updateAll())
+    {
+        logErrorP("Segment-less updateAll() transfer failed");
+        return false;
+    }
+
+    const uint8_t* buffer = _physStrip1->getBuffer();
+    const size_t bufferSize = _physStrip1->getBufferSize();
+    if (!buffer || bufferSize < 3)
+    {
+        logErrorP("Segment-less update test has no physical RGB buffer");
+        return false;
+    }
+
+    // PhysicalStrip applies the protocol color order, so compare the first
+    // pixel as a set of channels rather than assuming the wire byte order.
+    bool hasRed = false;
+    bool hasGreen = false;
+    bool hasBlue = false;
+    for (size_t i = 0; i < 3; ++i)
+    {
+        hasRed |= buffer[i] == kRed;
+        hasGreen |= buffer[i] == kGreen;
+        hasBlue |= buffer[i] == kBlue;
+    }
+
+    if (!hasRed || !hasGreen || !hasBlue)
+    {
+        logErrorP("Segment-less update test did not reach the physical buffer");
+        return false;
+    }
+
+    logInfoP("Segment-less updateAll() regression test passed");
     return true;
 }
 

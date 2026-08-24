@@ -96,5 +96,6 @@ class AnimationTest
     void updatePerformanceStats(uint32_t updateTime);
     void logPerformanceStats();
     void initRainbowTable(uint8_t brightness);
+    bool runSegmentlessUpdateRegression();
 };
 #endif // OPENKNX_NEOPIXEL_TESTS
