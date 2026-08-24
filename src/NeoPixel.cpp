@@ -49,6 +49,15 @@ NeoPixel::~NeoPixel()
  */
 void NeoPixel::init()
 {
+    // OAM may reload ETS configuration while the NeoPixel facade is already
+    // alive. The manager owns DMA/PIO resources, so replacing its pointer here
+    // leaks the old manager and leaves its hardware allocations active.
+    if (_manager)
+    {
+        logDebugP("NeoPixel manager already initialized; reusing it");
+        return;
+    }
+
     logDebugP("Initializing NeoPixel module");
 
     _manager = new NeoPixelManager(); // Create manager instance

@@ -38,15 +38,7 @@ NeoPixelManager::NeoPixelManager()
  */
 NeoPixelManager::~NeoPixelManager()
 {
-    // Lösche alle Strips
-    for (auto strip : _strips)
-    {
-        if (strip)
-        {
-            delete strip;
-        }
-    }
-    _strips.clear();
+    clearTopology();
 }
 
 // =====================================================================
@@ -521,6 +513,39 @@ void NeoPixelManager::reset()
     }
     _errorCount = 0;
     _updateCount = 0;
+}
+
+/**
+ * @brief Remove all manager-owned strips, virtual strips, and segments.
+ *
+ * VirtualStrip mappings and Segment instances reference PhysicalStrip
+ * instances, therefore deleting physical strips first leaves dangling pointers
+ * that can be reached by a subsequent render or power-management pass.
+ */
+void NeoPixelManager::clearTopology()
+{
+    for (auto segment : _segments)
+    {
+        delete segment;
+    }
+    _segments.clear();
+
+    for (auto vstrip : _virtualStrips)
+    {
+        delete vstrip;
+    }
+    _virtualStrips.clear();
+
+    for (auto strip : _strips)
+    {
+        delete strip;
+    }
+    _strips.clear();
+
+    _stripPowerCache.clear();
+    _physToVirtualMap.clear();
+    _mappingDirty = true;
+    _initialized = false;
 }
 
 /**

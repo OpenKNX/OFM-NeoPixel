@@ -142,6 +142,14 @@ class NeoPixelManager
     bool init();
     bool isInitialized() const { return _initialized; }
     void reset();
+    /**
+     * Remove every manager-owned runtime object.
+     *
+     * Segments and virtual strips retain raw references to physical strips, so
+     * the only safe destruction order is segments, virtual strips, then
+     * physical strips. Call this before replacing a complete configuration.
+     */
+    void clearTopology();
     uint32_t getErrorCount() const { return _errorCount; }
 
     // ====================================================================
