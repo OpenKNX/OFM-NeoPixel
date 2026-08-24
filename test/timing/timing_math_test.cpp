@@ -10,7 +10,13 @@ static void testProfiles()
     const OneWireTimingProfile& ws2812 = getOneWireTimingProfile(LedProtocol::WS2812B);
     assert(ws2812.bitRateHz == 800000 && ws2812.resetTimeUs == 300 && !ws2812.inverted);
     const OneWireTimingProfile& ws2811 = getOneWireTimingProfile(LedProtocol::WS2811);
-    assert(ws2811.bitRateHz == 400000 && ws2811.pioCadence == OneWirePioCadence::SIX_STEP);
+    assert(ws2811.bitRateHz == 800000 && ws2811.pioCadence == OneWirePioCadence::FOUR_STEP);
+    assert(ws2811.t0hNs == 300 && ws2811.t0lNs == 950);
+    assert(ws2811.t1hNs == 900 && ws2811.t1lNs == 350);
+    assert(ws2811.defaultColorOrder == ColorOrder::RGB);
+    const OneWireTimingProfile& ws2811Legacy = getOneWireTimingProfile(LedProtocol::WS2811_400KHZ);
+    assert(ws2811Legacy.bitRateHz == 400000 && ws2811Legacy.pioCadence == OneWirePioCadence::SIX_STEP);
+    assert(ws2811Legacy.defaultColorOrder == ColorOrder::GRB);
     const OneWireTimingProfile& rgbcct = getOneWireTimingProfile(LedProtocol::SK6812_RGBCCT);
     assert(rgbcct.channelCount == 5 && rgbcct.defaultColorOrder == ColorOrder::GRBCCT);
     const OneWireTimingProfile& ws2805 = getOneWireTimingProfile(LedProtocol::WS2805_RGBCCT);
@@ -31,6 +37,22 @@ static void testProfiles()
 
 static void testColorOrderCompatibility()
 {
+    uint8_t first = 0, second = 0, third = 0;
+    const struct { ColorOrder order; uint8_t first; uint8_t second; uint8_t third; } cases[] = {
+        {ColorOrder::RGB, 1, 2, 3}, {ColorOrder::RBG, 1, 3, 2},
+        {ColorOrder::GRB, 2, 1, 3}, {ColorOrder::GBR, 2, 3, 1},
+        {ColorOrder::BGR, 3, 2, 1}, {ColorOrder::BRG, 3, 1, 2},
+    };
+    for (const auto& value : cases)
+    {
+        assert(ProtocolHelper::mapRgbChannels(value.order, 1, 2, 3, first, second, third));
+        assert(first == value.first && second == value.second && third == value.third);
+    }
+    assert(!ProtocolHelper::mapRgbChannels(ColorOrder::RGBW, 1, 2, 3, first, second, third));
+    assert(ProtocolHelper::getDefaultFrequency(LedProtocol::WS2811) == 800000);
+    assert(ProtocolHelper::getDefaultFrequency(LedProtocol::WS2811_400KHZ) == 400000);
+    assert(ProtocolHelper::getColorOrder(LedProtocol::WS2811) == ColorOrder::RGB);
+    assert(ProtocolHelper::getColorOrder(LedProtocol::WS2811_400KHZ) == ColorOrder::GRB);
     assert(ProtocolHelper::isColorOrderCompatible(LedProtocol::SK6812, ColorOrder::GRB));
     assert(ProtocolHelper::isColorOrderCompatible(LedProtocol::SK6812, ColorOrder::GRBW));
     assert(!ProtocolHelper::isColorOrderCompatible(LedProtocol::WS2812B, ColorOrder::GRBW));
@@ -89,7 +111,7 @@ static void testBitrateOverrides()
     assert(timing.t0hNs == 312 && timing.t0lNs == 938);
     assert(timing.t1hNs == 938 && timing.t1lNs == 312);
 
-    const OneWireTimingProfile& ws2811 = getOneWireTimingProfile(LedProtocol::WS2811);
+    const OneWireTimingProfile& ws2811 = getOneWireTimingProfile(LedProtocol::WS2811_400KHZ);
     assert(oneWireMakeBitrateOverride(ws2811, 400000U, timing));
     assert(timing.t0hNs == 416 && timing.t0lNs == 2084);
     assert(timing.t1hNs == 1250 && timing.t1lNs == 1250);

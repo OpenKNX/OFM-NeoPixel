@@ -409,20 +409,15 @@ void RMT_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
         oneWireStoreChannel(_inst->buffer + offset, _inst->bytesPerChannel, channel, value);
     };
 
+    uint8_t first = 0, second = 0, third = 0;
+    if (ProtocolHelper::mapRgbChannels(_inst->colorOrder, r, g, b, first, second, third))
+    {
+        setChannel(0, first); setChannel(1, second); setChannel(2, third);
+        return;
+    }
+
     switch (_inst->colorOrder)
     {
-        case ColorOrder::RGB:
-            setChannel(0, r); setChannel(1, g); setChannel(2, b);
-            break;
-
-        case ColorOrder::GRB:
-            setChannel(0, g); setChannel(1, r); setChannel(2, b);
-            break;
-
-        case ColorOrder::BGR:
-            setChannel(0, b); setChannel(1, g); setChannel(2, r);
-            break;
-
         case ColorOrder::RGBW:
             setChannel(0, r); setChannel(1, g); setChannel(2, b); setChannel(3, ww);
             break;

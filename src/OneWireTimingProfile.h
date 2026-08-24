@@ -124,9 +124,12 @@ inline const OneWireTimingProfile& getOneWireTimingProfile(LedProtocol protocol)
     static constexpr OneWireTimingProfile sk6812_rgbcct = {
         "SK6812/WS2814 RGBCCT", 800000, 400, 850, 800, 450, 80, false, OneWirePioCadence::CANONICAL_10,
         5, 1, 0, ColorOrder::GRBCCT, false};
+    static constexpr OneWireTimingProfile ws2811 = {
+        "WS2811", 800000, 300, 950, 900, 350, 300, false, OneWirePioCadence::FOUR_STEP,
+        3, 1, 0, ColorOrder::RGB, false};
     static constexpr OneWireTimingProfile ws2811_400 = {
         "WS2811-400", 400000, 500, 2000, 1200, 1300, 50, false, OneWirePioCadence::SIX_STEP,
-        3, 1, 0, ColorOrder::RGB, false};
+        3, 1, 0, ColorOrder::GRB, false};
     static constexpr OneWireTimingProfile ws2805 = {
         // WS2805 needs a 1.25 us bit cell. The former 917 kHz profile produced
         // a 1.09 us cell and caused periodic colour corruption and white flashes.
@@ -153,6 +156,9 @@ inline const OneWireTimingProfile& getOneWireTimingProfile(LedProtocol protocol)
             return sk6812_rgbcct;
 
         case LedProtocol::WS2811:
+            return ws2811;
+
+        case LedProtocol::WS2811_400KHZ:
             return ws2811_400;
 
         case LedProtocol::WS2805_RGBCCT:

@@ -29,7 +29,8 @@ enum class LedProtocol
     WS2812B, // Same as WS2812 (common variant)
     WS2813,  // 5V RGB, 800kHz, GRB, data backup
     WS2815,  // 12V RGB, 800kHz, GRB, data backup
-    WS2811,  // 12V RGB, 400kHz, RGB order
+    WS2811,        // 12V RGB, modern 800kHz, RGB order
+    WS2811_400KHZ, // Legacy half-speed WS2811/WS2812, 400kHz, GRB order
     SK6812,  // 5V/12V RGBW, 800kHz, GRBW order
     SK6805,  // 5V RGBW, 800kHz, GRBW order
     WS2814,  // 12V RGBW, 800kHz, GRBW order
@@ -249,6 +250,22 @@ namespace ProtocolHelper
                order == ColorOrder::RGBCTW || order == ColorOrder::GRBCTW;
     }
 
+    /** Map logical RGB values to the first three transmitted channels. */
+    inline bool mapRgbChannels(ColorOrder order, uint8_t r, uint8_t g, uint8_t b,
+                               uint8_t& first, uint8_t& second, uint8_t& third)
+    {
+        switch (order)
+        {
+            case ColorOrder::RGB: first = r; second = g; third = b; return true;
+            case ColorOrder::RBG: first = r; second = b; third = g; return true;
+            case ColorOrder::GRB: first = g; second = r; third = b; return true;
+            case ColorOrder::GBR: first = g; second = b; third = r; return true;
+            case ColorOrder::BGR: first = b; second = g; third = r; return true;
+            case ColorOrder::BRG: first = b; second = r; third = g; return true;
+            default: return false;
+        }
+    }
+
     /**
      * Get color order for protocol
      */
@@ -258,6 +275,9 @@ namespace ProtocolHelper
         {
             case LedProtocol::WS2811:
                 return ColorOrder::RGB;
+
+            case LedProtocol::WS2811_400KHZ:
+                return ColorOrder::GRB;
 
             case LedProtocol::APA102:
             case LedProtocol::APA102_CLONE:
@@ -362,9 +382,9 @@ namespace ProtocolHelper
      */
     inline uint32_t getDefaultFrequency(LedProtocol protocol)
     {
-        if (protocol == LedProtocol::WS2811)
+        if (protocol == LedProtocol::WS2811_400KHZ)
         {
-            return 400000; // 400kHz (WS2811 slow mode)
+            return 400000; // 400kHz legacy half-speed mode
         }
         if (isSPI(protocol))
         {

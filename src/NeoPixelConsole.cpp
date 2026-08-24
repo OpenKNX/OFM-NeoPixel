@@ -167,6 +167,7 @@ static const char* getProtocolName(LedProtocol protocol)
         case LedProtocol::WS2813: return "WS2813";
         case LedProtocol::WS2815: return "WS2815";
         case LedProtocol::WS2811: return "WS2811";
+        case LedProtocol::WS2811_400KHZ: return "WS2811/WS2812 400kHz";
         case LedProtocol::SK6812: return "SK6812";
         case LedProtocol::SK6805: return "SK6805";
         case LedProtocol::WS2814: return "WS2814";
