@@ -20,13 +20,13 @@ static void testProfiles()
     const OneWireTimingProfile& rgbcct = getOneWireTimingProfile(LedProtocol::SK6812_RGBCCT);
     assert(rgbcct.channelCount == 5 && rgbcct.defaultColorOrder == ColorOrder::GRBCCT);
     const OneWireTimingProfile& ws2805 = getOneWireTimingProfile(LedProtocol::WS2805_RGBCCT);
-    assert(ws2805.bitRateHz == 800000 && ws2805.resetTimeUs >= 300);
+    assert(ws2805.bitRateHz == 917431 && ws2805.resetTimeUs == 300);
     assert(ws2805.pioCadence == OneWirePioCadence::FOUR_STEP);
     assert(ws2805.channelCount == 5 && ws2805.defaultColorOrder == ColorOrder::RGBCCT);
-    assert(ws2805.t0hNs == 312 && ws2805.t0lNs == 938);
-    assert(ws2805.t1hNs == 938 && ws2805.t1lNs == 312);
-    assert(ws2805.t0hNs + ws2805.t0lNs == 1250);
-    assert(ws2805.t1hNs + ws2805.t1lNs == 1250);
+    assert(ws2805.t0hNs == 300 && ws2805.t0lNs == 790);
+    assert(ws2805.t1hNs == 790 && ws2805.t1lNs == 300);
+    assert(ws2805.t0hNs + ws2805.t0lNs == 1090);
+    assert(ws2805.t1hNs + ws2805.t1lNs == 1090);
     const OneWireTimingProfile& sm16825 = getOneWireTimingProfile(LedProtocol::SM16825);
     assert(sm16825.bitRateHz == 800000 && sm16825.channelCount == 5);
     assert(sm16825.bytesPerChannel == 2 && sm16825.frameSettingsBytes == 4);
@@ -51,6 +51,7 @@ static void testColorOrderCompatibility()
     assert(!ProtocolHelper::mapRgbChannels(ColorOrder::RGBW, 1, 2, 3, first, second, third));
     assert(ProtocolHelper::getDefaultFrequency(LedProtocol::WS2811) == 800000);
     assert(ProtocolHelper::getDefaultFrequency(LedProtocol::WS2811_400KHZ) == 400000);
+    assert(ProtocolHelper::getDefaultFrequency(LedProtocol::WS2805_RGBCCT) == 917431);
     assert(ProtocolHelper::getColorOrder(LedProtocol::WS2811) == ColorOrder::RGB);
     assert(ProtocolHelper::getColorOrder(LedProtocol::WS2811_400KHZ) == ColorOrder::GRB);
     assert(ProtocolHelper::isColorOrderCompatible(LedProtocol::SK6812, ColorOrder::GRB));
@@ -93,8 +94,8 @@ static void testQuantization()
     assert(oneWireMakeBalancedSymbols(ws2805.t0hNs, ws2805.t0lNs,
                                       ws2805.t1hNs, ws2805.t1lNs,
                                       40000000U, 32767U, symbols));
-    assert(symbols.period == 50 && symbols.zeroHigh == 12 && symbols.zeroLow == 38);
-    assert(symbols.oneHigh == 38 && symbols.oneLow == 12);
+    assert(symbols.period == 44 && symbols.zeroHigh == 12 && symbols.zeroLow == 32);
+    assert(symbols.oneHigh == 32 && symbols.oneLow == 12);
 }
 
 static void testBitrateOverrides()
@@ -130,12 +131,12 @@ static void testPioDivider()
     float realizedBitrate = 0.0f;
 
     // WS2805 uses the FOUR_STEP cadence: four PIO cycles per serial bit.
-    assert(oneWireMakePioClockDivider(125000000U, 800000.0f, 4,
+    assert(oneWireMakePioClockDivider(125000000U, 917431.0f, 4,
                                       divider, realizedBitrate));
-    assert(divider == 39.0625f && realizedBitrate == 800000.0f);
-    assert(oneWireMakePioClockDivider(150000000U, 800000.0f, 4,
+    assert(divider == (125000000.0f / (917431.0f * 4.0f)) && realizedBitrate == 917431.0f);
+    assert(oneWireMakePioClockDivider(150000000U, 917431.0f, 4,
                                       divider, realizedBitrate));
-    assert(divider == 46.875f && realizedBitrate == 800000.0f);
+    assert(divider == (150000000.0f / (917431.0f * 4.0f)) && realizedBitrate == 917431.0f);
 
     // The custom bitrate path must use the same cadence calculation.
     assert(oneWireMakePioClockDivider(125000000U, 600000.0f, 4,

@@ -131,9 +131,9 @@ inline const OneWireTimingProfile& getOneWireTimingProfile(LedProtocol protocol)
         "WS2811-400", 400000, 500, 2000, 1200, 1300, 50, false, OneWirePioCadence::SIX_STEP,
         3, 1, 0, ColorOrder::GRB, false};
     static constexpr OneWireTimingProfile ws2805 = {
-        // WS2805 needs a 1.25 us bit cell. The former 917 kHz profile produced
-        // a 1.09 us cell and caused periodic colour corruption and white flashes.
-        "WS2805", 800000, 312, 938, 938, 312, 300, false, OneWirePioCadence::FOUR_STEP,
+        // Match WLED's NeoPixelBus profile. RMT emits these pulses exactly;
+        // RP2040 uses NeoPixelBus's 917.431 kHz four-step approximation.
+        "WS2805", 917431, 300, 790, 790, 300, 300, false, OneWirePioCadence::FOUR_STEP,
         5, 1, 0, ColorOrder::RGBCCT, false};
     static constexpr OneWireTimingProfile sm16825 = {
         // SM16825 uses the WS2812x waveform, 16-bit MSB-first channels and

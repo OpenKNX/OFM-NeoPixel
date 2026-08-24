@@ -382,6 +382,10 @@ namespace ProtocolHelper
      */
     inline uint32_t getDefaultFrequency(LedProtocol protocol)
     {
+        if (protocol == LedProtocol::WS2805_RGBCCT)
+        {
+            return 917431; // WLED/NeoPixelBus WS2805 profile (1.09 us bit cell)
+        }
         if (protocol == LedProtocol::WS2811_400KHZ)
         {
             return 400000; // 400kHz legacy half-speed mode
