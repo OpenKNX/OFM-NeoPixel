@@ -1,7 +1,8 @@
 #if defined(ARDUINO_ARCH_RP2040)
 
-    #include "pio_neopixel_spi.h"
-    #include "../PhysicalStripConfig.h"
+#include "pio_neopixel_spi.h"
+#include "../PhysicalStripConfig.h"
+#include "../SpiFrameMath.h"
     #include "OpenKNX.h"
     #include "pio_dma_shared.h"
     #include <Arduino.h>
@@ -229,19 +230,17 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
         _inst->hwBrightness = 16;    // Default: 50% brightness
     }
 
-    _inst->hasGlobalBrightness = (protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE || protocol == LedProtocol::SK9822);
-    // APA102/SK9822 add one hardware-brightness byte to their three colour
-    // channels; flat SPI protocols use their native payload width.
-    _inst->bytesPerLed = _inst->hasGlobalBrightness ? 4 : ProtocolHelper::getBytesPerLed(protocol);
-
     // Store a canonical, protocol-native byte stream. A separate word buffer
     // feeds the PIO FIFO, preserving exact output framing without exposing a
     // host-endian/DMA representation to the rest of OFM.
-    const size_t pixelDataSize = (size_t)ledCount * _inst->bytesPerLed;
-    const size_t startFrameSize = _inst->hasGlobalBrightness ? (size_t)_inst->startFrameCount * 4 : 0;
-    const size_t dummyLedSize = _inst->hasGlobalBrightness && _inst->dummyLedMode == 1 ? 4 : 0;
-    const size_t endFrameSize = _inst->hasGlobalBrightness ? (size_t)_inst->endFrameCount * 4 : 0;
-    _inst->bufferSize = startFrameSize + dummyLedSize + pixelDataSize + endFrameSize;
+    SpiFrameLayout layout = {};
+    if (!spiMakeFrameLayout(protocol, ledCount, _inst->startFrameCount,
+                            _inst->dummyLedMode, _inst->endFrameCount, layout))
+        return;
+
+    _inst->hasGlobalBrightness = layout.hasGlobalBrightness;
+    _inst->bytesPerLed = layout.bytesPerLed;
+    _inst->bufferSize = layout.bufferSize;
     _inst->bufferWordCount = _inst->bufferSize;
     _inst->buffer = (uint8_t*)calloc(_inst->bufferSize, sizeof(uint8_t));
     _inst->transferBuffer = (uint32_t*)calloc(_inst->bufferWordCount, sizeof(uint32_t));
@@ -257,15 +256,15 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
 
     if (_inst->hasGlobalBrightness)
     {
-        const size_t firstLedOffset = startFrameSize + dummyLedSize;
+        const size_t firstLedOffset = layout.startFrameSize + layout.dummyLedSize;
         if (_inst->dummyLedMode == 1)
-            _inst->buffer[startFrameSize] = 0xE0;
+            _inst->buffer[layout.startFrameSize] = 0xE0;
 
         const uint8_t defaultBright = 0xE0 | 30;
         for (uint16_t i = 0; i < _inst->ledCount; ++i)
             _inst->buffer[firstLedOffset + (size_t)i * 4] = defaultBright;
 
-        memset(_inst->buffer + firstLedOffset + pixelDataSize, _inst->endFramePattern, endFrameSize);
+        memset(_inst->buffer + firstLedOffset + layout.pixelDataSize, _inst->endFramePattern, layout.endFrameSize);
     }
 }
 
@@ -702,9 +701,9 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
     }
     else if (_inst->protocol == LedProtocol::LPD8806)
     {
-        _inst->buffer[dataOffset] = 0x80 | (channels[0] >> 1);
-        _inst->buffer[dataOffset + 1] = 0x80 | (channels[1] >> 1);
-        _inst->buffer[dataOffset + 2] = 0x80 | (channels[2] >> 1);
+        _inst->buffer[dataOffset] = spiEncodeLpd8806Channel(channels[0]);
+        _inst->buffer[dataOffset + 1] = spiEncodeLpd8806Channel(channels[1]);
+        _inst->buffer[dataOffset + 2] = spiEncodeLpd8806Channel(channels[2]);
     }
     else
     {
@@ -767,7 +766,7 @@ void PIO_NeoPixel_SPI::prepareTransferBuffer()
     if (!_inst || !_inst->buffer || !_inst->transferBuffer) return;
 
     for (size_t i = 0; i < _inst->bufferSize; ++i)
-        _inst->transferBuffer[i] = (uint32_t)_inst->buffer[i] << 24;
+        _inst->transferBuffer[i] = spiPioWordForByte(_inst->buffer[i]);
 
     __dmb();
 }

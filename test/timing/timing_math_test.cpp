@@ -1,5 +1,6 @@
 #include "OneWireTimingMath.h"
 #include "OneWireTimingProfile.h"
+#include "SpiFrameMath.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -131,6 +132,31 @@ static void testExactPacking()
         assert(oneWirePackedWordAt(sm16825, 10, i) == ((uint32_t)sm16825[i] << 24));
 }
 
+static void testSpiFrameLayouts()
+{
+    SpiFrameLayout layout = {};
+
+    assert(spiMakeFrameLayout(LedProtocol::APA102, 2, 8, 1, 1, layout));
+    assert(layout.hasGlobalBrightness && layout.bytesPerLed == 4);
+    assert(layout.startFrameSize == 32 && layout.dummyLedSize == 4);
+    assert(layout.pixelDataSize == 8 && layout.endFrameSize == 4);
+    assert(layout.bufferSize == 48);
+
+    assert(spiMakeFrameLayout(LedProtocol::SK9822, 1, 1, 0, 1, layout));
+    assert(layout.bufferSize == 12); // start frame + pixel frame + end frame
+
+    assert(spiMakeFrameLayout(LedProtocol::WS2801, 2, 8, 1, 1, layout));
+    assert(!layout.hasGlobalBrightness && layout.bytesPerLed == 3);
+    assert(layout.startFrameSize == 0 && layout.dummyLedSize == 0 && layout.endFrameSize == 0);
+    assert(layout.bufferSize == 6); // no APA framing or padding
+
+    assert(spiMakeFrameLayout(LedProtocol::LPD8806, 1, 8, 1, 1, layout));
+    assert(layout.bufferSize == 3);
+    assert(spiEncodeLpd8806Channel(0x00) == 0x80);
+    assert(spiEncodeLpd8806Channel(0xff) == 0xff);
+    assert(spiPioWordForByte(0xa5) == 0xa5000000U);
+}
+
 int main()
 {
     testProfiles();
@@ -139,6 +165,7 @@ int main()
     testBitrateOverrides();
     testDeadlines();
     testExactPacking();
+    testSpiFrameLayouts();
     puts("one-wire timing regression tests passed");
     return 0;
 }
