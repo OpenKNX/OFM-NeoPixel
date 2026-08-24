@@ -100,6 +100,8 @@ struct pio_neopixel_spi_inst
     bool initialized;    // Initialization state
     volatile bool busy;  // Transfer in progress
     volatile bool dirty; // Buffer has changed since last show() (prevents flicker from redundant sends)
+    volatile bool dmaFinished; // DMA has filled the FIFO; wire output may still be pending
+    uint32_t fifoDrainedAtUs;
 };
 typedef struct pio_neopixel_spi_inst pio_neopixel_spi_inst_t;
 
@@ -217,7 +219,7 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
     /**
      * @brief Get detected chip type (after auto-detect or manual set)
      */
-    LedProtocol getDetectedChip() const { return _inst ? _inst->detectedChip : _inst->protocol; }
+    LedProtocol getDetectedChip() const { return _inst ? _inst->detectedChip : LedProtocol::APA102; }
 
     /**
      * @brief Run chip auto-detection (APA102 vs SK9822)
@@ -249,9 +251,10 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
 
     bool initPIO();
     bool initDMA();
-    void sendDataPIO();
-    void sendDataDMA();
+    bool sendDataPIO();
+    bool sendDataDMA();
     void prepareTransferBuffer();
+    bool rebuildFrameBuffers();
     void sendStartFrame();
     void sendEndFrame();
     static void dmaIRQHandler();

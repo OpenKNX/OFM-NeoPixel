@@ -182,6 +182,8 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     _inst->protocol = protocol;
     _inst->spiFrequency = frequency;
     _inst->dirty = true;
+    _inst->dmaFinished = false;
+    _inst->fifoDrainedAtUs = 0;
 
     // Set ColorOrder: Use provided value, or protocol-dependent default
     if (colorOrder == ColorOrder::NONE)
@@ -197,7 +199,7 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     }
 
     // DMA configuration (claimed later in init() if available)
-    _inst->useDMA = true;   // Enable DMA by default (falls back to PIO if unavailable)
+    _inst->useDMA = useDMA;
     _inst->dmaChannel = -1; // Not yet claimed
     _inst->dmaIrqNum = -1;  // Not yet assigned
     // ===== Extended SPI Configuration Defaults =====
@@ -741,18 +743,29 @@ bool PIO_NeoPixel_SPI::show()
 
     prepareTransferBuffer();
     _inst->busy = true;
-    _inst->dirty = false;
+    _inst->dmaFinished = false;
+    _inst->fifoDrainedAtUs = 0;
+    if (_inst->csPin >= 0) digitalWrite(_inst->csPin, LOW);
 
+    bool started = false;
     if (_inst->useDMA && _inst->dmaChannel >= 0)
     {
-        sendDataDMA();
+        started = sendDataDMA();
     }
     else
     {
-        sendDataPIO();
-        _inst->busy = false;
+        started = sendDataPIO();
     }
 
+    if (!started)
+    {
+        _inst->busy = false;
+        _inst->dirty = true;
+        if (_inst->csPin >= 0) digitalWrite(_inst->csPin, HIGH);
+        return false;
+    }
+
+    _inst->dirty = false;
     return true;
 }
 
@@ -785,9 +798,9 @@ void PIO_NeoPixel_SPI::prepareTransferBuffer()
  * Note: BLOCKING - function returns only after ALL data sent.
  * Use DMA for non-blocking transfers in production.
  */
-void PIO_NeoPixel_SPI::sendDataPIO()
+bool PIO_NeoPixel_SPI::sendDataPIO()
 {
-    if (!_inst) return;
+    if (!_inst) return false;
 
     // CRITICAL: Memory barrier to ensure all buffer writes are visible to PIO!
     __dmb(); // Data Memory Barrier
@@ -807,19 +820,22 @@ void PIO_NeoPixel_SPI::sendDataPIO()
             if ((uint32_t)(micros() - startUs) > 20000) // 20 ms >> any real FIFO wait
             {
                 if (_inst->csPin >= 0) digitalWrite(_inst->csPin, HIGH);
-                _inst->busy = false;
-                return; // abandon the frame; next show() re-arms
+                return false;
             }
         }
         pio_sm_put(_inst->pio, _inst->sm, wordBuffer[i]);
     }
 
-    if (_inst->csPin >= 0)
+    const uint32_t drainStart = micros();
+    while (!pio_sm_is_tx_fifo_empty(_inst->pio, _inst->sm))
     {
-        digitalWrite(_inst->csPin, HIGH); // CS inactive
+        if ((uint32_t)(micros() - drainStart) > 20000) return false;
     }
-
+    // The FIFO becoming empty still leaves one byte in the output shifter.
+    delayMicroseconds((8000000U + _inst->spiFrequency - 1U) / _inst->spiFrequency + 1U);
+    if (_inst->csPin >= 0) digitalWrite(_inst->csPin, HIGH);
     _inst->busy = false;
+    return true;
 }
 
 /**
@@ -834,13 +850,12 @@ void PIO_NeoPixel_SPI::sendDataPIO()
  * 3. DREQ pacing from PIO prevents FIFO overflow
  * 4. IRQ fires on completion → onDmaComplete() clears busy flag
  */
-void PIO_NeoPixel_SPI::sendDataDMA()
+bool PIO_NeoPixel_SPI::sendDataDMA()
 {
-    if (!_inst) return; // can't clear busy on a null instance — must check first
+    if (!_inst) return false;
     if (_inst->dmaChannel < 0)
     {
-        _inst->busy = false;
-        return;
+        return false;
     }
 
     // CRITICAL: Memory barrier to ensure all buffer writes are visible to DMA!
@@ -850,6 +865,7 @@ void PIO_NeoPixel_SPI::sendDataDMA()
     // Trigger DMA transfer (last parameter true = start immediately)
     // DMA reads PIO-ready words and writes to the PIO TX FIFO.
     dma_channel_set_read_addr(_inst->dmaChannel, _inst->transferBuffer, true);
+    return true;
 }
 
 /**
@@ -861,7 +877,10 @@ void PIO_NeoPixel_SPI::sendDataDMA()
 void PIO_NeoPixel_SPI::onDmaComplete()
 {
     if (!_inst) return;
-    _inst->busy = false; // Transfer complete, ready for next frame
+    // DMA completion only says that the FIFO was fed.  isBusy() completes the
+    // transfer after FIFO and output-shifter drain in normal foreground code.
+    _inst->dmaFinished = true;
+    _inst->fifoDrainedAtUs = 0;
 }
 
 /**
@@ -869,7 +888,22 @@ void PIO_NeoPixel_SPI::onDmaComplete()
  */
 bool PIO_NeoPixel_SPI::isBusy()
 {
-    return _inst ? _inst->busy : false;
+    if (!_inst || !_inst->busy) return false;
+    if (!_inst->dmaFinished) return true;
+    if (!pio_sm_is_tx_fifo_empty(_inst->pio, _inst->sm)) return true;
+
+    const uint32_t now = micros();
+    if (_inst->fifoDrainedAtUs == 0)
+    {
+        _inst->fifoDrainedAtUs = now;
+        return true;
+    }
+    const uint32_t finalByteUs = (8000000U + _inst->spiFrequency - 1U) / _inst->spiFrequency + 1U;
+    if ((uint32_t)(now - _inst->fifoDrainedAtUs) < finalByteUs) return true;
+
+    _inst->busy = false;
+    if (_inst->csPin >= 0) digitalWrite(_inst->csPin, HIGH);
+    return false;
 }
 
 /**
@@ -992,6 +1026,51 @@ PhysicalStripConfig* PIO_NeoPixel_SPI::createDefaultConfig() const
     return cfg;
 }
 
+bool PIO_NeoPixel_SPI::rebuildFrameBuffers()
+{
+    if (!_inst || _inst->initialized) return false;
+
+    SpiFrameLayout layout = {};
+    if (!spiMakeFrameLayout(_inst->protocol, _inst->ledCount, _inst->startFrameCount,
+                            _inst->dummyLedMode, _inst->endFrameCount, layout))
+        return false;
+
+    uint8_t* replacement = static_cast<uint8_t*>(calloc(layout.bufferSize, sizeof(uint8_t)));
+    uint32_t* replacementWords = static_cast<uint32_t*>(calloc(layout.bufferSize, sizeof(uint32_t)));
+    if (!replacement || !replacementWords)
+    {
+        free(replacement);
+        free(replacementWords);
+        return false;
+    }
+
+    if (layout.hasGlobalBrightness)
+    {
+        const size_t firstLedOffset = layout.startFrameSize + layout.dummyLedSize;
+        if (_inst->dummyLedMode == 1) replacement[layout.startFrameSize] = 0xE0;
+        const uint8_t bright = 0xE0 | (_inst->hwBrightness & 0x1F);
+        for (uint16_t i = 0; i < _inst->ledCount; ++i)
+            replacement[firstLedOffset + static_cast<size_t>(i) * 4] = bright;
+        memset(replacement + firstLedOffset + layout.pixelDataSize,
+               _inst->endFramePattern, layout.endFrameSize);
+    }
+    else if (_inst->protocol == LedProtocol::LPD8806)
+    {
+        memset(replacement, 0x80, layout.bufferSize);
+    }
+
+    free(_inst->buffer);
+    free(_inst->transferBuffer);
+    _inst->buffer = replacement;
+    _inst->transferBuffer = replacementWords;
+    _inst->bufferSize = layout.bufferSize;
+    _inst->bufferWordCount = layout.bufferSize;
+    _inst->bytesPerLed = layout.bytesPerLed;
+    _inst->hasGlobalBrightness = layout.hasGlobalBrightness;
+    _inst->dirty = true;
+    return true;
+}
+
 /**
  * @brief Apply configuration to driver
  * @param config SpiStripConfig to apply
@@ -1005,13 +1084,20 @@ bool PIO_NeoPixel_SPI::applyConfig(const PhysicalStripConfig* config)
     const SpiStripConfig* spiCfg = dynamic_cast<const SpiStripConfig*>(config);
     if (!spiCfg) return false;
 
+    const bool layoutChanged = _inst->dummyLedMode != spiCfg->getDummyLedMode() ||
+                               _inst->startFrameCount != spiCfg->getStartFrameCount() ||
+                               _inst->endFrameCount != spiCfg->getEndFrameCount() ||
+                               _inst->endFramePattern != spiCfg->getEndFramePattern();
+    if (spiCfg->getStartFrameDelayUs() != 0) return false;
+    if (_inst->initialized && layoutChanged) return false;
+
     // Apply ColorOrder
     _inst->colorOrder = spiCfg->getColorOrder();
 
     // Apply SPI-specific settings
     _inst->hwBrightness = spiCfg->getHwBrightness();
     _inst->endFramePattern = spiCfg->getEndFramePattern();
-    _inst->startFrameDelayUs = spiCfg->getStartFrameDelayUs();
+    _inst->startFrameDelayUs = 0;
     _inst->autoDetectChip = spiCfg->getAutoDetectChip();
     _inst->detectedChip = spiCfg->getDetectedChip();
     _inst->minRgbValue = spiCfg->getMinRgbValue();         // Clone chip workaround
@@ -1021,6 +1107,7 @@ bool PIO_NeoPixel_SPI::applyConfig(const PhysicalStripConfig* config)
 
     // Apply SPI frequency (can be changed live if initialized)
     uint32_t newFreq = spiCfg->getSpiFrequency();
+    if (newFreq == 0) return false;
     if (_inst->spiFrequency != newFreq)
     {
         _inst->spiFrequency = newFreq;
@@ -1044,6 +1131,7 @@ bool PIO_NeoPixel_SPI::applyConfig(const PhysicalStripConfig* config)
         _inst->dummyLedMode = spiCfg->getDummyLedMode();
         _inst->startFrameCount = spiCfg->getStartFrameCount();
         _inst->endFrameCount = spiCfg->getEndFrameCount();
+        if (layoutChanged && !rebuildFrameBuffers()) return false;
     }
 
     return true;
@@ -1071,7 +1159,9 @@ void PIO_NeoPixel_SPI::setDummyLedMode(uint8_t mode)
         return;
     }
 
+    const uint8_t previous = _inst->dummyLedMode;
     _inst->dummyLedMode = mode;
+    if (!rebuildFrameBuffers()) _inst->dummyLedMode = previous;
 }
 
 /**
@@ -1092,7 +1182,9 @@ void PIO_NeoPixel_SPI::setStartFrameCount(uint8_t count)
         return;
     }
 
+    const uint8_t previous = _inst->startFrameCount;
     _inst->startFrameCount = count;
+    if (!rebuildFrameBuffers()) _inst->startFrameCount = previous;
 }
 
 /**
@@ -1114,7 +1206,9 @@ void PIO_NeoPixel_SPI::setEndFrameCount(uint8_t count)
         return;
     }
 
+    const uint8_t previous = _inst->endFrameCount;
     _inst->endFrameCount = count;
+    if (!rebuildFrameBuffers()) _inst->endFrameCount = previous;
 }
 
 /**
@@ -1123,9 +1217,12 @@ void PIO_NeoPixel_SPI::setEndFrameCount(uint8_t count)
 void PIO_NeoPixel_SPI::setStartFrameDelayUs(uint32_t delayUs)
 {
     if (!_inst) return;
-    if (delayUs > 1000) delayUs = 1000;
-
-    _inst->startFrameDelayUs = delayUs;
+    if (delayUs != 0)
+    {
+        logWarningP("PIO NeoPixel SPI: startFrameDelayUs is unsupported");
+        return;
+    }
+    _inst->startFrameDelayUs = 0;
 }
 
 /**
@@ -1134,7 +1231,10 @@ void PIO_NeoPixel_SPI::setStartFrameDelayUs(uint32_t delayUs)
 void PIO_NeoPixel_SPI::setEndFramePattern(uint8_t pattern)
 {
     if (!_inst) return;
+    if (_inst->initialized) return;
+    const uint8_t previous = _inst->endFramePattern;
     _inst->endFramePattern = pattern;
+    if (!rebuildFrameBuffers()) _inst->endFramePattern = previous;
 }
 
 /**

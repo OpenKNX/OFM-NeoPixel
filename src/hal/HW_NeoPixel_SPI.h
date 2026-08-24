@@ -168,7 +168,7 @@ class HW_NeoPixel_SPI : public IHardwareDriver
     /**
      * @brief Get detected chip type (after auto-detect or manual set)
      */
-    LedProtocol getDetectedChip() const { return _inst ? _inst->detectedChip : _inst->protocol; }
+    LedProtocol getDetectedChip() const { return _inst ? _inst->detectedChip : LedProtocol::APA102; }
 
     /**
      * @brief Run chip auto-detection (APA102 vs SK9822)
@@ -187,6 +187,7 @@ class HW_NeoPixel_SPI : public IHardwareDriver
     void sendStartFrame();
     void sendEndFrame();
     void initBufferFraming();
+    bool rebuildFrameBuffer();
     void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
 
     static bool _spi0Used;          // Track SPI0 usage
