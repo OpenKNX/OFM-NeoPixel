@@ -11,6 +11,13 @@ bool managerOwns(const std::vector<T*>& entries, const T* value)
 {
     return value && std::find(entries.begin(), entries.end(), value) != entries.end();
 }
+
+uint8_t loadPercent(uint32_t currentMa, uint32_t limitMa)
+{
+    if (limitMa == 0) return 0;
+    const uint64_t percent = (static_cast<uint64_t>(currentMa) * 100U) / limitMa;
+    return percent > 255U ? 255U : static_cast<uint8_t>(percent);
+}
 }
 
 // ============================================================================
@@ -704,9 +711,7 @@ void NeoPixelManager::applyPowerLimit()
             // Cache global stats
             _globalCurrentMa = targetCurrent;
             _globalLimitMa = effectiveLimit;
-            _globalLoadPercent = effectiveLimit > 0
-                                     ? (uint8_t)((targetCurrent * 100) / effectiveLimit)
-                                     : 0;
+            _globalLoadPercent = loadPercent(targetCurrent, effectiveLimit);
         }
         else
         {
@@ -715,7 +720,7 @@ void NeoPixelManager::applyPowerLimit()
 
             _globalCurrentMa = totalRequestedCurrent;
             _globalLimitMa = effectiveLimit;
-            _globalLoadPercent = effectiveLimit > 0 ? (uint8_t)((totalRequestedCurrent * 100) / effectiveLimit) : 0;
+            _globalLoadPercent = loadPercent(totalRequestedCurrent, effectiveLimit);
         }
 
         // Cache per-strip stats for ALL strips (for monitoring)
@@ -757,7 +762,7 @@ void NeoPixelManager::applyPowerLimit()
             StripPowerStats stats;
             stats.currentMa = stripCurrent;
             stats.limitMa = stripLimit;
-            stats.loadPercent = stripLimit > 0 ? (uint8_t)((stripCurrent * 100) / stripLimit) : 0;
+            stats.loadPercent = loadPercent(stripCurrent, stripLimit);
             _stripPowerCache[phys] = stats;
         }
 
@@ -830,7 +835,7 @@ void NeoPixelManager::applyPowerLimit()
             StripPowerStats stats;
             stats.currentMa = actualCurrent;
             stats.limitMa = stripLimit;
-            stats.loadPercent = stripLimit > 0 ? (uint8_t)((actualCurrent * 100) / stripLimit) : 0;
+            stats.loadPercent = loadPercent(actualCurrent, stripLimit);
             _stripPowerCache[phys] = stats;
         }
     }
@@ -878,7 +883,7 @@ void NeoPixelManager::applyPowerLimit()
             StripPowerStats stats;
             stats.currentMa = stripRequestedCurrent;
             stats.limitMa = stripLimit;
-            stats.loadPercent = stripLimit > 0 ? (uint8_t)((stripRequestedCurrent * 100) / stripLimit) : 0;
+            stats.loadPercent = loadPercent(stripRequestedCurrent, stripLimit);
             _stripPowerCache[phys] = stats;
         }
 
@@ -953,7 +958,7 @@ void NeoPixelManager::applyPowerLimit()
                 if (actualCurrent > stripLimit) actualCurrent = stripLimit;
 
                 cacheIt->second.currentMa = actualCurrent;
-                cacheIt->second.loadPercent = stripLimit > 0 ? (uint8_t)((actualCurrent * 100) / stripLimit) : 0;
+                cacheIt->second.loadPercent = loadPercent(actualCurrent, stripLimit);
             }
         }
 
@@ -965,7 +970,7 @@ void NeoPixelManager::applyPowerLimit()
             _globalCurrentMa += entry.second.currentMa;
             _globalLimitMa += entry.second.limitMa;
         }
-        _globalLoadPercent = _globalLimitMa > 0 ? (uint8_t)((_globalCurrentMa * 100) / _globalLimitMa) : 0;
+        _globalLoadPercent = loadPercent(_globalCurrentMa, _globalLimitMa);
     }
     else if (mode == PowerLimitMode::PER_LED)
     {
@@ -1014,7 +1019,7 @@ void NeoPixelManager::applyPowerLimit()
             StripPowerStats stats;
             stats.currentMa = stripRequestedCurrent;
             stats.limitMa = stripLimit;
-            stats.loadPercent = stripLimit > 0 ? (uint8_t)((stripRequestedCurrent * 100) / stripLimit) : 0;
+            stats.loadPercent = loadPercent(stripRequestedCurrent, stripLimit);
             _stripPowerCache[phys] = stats;
         }
 
@@ -1082,7 +1087,7 @@ void NeoPixelManager::applyPowerLimit()
                 if (actualCurrent > stripLimit) actualCurrent = stripLimit;
 
                 cacheIt->second.currentMa = actualCurrent;
-                cacheIt->second.loadPercent = stripLimit > 0 ? (uint8_t)((actualCurrent * 100) / stripLimit) : 0;
+                cacheIt->second.loadPercent = loadPercent(actualCurrent, stripLimit);
             }
         }
 
@@ -1094,7 +1099,7 @@ void NeoPixelManager::applyPowerLimit()
             _globalCurrentMa += entry.second.currentMa;
             _globalLimitMa += entry.second.limitMa;
         }
-        _globalLoadPercent = _globalLimitMa > 0 ? (uint8_t)((_globalCurrentMa * 100) / _globalLimitMa) : 0;
+        _globalLoadPercent = loadPercent(_globalCurrentMa, _globalLimitMa);
     }
 }
 
