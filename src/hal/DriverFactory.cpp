@@ -85,7 +85,8 @@ IHardwareDriver* DriverFactory::create(uint pin,              // Data pin (for 1
     }
     else if (driverType == DriverType::SPI_HARDWARE && isSpi)
     {
-        return new HW_NeoPixel_SPI(ledCount, protocol);
+        return new HW_NeoPixel_SPI(mosiPin, sckPin, ledCount, protocol,
+                                  ProtocolHelper::getDefaultFrequency(protocol));
     }
 #else
     return nullptr; // Not supported platform
