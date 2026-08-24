@@ -97,7 +97,8 @@ void HclPixelTransform::Callback(uint16_t pixelIndex,
         const uint8_t sat = (vmax == 0) ? 0 : (uint8_t)(((uint16_t)(vmax - vmin) * 255u) / vmax);
 
         // Check if we should apply HCL based on saturation and mode
-        weight = hclWeightFromSat(applyMode, sat, hclConfig->saturationThreshold);
+        const uint8_t curve = (hclConfig->preserveCurve <= 2) ? hclConfig->preserveCurve : 0;
+        weight = hclWeightFromSatInternal(sat, hclConfig->saturationThreshold, applyMode, curve);
         if (weight == 0) return;
 
         // Apply HCL transformation to this pixel using cached values from context
@@ -183,16 +184,16 @@ void HclPixelTransform::applyToPixelCached(HclTransformContext* ctx,
                                            uint8_t* ww,
                                            uint8_t* cw)
 {
-    // For RGBCCT (5-channel): Not supported in cached path
-    if (ww && cw) return;
-
     // Use cached Kelvin RGB values from the selected LightManager master.
     const uint8_t kr = masterState.cachedKr;
     const uint8_t kg = masterState.cachedKg;
     const uint8_t kb = masterState.cachedKb;
 
-    // For RGB/RGBW
+    const bool isRGBCCT = ww && cw;
+
+    // For RGB/RGBW/RGBCCT
     const uint8_t wIn = (ww) ? *ww : 0;
+    const uint8_t cwIn = (cw) ? *cw : 0;
 
     // Weight is already calculated by caller (includes saturation + curve)
     if (weight == 0) return;
@@ -206,7 +207,10 @@ void HclPixelTransform::applyToPixelCached(HclTransformContext* ctx,
     // Use current pixel value/brightness basis
     const uint8_t vmax = u8_max3(r, g, b);
     uint8_t v = vmax;
-    if (wIn > v) v = wIn;
+    // On a true RGBCCT strip, existing WW/CW light is rebalanced below.  It
+    // must not become an RGB Kelvin approximation as well; otherwise a direct
+    // CCT command lights RGB dies in addition to the white channels.
+    if (!isRGBCCT && wIn > v) v = wIn;
 
     int tr = ((int)kr * (int)v) / 255;
     int tg = ((int)kg * (int)v) / 255;
@@ -231,6 +235,52 @@ void HclPixelTransform::applyToPixelCached(HclTransformContext* ctx,
             tg = (int)((tg * (int)scaleQ8 + 128) >> 8);
             tb = (int)((tb * (int)scaleQ8 + 128) >> 8);
         }
+    }
+
+    // RGBCCT: direct existing white light is rebalanced between warm and cool
+    // channels, while neutral RGB content is extracted into the same CCT pair.
+    // This preserves total white intensity and makes LightManager HCL effective
+    // on five-channel strips instead of silently skipping them.
+    if (isRGBCCT)
+    {
+        uint16_t minKelvin = config.minKelvin;
+        uint16_t maxKelvin = config.maxKelvin;
+        if (minKelvin >= maxKelvin)
+        {
+            minKelvin = 2700;
+            maxKelvin = 6500;
+        }
+
+        const uint16_t kelvin = (masterState.kelvin < minKelvin) ? minKelvin :
+                                (masterState.kelvin > maxKelvin) ? maxKelvin :
+                                masterState.kelvin;
+        const uint32_t range = (uint32_t)maxKelvin - minKelvin;
+        const uint8_t coolFraction = (uint8_t)(((uint32_t)(kelvin - minKelvin) * 255u + range / 2u) / range);
+        const uint8_t warmFraction = (uint8_t)(255u - coolFraction);
+
+        // White channels use a constant-sum brightness basis.  A direct CCT
+        // command produces WW+CW=255, therefore it remains at full intensity
+        // while HCL changes only the temperature ratio.
+        const uint16_t sourceWhiteSum = (uint16_t)wIn + (uint16_t)cwIn;
+        const uint8_t sourceWhite = (sourceWhiteSum > 255u) ? 255u : (uint8_t)sourceWhiteSum;
+        uint16_t targetWW = ((uint16_t)sourceWhite * warmFraction + 127u) / 255u;
+        uint16_t targetCW = ((uint16_t)sourceWhite * coolFraction + 127u) / 255u;
+
+        const int neutral = u8_min3((uint8_t)clamp_u8(tr), (uint8_t)clamp_u8(tg), (uint8_t)clamp_u8(tb));
+        const uint8_t mix = (config.whiteMix > 100) ? 100 : config.whiteMix;
+        const int extracted = (neutral * (int)mix + 50) / 100;
+        tr -= extracted;
+        tg -= extracted;
+        tb -= extracted;
+        targetWW += ((uint16_t)extracted * warmFraction + 127u) / 255u;
+        targetCW += ((uint16_t)extracted * coolFraction + 127u) / 255u;
+
+        r = lerp_u8(r, clamp_u8(tr), frac);
+        g = lerp_u8(g, clamp_u8(tg), frac);
+        b = lerp_u8(b, clamp_u8(tb), frac);
+        *ww = lerp_u8(wIn, clamp_u8(targetWW), frac);
+        *cw = lerp_u8(cwIn, clamp_u8(targetCW), frac);
+        return;
     }
 
     // RGBW: extract neutral part into W

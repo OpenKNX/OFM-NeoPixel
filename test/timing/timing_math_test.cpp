@@ -16,7 +16,7 @@ static void testProfiles()
     const OneWireTimingProfile& ws2805 = getOneWireTimingProfile(LedProtocol::WS2805_RGBCCT);
     assert(ws2805.bitRateHz == 800000 && ws2805.resetTimeUs >= 300);
     assert(ws2805.pioCadence == OneWirePioCadence::FOUR_STEP);
-    assert(ws2805.channelCount == 5 && ws2805.defaultColorOrder == ColorOrder::GRBCCT);
+    assert(ws2805.channelCount == 5 && ws2805.defaultColorOrder == ColorOrder::RGBCCT);
     assert(ws2805.t0hNs == 312 && ws2805.t0lNs == 938);
     assert(ws2805.t1hNs == 938 && ws2805.t1lNs == 312);
     assert(ws2805.t0hNs + ws2805.t0lNs == 1250);
@@ -37,9 +37,23 @@ static void testColorOrderCompatibility()
     assert(!ProtocolHelper::isColorOrderCompatible(LedProtocol::SK6812, ColorOrder::GRBCCT));
     assert(ProtocolHelper::normalizeColorOrder(LedProtocol::WS2812B, ColorOrder::GRBW) == ColorOrder::GRB);
     assert(ProtocolHelper::normalizeColorOrder(LedProtocol::APA102, ColorOrder::GRBW) == ColorOrder::BGR);
-    assert(ProtocolHelper::normalizeColorOrder(LedProtocol::WS2805_RGBCCT, ColorOrder::GRBCCT) == ColorOrder::GRBCCT);
+    assert(ProtocolHelper::getColorOrder(LedProtocol::WS2805_RGBCCT) == ColorOrder::RGBCCT);
+    assert(ProtocolHelper::normalizeColorOrder(LedProtocol::WS2805_RGBCCT, ColorOrder::RGBCCT) == ColorOrder::RGBCCT);
     assert(ProtocolHelper::getBytesPerLed(LedProtocol::SM16825) == 10);
     assert(ProtocolHelper::isColorOrderCompatible(LedProtocol::SM16825, ColorOrder::RGBCTW));
+}
+
+static void testCctMix()
+{
+    uint8_t ww = 0;
+    uint8_t cw = 0;
+    ProtocolHelper::kelvinToWWCW(2700, ww, cw);
+    assert(ww == 255 && cw == 0);
+    ProtocolHelper::kelvinToWWCW(6500, ww, cw);
+    assert(ww == 0 && cw == 255);
+    ProtocolHelper::kelvinToWWCW(4600, ww, cw);
+    assert((uint16_t)ww + cw == 255);
+    assert(ProtocolHelper::wwcwToKelvin(ww, cw) >= 4590 && ProtocolHelper::wwcwToKelvin(ww, cw) <= 4610);
 }
 
 static void testQuantization()
@@ -195,6 +209,7 @@ int main()
 {
     testProfiles();
     testColorOrderCompatibility();
+    testCctMix();
     testQuantization();
     testBitrateOverrides();
     testPioDivider();
