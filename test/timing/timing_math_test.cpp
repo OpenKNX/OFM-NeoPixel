@@ -115,6 +115,16 @@ static void testExactPacking()
     for (size_t i = 0; i < sizeof(rgbcct); ++i)
         assert(oneWirePackedWordAt(rgbcct, 5, i) == ((uint32_t)rgbcct[i] << 24));
 
+    // Two pixels ensure the byte-stream path cannot hide an inserted FIFO
+    // padding word or a missing fifth channel at a pixel boundary.
+    const uint8_t rgbcctPixels[] = {
+        0x11, 0x22, 0x33, 0x44, 0x55,
+        0x66, 0x77, 0x88, 0x99, 0xaa,
+    };
+    assert(oneWirePackedWordCount(sizeof(rgbcctPixels), 5) == sizeof(rgbcctPixels));
+    for (size_t i = 0; i < sizeof(rgbcctPixels); ++i)
+        assert(oneWirePackedWordAt(rgbcctPixels, 5, i) == ((uint32_t)rgbcctPixels[i] << 24));
+
     uint8_t sm16825[14] = {};
     // Default RGBCTW ordering: R, G, B, cool white, warm white.
     oneWireStoreChannel(sm16825, 2, 0, 0x01);
