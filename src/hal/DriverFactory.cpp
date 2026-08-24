@@ -10,14 +10,6 @@
     #include "../rmt/rmt_neopixel_serial.h"
 #endif
 
-namespace
-{
-bool requiresFlatSpiFrames(LedProtocol protocol)
-{
-    return protocol == LedProtocol::WS2801 || protocol == LedProtocol::LPD8806;
-}
-} // namespace
-
 /**
  * Create a hardware driver with automatic selection
  * @param pin GPIO pin for LED data
@@ -76,23 +68,13 @@ IHardwareDriver* DriverFactory::create(uint pin,              // Data pin (for 1
     }
     else if (driverType == DriverType::SPI_HARDWARE && isSpi)
     {
-        // The PIO SPI implementation emits APA102/SK9822 32-bit frames. Flat
-        // WS2801 and LPD8806 streams must use the hardware SPI encoder instead.
-        if (requiresFlatSpiFrames(protocol))
-            return new HW_NeoPixel_SPI(mosiPin, sckPin, ledCount, protocol);
-
-        // PIO keeps the flexible pin support needed for APA102/SK9822.
+        // The RP PIO backend uses protocol-native byte streams for every
+        // supported SPI LED protocol and retains flexible pin assignment.
         return new PIO_NeoPixel_SPI(sckPin, mosiPin, ledCount, protocol);
     }
     else if (driverType == DriverType::SPI_PIO && isSpi)
     {
-        // PIO currently supports only APA102-style framed protocols. Returning
-        // nullptr is safer than silently transmitting APA102 words to a flat
-        // WS2801/LPD8806 strip.
-        if (requiresFlatSpiFrames(protocol))
-            return nullptr;
-
-        // SPI via PIO - for flexible pin configuration.
+        // SPI via PIO with protocol-native framing.
         return new PIO_NeoPixel_SPI(sckPin, mosiPin, ledCount, protocol);
     }
 

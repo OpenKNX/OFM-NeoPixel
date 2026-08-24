@@ -43,7 +43,9 @@ PIO_NeoPixel_SPI* PIO_NeoPixel_SPI::_dmaHandlers[12] = {nullptr};
  * - Instruction 0: Output 1 bit, CLK LOW
  * - Instruction 1: NOP, CLK HIGH (sample edge)
  *
- * Autopull pulls next 32-bit word from TX FIFO (threshold 32).
+ * Autopull pulls one FIFO word for each byte (threshold 8). The byte is held
+ * in bits 31..24 of that word, so the PIO still emits it MSB-first while the
+ * transfer can end on an exact byte boundary.
  * Sideset toggles CLK pin each instruction.
  * Reference: https://github.com/raspberrypi/pico-examples/tree/master/pio/spi
  */
@@ -99,10 +101,10 @@ static inline void pio_spi_program_init(PIO pio, uint sm, uint offset, uint clk_
     // Configure out pins for MOSI
     sm_config_set_out_pins(&c, data_pin, 1);
 
-    // Out shift: shift_right=FALSE for MSB-first
-    // false = shift left = output from MSB (bit 31 first)
-    // Autopull enabled, 32 bits per pull
-    sm_config_set_out_shift(&c, false, true, 32);
+    // Out shift: shift_right=FALSE for MSB-first. Autopull after eight bits
+    // means every FIFO word represents exactly one wire byte. This keeps
+    // APA102's 4-byte frames and WS2801/LPD8806's 3-byte frames distinct.
+    sm_config_set_out_shift(&c, false, true, 8);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
     // Calculate clock divider
@@ -227,74 +229,43 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
         _inst->hwBrightness = 16;    // Default: 50% brightness
     }
 
-    // Determine bytes per LED and capabilities based on protocol
-    _inst->bytesPerLed = 4; // APA102, APA102_CLONE, SK9822: 4 bytes (brightness + RGB)
     _inst->hasGlobalBrightness = (protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE || protocol == LedProtocol::SK9822);
+    // APA102/SK9822 add one hardware-brightness byte to their three colour
+    // channels; flat SPI protocols use their native payload width.
+    _inst->bytesPerLed = _inst->hasGlobalBrightness ? 4 : ProtocolHelper::getBytesPerLed(protocol);
 
-    // ===== Buffer Allocation =====
-    // Buffer layout: [START_FRAMES] [DUMMY_LED] [LED_DATA] [END_FRAMES]
-    // This structure ensures proper APA102/SK9822 protocol framing:
-    // - Start Frames: N * 4 bytes (0x00000000) - synchronize data stream
-    // - Dummy LED: 4 bytes if Mode 1 (0xE0 + Brightness + RGB) - fixes first LED color bug
-    // - LED Data: ledCount * 4 bytes each [111bbbbb][C1][C2][C3] - actual LED colors
-    // - End Frames: M * 4 bytes (pattern 0x00 or 0xFF) - latch data to LEDs
+    // Store a canonical, protocol-native byte stream. A separate word buffer
+    // feeds the PIO FIFO, preserving exact output framing without exposing a
+    // host-endian/DMA representation to the rest of OFM.
+    const size_t pixelDataSize = (size_t)ledCount * _inst->bytesPerLed;
+    const size_t startFrameSize = _inst->hasGlobalBrightness ? (size_t)_inst->startFrameCount * 4 : 0;
+    const size_t dummyLedSize = _inst->hasGlobalBrightness && _inst->dummyLedMode == 1 ? 4 : 0;
+    const size_t endFrameSize = _inst->hasGlobalBrightness ? (size_t)_inst->endFrameCount * 4 : 0;
+    _inst->bufferSize = startFrameSize + dummyLedSize + pixelDataSize + endFrameSize;
+    _inst->bufferWordCount = _inst->bufferSize;
+    _inst->buffer = (uint8_t*)calloc(_inst->bufferSize, sizeof(uint8_t));
+    _inst->transferBuffer = (uint32_t*)calloc(_inst->bufferWordCount, sizeof(uint32_t));
 
-    // CRITICAL: Use size_t for intermediate calculations to prevent overflow!
-    // With uint16_t: ledCount=20000 * 4 = 80000 > 65535 → OVERFLOW!
-    size_t startFrameSize = (size_t)_inst->startFrameCount * 4; // Typically 8 frames = 32 bytes
-    size_t dummyLedSize = (_inst->dummyLedMode == 1) ? 4 : 0;   // 4 bytes if physical dummy
-    size_t endFrameSize = (size_t)_inst->endFrameCount * 4;     // Typically 1 frame = 4 bytes
-
-    _inst->bufferSize = startFrameSize + dummyLedSize + ((size_t)ledCount * _inst->bytesPerLed) + endFrameSize;
-
-    // CRITICAL: Allocate as uint32_t aligned (DMA and atomic writes require this)
-    // Buffer must be 32-bit aligned for direct word writes (no byte-by-byte access)
-    // Round UP to nearest word boundary to prevent buffer underallocation
-    _inst->bufferWordCount = (_inst->bufferSize + 3) / 4; // Round up: (size + 3) / 4
-    uint32_t* wordBuffer = (uint32_t*)malloc(_inst->bufferWordCount * sizeof(uint32_t));
-    _inst->buffer = (uint8_t*)wordBuffer; // Keep uint8_t* for compatibility
-
-    if (_inst->buffer)
+    if (!_inst->buffer || !_inst->transferBuffer)
     {
-        // Clear the ENTIRE allocated buffer (use word count, not logical byte size)
-        memset(_inst->buffer, 0, _inst->bufferWordCount * 4);
+        free(_inst->buffer);
+        free(_inst->transferBuffer);
+        _inst->buffer = nullptr;
+        _inst->transferBuffer = nullptr;
+        return;
+    }
 
-        // Re-cast for word-based initialization
-        uint32_t* words = (uint32_t*)_inst->buffer;
-
-        // Initialize start frames (all zeros per APA102/SK9822 spec)
-        for (uint16_t i = 0; i < _inst->startFrameCount; i++)
-        {
-            words[i] = 0x00000000;
-        }
-
-        // Initialize dummy LED (Mode 1: Physical)
-        // Dummy LED at brightness 0 (OFF) - matches test_sk9822_clean.cpp line 183: 0xE0000000
+    if (_inst->hasGlobalBrightness)
+    {
+        const size_t firstLedOffset = startFrameSize + dummyLedSize;
         if (_inst->dummyLedMode == 1)
-        {
-            uint32_t dummyIdx = _inst->startFrameCount;
-            words[dummyIdx] = 0xE0000000; // [0xE0 = 111 00000 = brightness 0][B=0][G=0][R=0]
-        }
+            _inst->buffer[startFrameSize] = 0xE0;
 
-        // CRITICAL: Initialize ALL LED frames with DEFAULT brightness 30
-        // Why? rgbToBuffer() updates entire 32-bit word, so brightness must be pre-set.
-        // This approach allows efficient single-word writes without read-modify-write cycles.
-        uint32_t firstLedIdx = _inst->startFrameCount + ((_inst->dummyLedMode == 1) ? 1 : 0);
-        uint8_t defaultBright = 0xE0 | 30;                                    // 0xE0 = 111 00000 (3 high bits) + 30 (5-bit brightness)
-        uint32_t defaultLedWord = ((uint32_t)defaultBright << 24) | 0x000000; // Black with brightness=30
+        const uint8_t defaultBright = 0xE0 | 30;
+        for (uint16_t i = 0; i < _inst->ledCount; ++i)
+            _inst->buffer[firstLedOffset + (size_t)i * 4] = defaultBright;
 
-        for (uint16_t i = 0; i < _inst->ledCount; i++)
-        {
-            words[firstLedIdx + i] = defaultLedWord; // [0xFE][0x00][0x00][0x00]
-        }
-
-        // Initialize End Frames ONCE (static, won't change)
-        uint32_t endFrameStartIdx = firstLedIdx + _inst->ledCount;
-        uint32_t endFrameValue = (_inst->endFramePattern == 0xFF) ? 0xFFFFFFFF : 0x00000000;
-        for (uint32_t i = 0; i < _inst->endFrameCount; i++)
-        {
-            words[endFrameStartIdx + i] = endFrameValue;
-        }
+        memset(_inst->buffer + firstLedOffset + pixelDataSize, _inst->endFramePattern, endFrameSize);
     }
 }
 
@@ -343,6 +314,12 @@ PIO_NeoPixel_SPI::~PIO_NeoPixel_SPI()
             _inst->buffer = nullptr;
         }
 
+        if (_inst->transferBuffer)
+        {
+            free(_inst->transferBuffer);
+            _inst->transferBuffer = nullptr;
+        }
+
         free(_inst);
         _inst = nullptr;
     }
@@ -362,7 +339,7 @@ PIO_NeoPixel_SPI::~PIO_NeoPixel_SPI()
  */
 bool PIO_NeoPixel_SPI::init()
 {
-    if (!_inst || !_inst->buffer) return false;
+    if (!_inst || !_inst->buffer || !_inst->transferBuffer) return false;
     if (_inst->initialized) return true;
 
     #ifdef OPENKNX_DEBUG
@@ -519,14 +496,14 @@ bool PIO_NeoPixel_SPI::initPIO()
  * 3. Enables IRQ1 for transfer completion (shared across all SPI strips)
  *
  * DMA configuration details:
- * - Transfer size: 32-bit words (matches PIO autopull=32 setting)
+ * - Transfer size: 32-bit words (one encoded wire byte per FIFO word)
  * - Source: Buffer pointer (increments by 4 bytes per word)
  * - Destination: PIO TX FIFO (fixed address, auto-drains to PIO)
  * - Pacing: DREQ from PIO controls transfer timing (prevents FIFO overflow)
  * - IRQ: DMA_IRQ_1 shared by ALL SPI strips (IRQ_0 used by Serial strips)
  *
- * Why 32-bit words? PIO configured with autopull=32 expects full 32-bit values.
- * Buffer must be 4-byte aligned and size must be multiple of 4.
+ * Why 32-bit words? The PIO TX FIFO is 32 bits wide. The PIO program consumes
+ * only bits 31..24 from each word and auto-pulls after eight output bits.
  *
  * @note All SPI strips share IRQ1, Serial strips use IRQ0 (see pio_dma_shared.h)
  * @return true if DMA configured, false if no channels available
@@ -551,8 +528,7 @@ bool PIO_NeoPixel_SPI::initDMA()
     _inst->dmaIrqNum = 1; // ALL SPI strips use DMA_IRQ_1
 
     // Configure DMA channel
-    // CRITICAL: We use autopull=32 in PIO, so DMA MUST transfer 32-bit words!
-    // Buffer size must be multiple of 4 bytes (e.g., 408 bytes = 102 words)
+    // DMA feeds one 32-bit word per wire byte to the PIO TX FIFO.
     dma_channel_config c = dma_channel_get_default_config(channel);
     channel_config_set_transfer_data_size(&c, DMA_SIZE_32);                 // 32-bit word transfers (4 bytes per transfer)
     channel_config_set_read_increment(&c, true);                            // Increment read pointer by 4 bytes after each word
@@ -563,8 +539,8 @@ bool PIO_NeoPixel_SPI::initDMA()
         channel,
         &c,
         &_inst->pio->txf[_inst->sm], // Destination: PIO TX FIFO (32-bit register)
-        _inst->buffer,               // Source: Main buffer (direct transfer, no intermediate copy)
-        _inst->bufferWordCount,      // Transfer count in 32-bit words (stored during allocation)
+        _inst->transferBuffer,       // Source: PIO-ready wire bytes
+        _inst->bufferWordCount,      // One 32-bit FIFO word per wire byte
         false                        // Don't start yet (triggered by show() → sendDataDMA())
     );
 
@@ -697,105 +673,48 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
         if (b > maxRgbValue) b = maxRgbValue;
     }
 
-    // Buffer layout: [START_FRAMES(N words)] [DUMMY_LED(1 word if mode=1)] [LED_DATA(N words)] [END_FRAMES(M words)]
-    // Calculate word index for this LED:
-    // - Skip start frames (typically 8 words)
-    // - Skip dummy LED if mode=1 (1 word)
-    // - Add LED index to reach target LED position
-    uint32_t startFrameWords = _inst->startFrameCount;         // Typically 8
-    uint32_t dummyWords = (_inst->dummyLedMode == 1) ? 1 : 0;  // 1 if physical dummy, 0 otherwise
-    uint32_t wordIndex = startFrameWords + dummyWords + index; // Final word position in buffer
-
-    uint32_t* wordBuffer = (uint32_t*)_inst->buffer;
-
-    #ifdef OPENKNX_NEOPIXEL_TRACE1
-    if (index < 1) // Only debug first LED
+    uint8_t channels[3] = {r, g, b};
+    switch (_inst->colorOrder)
     {
-        openknx.logger.logWithPrefixAndValues("PIO NeoPixel Spi",
-                                              "rgbToBuffer[%d]: R=%d G=%d B=%d Bright=%d, WordIdx=%d",
-                                              index, r, g, b, _inst->hwBrightness, wordIndex);
+        case ColorOrder::RBG: channels[1] = b; channels[2] = g; break;
+        case ColorOrder::GRB: channels[0] = g; channels[1] = r; break;
+        case ColorOrder::GBR: channels[0] = g; channels[1] = b; channels[2] = r; break;
+        case ColorOrder::BRG: channels[0] = b; channels[1] = r; channels[2] = g; break;
+        case ColorOrder::BGR: channels[0] = b; channels[1] = g; channels[2] = r; break;
+        case ColorOrder::RGB:
+        default: break;
     }
-    #endif
 
+    const size_t dataOffset = _inst->hasGlobalBrightness
+                                  ? (size_t)_inst->startFrameCount * 4 +
+                                        (_inst->dummyLedMode == 1 ? 4 : 0) + (size_t)index * 4
+                                  : (size_t)index * _inst->bytesPerLed;
+    if (dataOffset + 3 > _inst->bufferSize) return;
+
+    __dmb();
     if (_inst->hasGlobalBrightness)
     {
-        // APA102/SK9822: Pack as 32-bit word
-        // Format: [Byte3: Brightness | Byte2: Color2 | Byte1: Color1 | Byte0: Color0]
-        uint8_t brightByte = 0xE0 | (_inst->hwBrightness & 0x1F); // 111xxxxx (5-bit brightness)
-
-        // Build RGB value (24-bit) according to ColorOrder
-        // Each case maps logical RGB → hardware byte positions
-        uint32_t rgbValue;
-        switch (_inst->colorOrder)
-        {
-            case ColorOrder::RGB: // [R][G][B]
-                rgbValue = (r << 16) | (g << 8) | b;
-                break;
-            case ColorOrder::RBG: // [R][B][G]
-                rgbValue = (r << 16) | (b << 8) | g;
-                break;
-            case ColorOrder::GRB: // [G][R][B]
-                rgbValue = (g << 16) | (r << 8) | b;
-                break;
-            case ColorOrder::GBR: // [G][B][R]
-                rgbValue = (g << 16) | (b << 8) | r;
-                break;
-            case ColorOrder::BRG: // [B][R][G]
-                rgbValue = (b << 16) | (r << 8) | g;
-                break;
-            case ColorOrder::BGR: // [B][G][R] (APA102 standard)
-            default:
-                rgbValue = (b << 16) | (g << 8) | r;
-                break;
-        }
-
-        // Write complete 32-bit word (atomic operation, DMA-safe)
-        // Result: [Brightness << 24 | Byte2 << 16 | Byte1 << 8 | Byte0]
-
-        // CRITICAL: Memory barrier BEFORE write to ensure previous operations complete
-        __dmb();
-
-        wordBuffer[wordIndex] = ((uint32_t)brightByte << 24) | (rgbValue & 0x00FFFFFF);
-
-        // CRITICAL: Memory barrier AFTER write to ensure write is visible before busy check
-        __dmb();
-
-        // CRITICAL: Double-check busy flag AFTER write to detect race with show()
-        // If DMA started between our initial check and write, invalidate this write
-        if (_inst->busy)
-        {
-            // DMA started during our write - mark buffer dirty so next show() will resend
-            _inst->dirty = true;
-        }
-
-    #ifdef OPENKNX_NEOPIXEL_TRACE1
-        if (index < 1)
-        {
-            openknx.logger.logWithPrefixAndValues("PIO NeoPixel Spi",
-                                                  "  ColorOrder=%d, Written word[%d]=0x%08X [Bright=0x%02X][RGB=0x%06X]",
-                                                  (int)_inst->colorOrder, wordIndex, wordBuffer[wordIndex],
-                                                  brightByte, rgbValue & 0x00FFFFFF);
-        }
-    #endif
+        if (dataOffset + 4 > _inst->bufferSize) return;
+        _inst->buffer[dataOffset] = 0xE0 | (_inst->hwBrightness & 0x1F);
+        _inst->buffer[dataOffset + 1] = channels[0];
+        _inst->buffer[dataOffset + 2] = channels[1];
+        _inst->buffer[dataOffset + 3] = channels[2];
+    }
+    else if (_inst->protocol == LedProtocol::LPD8806)
+    {
+        _inst->buffer[dataOffset] = 0x80 | (channels[0] >> 1);
+        _inst->buffer[dataOffset + 1] = 0x80 | (channels[1] >> 1);
+        _inst->buffer[dataOffset + 2] = 0x80 | (channels[2] >> 1);
     }
     else
     {
-        // WS2801: Simple 24-bit RGB word [R << 16 | G << 8 | B]
-
-        // CRITICAL: Memory barrier BEFORE write
-        __dmb();
-
-        wordBuffer[wordIndex] = (r << 16) | (g << 8) | b;
-
-        // CRITICAL: Memory barrier AFTER write + busy double-check
-        __dmb();
-
-        // Double-check busy flag to detect race with show()
-        if (_inst->busy)
-        {
-            _inst->dirty = true; // Mark for resend
-        }
+        _inst->buffer[dataOffset] = channels[0];
+        _inst->buffer[dataOffset + 1] = channels[1];
+        _inst->buffer[dataOffset + 2] = channels[2];
     }
+    __dmb();
+
+    if (_inst->busy) _inst->dirty = true;
 }
 
 /**
@@ -812,7 +731,7 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
  */
 bool PIO_NeoPixel_SPI::show()
 {
-    if (!_inst || !_inst->initialized || !_inst->buffer) return false;
+    if (!_inst || !_inst->initialized || !_inst->buffer || !_inst->transferBuffer) return false;
 
     // Skip frame if previous transfer still in progress (busy flag)
     if (_inst->busy) return false;
@@ -821,6 +740,7 @@ bool PIO_NeoPixel_SPI::show()
     // This prevents redundant sends which can cause visible flicker on SPI strips
     if (!_inst->dirty) return true;
 
+    prepareTransferBuffer();
     _inst->busy = true;
     _inst->dirty = false;
 
@@ -835,6 +755,21 @@ bool PIO_NeoPixel_SPI::show()
     }
 
     return true;
+}
+
+/**
+ * Convert the canonical on-wire byte stream into PIO FIFO words. The PIO
+ * state machine transmits only the high byte of each word, so no padding byte
+ * can become an accidental LED value on a 3-byte protocol.
+ */
+void PIO_NeoPixel_SPI::prepareTransferBuffer()
+{
+    if (!_inst || !_inst->buffer || !_inst->transferBuffer) return;
+
+    for (size_t i = 0; i < _inst->bufferSize; ++i)
+        _inst->transferBuffer[i] = (uint32_t)_inst->buffer[i] << 24;
+
+    __dmb();
 }
 
 /**
@@ -858,9 +793,8 @@ void PIO_NeoPixel_SPI::sendDataPIO()
     // CRITICAL: Memory barrier to ensure all buffer writes are visible to PIO!
     __dmb(); // Data Memory Barrier
 
-    // Use stored word count (already calculated during allocation)
-    // CRITICAL: Must use bufferWordCount, NOT bufferSize/4 (can cause rounding errors)
-    uint32_t* wordBuffer = (uint32_t*)_inst->buffer;
+    // One PIO FIFO word represents one wire byte.
+    const uint32_t* wordBuffer = _inst->transferBuffer;
 
     // Send data as 32-bit words to PIO TX FIFO. Use a bounded wait for FIFO space
     // instead of pio_sm_put_blocking(): if the SM ever wedges (FIFO never drains) an
@@ -915,8 +849,8 @@ void PIO_NeoPixel_SPI::sendDataDMA()
     __dmb(); // Data Memory Barrier (ARM Cortex-M0+ instruction)
 
     // Trigger DMA transfer (last parameter true = start immediately)
-    // DMA reads from _inst->buffer and writes to PIO TX FIFO
-    dma_channel_set_read_addr(_inst->dmaChannel, _inst->buffer, true);
+    // DMA reads PIO-ready words and writes to the PIO TX FIFO.
+    dma_channel_set_read_addr(_inst->dmaChannel, _inst->transferBuffer, true);
 }
 
 /**
@@ -953,34 +887,30 @@ void PIO_NeoPixel_SPI::clear()
     // CRITICAL: Memory barrier before buffer access
     __dmb();
 
-    uint32_t* wordBuffer = (uint32_t*)_inst->buffer;
-
     if (_inst->hasGlobalBrightness)
     {
         // APA102/SK9822: Clear all LEDs to black
-        uint32_t startFrameWords = _inst->startFrameCount;
-        uint32_t dummyWords = (_inst->dummyLedMode == 1) ? 1 : 0;
-        uint32_t firstLedWordIdx = startFrameWords + dummyWords;
+        const size_t firstLedOffset = (size_t)_inst->startFrameCount * 4 +
+                                      (_inst->dummyLedMode == 1 ? 4 : 0);
 
         uint8_t brightByte = 0xE0 | 30;
-        uint32_t blackWord = ((uint32_t)brightByte << 24) | 0x00000000;
 
         for (uint16_t i = 0; i < _inst->ledCount; i++)
         {
-            wordBuffer[firstLedWordIdx + i] = blackWord;
+            const size_t offset = firstLedOffset + (size_t)i * 4;
+            _inst->buffer[offset] = brightByte;
+            _inst->buffer[offset + 1] = 0;
+            _inst->buffer[offset + 2] = 0;
+            _inst->buffer[offset + 3] = 0;
         }
     }
     else
     {
-        // Other SPI protocols: Clear to zero
-        uint32_t startFrameWords = _inst->startFrameCount;
-        uint32_t dummyWords = (_inst->dummyLedMode == 1) ? 1 : 0;
-        uint32_t firstLedWordIdx = startFrameWords + dummyWords;
-
-        for (uint16_t i = 0; i < _inst->ledCount; i++)
-        {
-            wordBuffer[firstLedWordIdx + i] = 0x00000000;
-        }
+        // WS2801 uses zero bytes. LPD8806 requires the update marker even
+        // for black, otherwise the chips retain their previous colour.
+        memset(_inst->buffer, 0, _inst->bufferSize);
+        if (_inst->protocol == LedProtocol::LPD8806)
+            memset(_inst->buffer, 0x80, _inst->bufferSize);
     }
 
     // CRITICAL: Memory barrier after buffer writes
@@ -1322,18 +1252,14 @@ void PIO_NeoPixel_SPI::setHardwareBrightness(uint8_t brightness)
     // Only change brightness byte (byte 0), preserve RGB values (bytes 1-3)
     if (_inst->hasGlobalBrightness && _inst->buffer)
     {
-        uint32_t* wordBuffer = (uint32_t*)_inst->buffer;
-        uint32_t startFrameWords = _inst->startFrameCount;
-        uint32_t dummyWords = (_inst->dummyLedMode == 1) ? 1 : 0;
-        uint32_t firstLedWordIdx = startFrameWords + dummyWords;
+        const size_t firstLedOffset = (size_t)_inst->startFrameCount * 4 +
+                                      (_inst->dummyLedMode == 1 ? 4 : 0);
 
         uint8_t brightByte = 0xE0 | (brightness & 0x1F); // New brightness byte
 
         for (uint16_t i = 0; i < _inst->ledCount; i++)
         {
-            uint32_t oldWord = wordBuffer[firstLedWordIdx + i];
-            uint32_t rgbValue = oldWord & 0x00FFFFFF;                                  // Preserve RGB (bottom 24 bits)
-            wordBuffer[firstLedWordIdx + i] = ((uint32_t)brightByte << 24) | rgbValue; // New brightness + old RGB
+            _inst->buffer[firstLedOffset + (size_t)i * 4] = brightByte;
         }
     }
 

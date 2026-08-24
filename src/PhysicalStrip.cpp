@@ -110,19 +110,10 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
     }
 
 #ifdef ARDUINO_ARCH_RP2040
-    // The PIO implementation is APA102/SK9822 framed. Flat WS2801/LPD8806
-    // streams require the hardware SPI encoder even when a custom frequency
-    // is requested.
-    if (protocol == LedProtocol::WS2801 || protocol == LedProtocol::LPD8806)
-    {
-        _driver = new HW_NeoPixel_SPI(pin, sckPin, ledCount, protocol, frequencyHz, csPin);
-        if (_driver) _driver->setColorOrder(_colorOrder);
-    }
-    else
-    {
-        // Pass ColorOrder to driver (NONE = driver uses protocol default)
-        _driver = new PIO_NeoPixel_SPI(sckPin, pin, ledCount, protocol, frequencyHz, csPin, true, _colorOrder);
-    }
+    // PIO encodes a protocol-native byte stream for every supported SPI strip,
+    // so custom pins and frequencies work consistently for APA102, SK9822,
+    // WS2801, and LPD8806.
+    _driver = new PIO_NeoPixel_SPI(sckPin, pin, ledCount, protocol, frequencyHz, csPin, true, _colorOrder);
 #elif defined(ARDUINO_ARCH_ESP32)
     // Hardware SPI with explicit pins/frequency (DriverFactory has no frequency parameter, so bypass it here)
     _driver = new HW_NeoPixel_SPI(pin, sckPin, ledCount, protocol, frequencyHz, csPin);

@@ -16,7 +16,7 @@
  *
  * Technical Details:
  * - Uses PIO state machines for SPI clock and data
- * - DMA for zero-copy memory transfers
+ * - DMA transfers from a PIO-ready byte-word staging buffer
  * - Shares DMA IRQ with other strip types (see pio_dma_shared.h)
  * - Automatic clock divider calculation for exact timing
  * - MSB-first transmission (standard SPI)
@@ -66,9 +66,16 @@ struct pio_neopixel_spi_inst
     // Example: brightness=31 -> 0xFF(11111111) (full brightness), brightness=0 -> 0xE0(11100000) (off)
     bool hasGlobalBrightness; // APA102/SK9822 have global brightness
 
-    uint8_t* buffer;        // LED data buffer
-    size_t bufferSize;      // Buffer size in bytes (logical)
-    size_t bufferWordCount; // Buffer size in 32-bit words (actual allocation)
+    // Canonical on-wire frame. This is also the buffer exposed to OFM so
+    // protocol-aware power limiting always sees real protocol bytes.
+    uint8_t* buffer;
+    size_t bufferSize;
+
+    // PIO's TX FIFO is 32 bits wide. Each word carries one byte in bits 31..24;
+    // the PIO program auto-pulls every eight transmitted bits. This permits an
+    // exact byte count for both 3-byte and 4-byte SPI LED protocols.
+    uint32_t* transferBuffer;
+    size_t bufferWordCount;
 
     uint32_t spiFrequency; // SPI frequency (Hz)
     float clkdiv;          // Actual clock divider (set during init)
@@ -244,6 +251,7 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
     bool initDMA();
     void sendDataPIO();
     void sendDataDMA();
+    void prepareTransferBuffer();
     void sendStartFrame();
     void sendEndFrame();
     static void dmaIRQHandler();
