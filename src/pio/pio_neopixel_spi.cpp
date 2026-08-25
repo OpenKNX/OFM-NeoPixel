@@ -201,7 +201,10 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     // These settings optimize APA102/SK9822 compatibility (adjustable via API)
     _inst->dummyLedMode = 1;        // Physical dummy LED: sacrifice LED#0 to fix first LED color
     _inst->startFrameCount = 8;     // 8 start frames (0x00000000) for data sync
-    _inst->endFrameCount = 1;       // 1 end frame to latch data (varies by chip)
+    // APA102 needs one clock edge per two LEDs after the data, i.e. ledCount/16 bytes.
+    // A fixed single 4-byte frame only carries 64 LEDs; longer chains never latch the tail.
+    _inst->endFrameCount = (uint32_t)((ledCount + 63) / 64);
+    if (_inst->endFrameCount < 1) _inst->endFrameCount = 1;
     _inst->startFrameDelayUs = 0;   // No delay after start frames (can add if needed)
     _inst->endFramePattern = 0x00;  // End frame pattern: 0x00 = APA102, 0xFF = SK9822
     _inst->detectedChip = protocol; // Start with user-provided protocol
@@ -227,9 +230,39 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
         _inst->hwBrightness = 16;    // Default: 50% brightness
     }
 
-    // Determine bytes per LED and capabilities based on protocol
-    _inst->bytesPerLed = 4; // APA102, APA102_CLONE, SK9822: 4 bytes (brightness + RGB)
+    // Frame width and framing per protocol. The APA102 family keeps the layout it always
+    // had; the others differ in width, start frames and how the data is latched.
+    _inst->bytesPerLed = ProtocolHelper::getBytesPerLed(protocol);
     _inst->hasGlobalBrightness = (protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE || protocol == LedProtocol::SK9822);
+
+    switch (protocol)
+    {
+        case LedProtocol::WS2801:
+            // Raw RGB, no framing. The chip latches on an idle gap between frames.
+            _inst->startFrameCount = 0;
+            _inst->endFrameCount = 0;
+            _inst->dummyLedMode = 0;
+            break;
+
+        case LedProtocol::LPD8806:
+            // No start frame; one zero byte per 32 LEDs latches the chain.
+            _inst->startFrameCount = 0;
+            _inst->endFrameCount = (uint32_t)((((ledCount + 31) / 32) + 3) / 4);
+            if (_inst->endFrameCount < 1) _inst->endFrameCount = 1;
+            _inst->dummyLedMode = 0;
+            break;
+
+        case LedProtocol::LPD6803:
+        case LedProtocol::P9813:
+            // One 4-byte zero frame on each side.
+            _inst->startFrameCount = 1;
+            _inst->endFrameCount = 1;
+            _inst->dummyLedMode = 0;
+            break;
+
+        default:
+            break; // APA102 family keeps the defaults set above
+    }
 
     // ===== Buffer Allocation =====
     // Buffer layout: [START_FRAMES] [DUMMY_LED] [LED_DATA] [END_FRAMES]
@@ -276,24 +309,41 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
             words[dummyIdx] = 0xE0000000; // [0xE0 = 111 00000 = brightness 0][B=0][G=0][R=0]
         }
 
-        // CRITICAL: Initialize ALL LED frames with DEFAULT brightness 30
-        // Why? rgbToBuffer() updates entire 32-bit word, so brightness must be pre-set.
-        // This approach allows efficient single-word writes without read-modify-write cycles.
-        uint32_t firstLedIdx = _inst->startFrameCount + ((_inst->dummyLedMode == 1) ? 1 : 0);
-        uint8_t defaultBright = 0xE0 | 30;                                    // 0xE0 = 111 00000 (3 high bits) + 30 (5-bit brightness)
-        uint32_t defaultLedWord = ((uint32_t)defaultBright << 24) | 0x000000; // Black with brightness=30
-
-        for (uint16_t i = 0; i < _inst->ledCount; i++)
+        // Pre-set the brightness byte so rgbToBuffer can write a whole word without a
+        // read-modify-write. Only the APA102 family carries that byte.
+        if (_inst->hasGlobalBrightness)
         {
-            words[firstLedIdx + i] = defaultLedWord; // [0xFE][0x00][0x00][0x00]
+            uint32_t firstLedIdx = _inst->startFrameCount + ((_inst->dummyLedMode == 1) ? 1 : 0);
+            uint8_t defaultBright = 0xE0 | 30;
+            uint32_t defaultLedWord = ((uint32_t)defaultBright << 24) | 0x000000;
+
+            for (uint16_t i = 0; i < _inst->ledCount; i++)
+            {
+                words[firstLedIdx + i] = defaultLedWord;
+            }
+
+            uint32_t endFrameStartIdx = firstLedIdx + _inst->ledCount;
+            uint32_t endFrameValue = (_inst->endFramePattern == 0xFF) ? 0xFFFFFFFF : 0x00000000;
+            for (uint32_t i = 0; i < _inst->endFrameCount; i++)
+            {
+                words[endFrameStartIdx + i] = endFrameValue;
+            }
         }
-
-        // Initialize End Frames ONCE (static, won't change)
-        uint32_t endFrameStartIdx = firstLedIdx + _inst->ledCount;
-        uint32_t endFrameValue = (_inst->endFramePattern == 0xFF) ? 0xFFFFFFFF : 0x00000000;
-        for (uint32_t i = 0; i < _inst->endFrameCount; i++)
+        else if (_inst->protocol == LedProtocol::LPD6803)
         {
-            words[endFrameStartIdx + i] = endFrameValue;
+            // LPD6803 words must keep their leading 1 bit even while black.
+            const size_t dataOffset = (size_t)_inst->startFrameCount * 4;
+            for (uint16_t i = 0; i < _inst->ledCount; i++)
+            {
+                _inst->buffer[dataOffset + (size_t)i * 2] = 0x80;
+                _inst->buffer[dataOffset + (size_t)i * 2 + 1] = 0x00;
+            }
+        }
+        else if (_inst->protocol == LedProtocol::LPD8806)
+        {
+            // LPD8806 idles at 0x80: bit 7 set marks a data byte, value 0.
+            const size_t dataOffset = (size_t)_inst->startFrameCount * 4;
+            memset(_inst->buffer + dataOffset, 0x80, (size_t)_inst->ledCount * 3);
         }
     }
 }
@@ -779,14 +829,59 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
     }
     else
     {
-        // WS2801: Simple 24-bit RGB word [R << 16 | G << 8 | B]
+        // Protocols without a brightness byte. Frame widths differ (2, 3 or 4 bytes), so
+        // these write bytes rather than a whole word.
+        uint8_t ch[6] = {0};
+        ProtocolHelper::orderChannels(_inst->colorOrder, r, g, b, 0, 0, ch);
 
-        // CRITICAL: Memory barrier BEFORE write
+        const size_t dataOffset = (size_t)_inst->startFrameCount * 4;
+        const size_t off = dataOffset + (size_t)index * _inst->bytesPerLed;
+        if (off + _inst->bytesPerLed > _inst->bufferSize) return;
+
         __dmb();
 
-        wordBuffer[wordIndex] = (r << 16) | (g << 8) | b;
+        switch (_inst->protocol)
+        {
+            case LedProtocol::LPD8806:
+                // 7-bit channels, bit 7 marks a data byte.
+                _inst->buffer[off]     = (uint8_t)(0x80 | (ch[0] >> 1));
+                _inst->buffer[off + 1] = (uint8_t)(0x80 | (ch[1] >> 1));
+                _inst->buffer[off + 2] = (uint8_t)(0x80 | (ch[2] >> 1));
+                break;
 
-        // CRITICAL: Memory barrier AFTER write + busy double-check
+            case LedProtocol::LPD6803:
+            {
+                // 1 + 5R + 5G + 5B, MSB first.
+                const uint16_t w = (uint16_t)(0x8000 |
+                                              ((uint16_t)(ch[0] >> 3) << 10) |
+                                              ((uint16_t)(ch[1] >> 3) << 5) |
+                                              (uint16_t)(ch[2] >> 3));
+                _inst->buffer[off]     = (uint8_t)(w >> 8);
+                _inst->buffer[off + 1] = (uint8_t)(w & 0xFF);
+                break;
+            }
+
+            case LedProtocol::P9813:
+            {
+                // Flag byte carries the inverted top two bits of each channel.
+                const uint8_t flag = (uint8_t)(0xC0 |
+                                               ((uint8_t)(~ch[2] >> 6) & 0x03) << 4 |
+                                               ((uint8_t)(~ch[1] >> 6) & 0x03) << 2 |
+                                               ((uint8_t)(~ch[0] >> 6) & 0x03));
+                _inst->buffer[off]     = flag;
+                _inst->buffer[off + 1] = ch[2];
+                _inst->buffer[off + 2] = ch[1];
+                _inst->buffer[off + 3] = ch[0];
+                break;
+            }
+
+            default: // WS2801 and anything else: raw bytes in colour order
+                _inst->buffer[off]     = ch[0];
+                _inst->buffer[off + 1] = ch[1];
+                _inst->buffer[off + 2] = ch[2];
+                break;
+        }
+
         __dmb();
 
         // Double-check busy flag to detect race with show()
@@ -1086,7 +1181,9 @@ bool PIO_NeoPixel_SPI::applyConfig(const PhysicalStripConfig* config)
     if (!spiCfg) return false;
 
     // Apply ColorOrder
-    _inst->colorOrder = spiCfg->getColorOrder();
+    // Never let a NONE config stomp the live driver order.
+    const ColorOrder spiCfgOrder = spiCfg->getColorOrder();
+    if (spiCfgOrder != ColorOrder::NONE) _inst->colorOrder = spiCfgOrder;
 
     // Apply SPI-specific settings
     _inst->hwBrightness = spiCfg->getHwBrightness();
@@ -1256,23 +1353,10 @@ LedProtocol PIO_NeoPixel_SPI::detectChipType()
                                           "Auto-detecting chip type (APA102 vs SK9822)...");
     #endif
 
-    // Test 1: End frame 0x00000000 (APA102 standard)
-    _inst->endFramePattern = 0x00;
-    clear();
-    setPixel(0, 255, 0, 0); // Red on first LED
-    show();
-    delay(200); // Give time to stabilize
-
-    // Test 2: End frame 0xFFFFFFFF (SK9822 standard)
-    _inst->endFramePattern = 0xFF;
-    clear();
-    setPixel(0, 0, 255, 0); // Green on first LED
-    show();
-    delay(200);
-
-    // Heuristic: APA102 works with both patterns, SK9822 prefers 0xFF
-    // For practical use: Check LED count - longer chains often indicate APA102
-    // Real detection would require visual confirmation or photo sensor
+    // Guess from chain length. Nothing is measured: the chip gives no readback on this
+    // bus, so telling APA102 from SK9822 needs the end-frame behaviour observed optically.
+    // A previous version flashed the strip and waited 400 ms in delay() before applying
+    // this same rule, which blocked loop() and changed nothing about the outcome.
 
     LedProtocol detected;
     if (_inst->ledCount > 100)
@@ -1290,12 +1374,12 @@ LedProtocol PIO_NeoPixel_SPI::detectChipType()
 
     #ifdef OPENKNX_DEBUG
     openknx.logger.logWithPrefixAndValues("PIO NeoPixel SPI",
-                                          "Chip detection: %s (LED count: %d, end frame: 0x%02X)",
+                                          "Chip guess from chain length: %s (LED count: %d, end frame: 0x%02X)",
                                           detected == LedProtocol::APA102 ? "APA102" : "SK9822",
                                           _inst->ledCount,
                                           _inst->endFramePattern);
     openknx.logger.logWithPrefixAndValues("PIO NeoPixel SPI",
-                                          "NOTE: Auto-detection is heuristic-based. Use setSpi...() for manual override.");
+                                          "NOTE: not a measurement - set the chip explicitly if the guess is wrong.");
     #endif
 
     clear();
@@ -1322,8 +1406,8 @@ void PIO_NeoPixel_SPI::setHardwareBrightness(uint8_t brightness)
     if (_inst->busy) return;
 
     // Clamp to safe range 16-30
-    // if (brightness < 16) brightness = 16;
-    // if (brightness > 30) brightness = 30;
+    if (brightness < _inst->hwBrightnessMin) brightness = _inst->hwBrightnessMin;
+    if (brightness > _inst->hwBrightnessMax) brightness = _inst->hwBrightnessMax;
 
     _inst->hwBrightness = brightness; // Update global brightness
 
