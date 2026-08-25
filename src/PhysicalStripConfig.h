@@ -46,6 +46,17 @@ struct PhysicalStripConfig
     virtual ~PhysicalStripConfig() = default;
 
     /**
+     * @brief Set the per-strip channel swap
+     * @param mode ProtocolHelper::ChannelSwap value
+     */
+    void setChannelSwap(uint8_t mode) { _channelSwap = mode; }
+
+    /**
+     * @brief Get the per-strip channel swap
+     */
+    uint8_t getChannelSwap() const { return _channelSwap; }
+
+    /**
      * @brief Check if this is an SPI strip config (without RTTI)
      * @return true if this is SpiStripConfig
      */
@@ -378,6 +389,7 @@ struct PhysicalStripConfig
     std::vector<bool> _skipMask;               // Flexible skip mask (empty = disabled)
     float _gammaCorrection = 1.0f;             // Default: 1.0 (linear, no correction)
     bool _gammaCorrectionEnabled = false;      // Default: disabled
+    uint8_t _channelSwap = 0; ///< ProtocolHelper::ChannelSwap, 0 = none
     uint8_t _gammaLookupTable[256];            // Lookup table for color gamma
     // White balance
     bool _whiteBalanceEnabled = false; // Default: disabled

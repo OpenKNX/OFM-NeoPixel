@@ -726,6 +726,10 @@ bool PhysicalStrip::setTimingMode(TimingMode mode)
         if (_colorOrder != ColorOrder::NONE)
             _driver->setColorOrder(_colorOrder);
 
+        // The rebuild starts from protocol defaults, so re-apply the strip's config or the
+        // custom timing and reset time set from ETS are lost until the next reboot.
+        if (_config) _driver->applyConfig(_config);
+
         _initialized = true;
         return true;
     }

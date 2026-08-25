@@ -407,6 +407,25 @@ PhysicalStrip* NeoPixelManager::addSpiStrip(uint32_t mosiPin, uint32_t sckPin, u
  * @return true if the strip was found and removed
  * @return false if the strip was not found
  */
+namespace
+{
+    /**
+     * @brief Bytes per pixel of the buffer a strip actually owns
+     *
+     * Derived from the driver's own allocation, not from ColorOrder: the two disagree
+     * whenever the configured order and the driver's protocol carry a different channel
+     * count, and the buffer is what the reader indexes into.
+     */
+    inline uint8_t bufferStride(PhysicalStrip* strip)
+    {
+        if (!strip) return 3;
+        // Same source the driver sizes its buffer from. Deriving it from the buffer length
+        // breaks as soon as the frame carries a prefix, as TM1814 does with C1 and C2.
+        const uint8_t stride = ProtocolHelper::getBytesPerLed(strip->getProtocol());
+        return (stride >= 2 && stride <= 10) ? stride : 3;
+    }
+} // namespace
+
 bool NeoPixelManager::removeStrip(PhysicalStrip* strip)
 {
     if (!strip) return false;
@@ -494,17 +513,22 @@ bool NeoPixelManager::init()
         }
     }
 
-    if (successCount == _strips.size())
+    if (successCount == (int)_strips.size())
     {
         _initialized = true;
         logDebugP("NeoPixelManager: All strips initialized successfully");
         return true;
     }
+
+    // Run with whatever came up. Treating one failed strip as a total failure left every
+    // other strip dark and stopped effect rendering for the whole device.
+    _initialized = (successCount > 0);
+    if (successCount > 0)
+        logErrorP("NeoPixelManager: only %d/%d strips initialized, continuing with those",
+                  successCount, (int)_strips.size());
     else
-    {
-        logDebugP("NeoPixelManager: Only %d/%d strips initialized", successCount, _strips.size());
-        return false;
-    }
+        logErrorP("NeoPixelManager: no strip could be initialized");
+    return false;
 }
 
 /**
@@ -564,7 +588,7 @@ void NeoPixelManager::applyPowerLimit()
             const uint8_t* buffer = phys->getBuffer();
             if (!buffer) continue;
 
-            uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+            uint8_t bytesPerPixel = bufferStride(phys);
             uint8_t hardwareBrightness = 255; // syncAll() already applied brightness
 
             uint32_t stripCurrent = _powerManager.calculateTotalCurrent(
@@ -632,7 +656,7 @@ void NeoPixelManager::applyPowerLimit()
 
             if (buffer)
             {
-                uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+                uint8_t bytesPerPixel = bufferStride(phys);
                 stripCurrent = _powerManager.calculateTotalCurrent(
                     buffer, ledCount, bytesPerPixel, 255);
             }
@@ -698,7 +722,7 @@ void NeoPixelManager::applyPowerLimit()
             const uint8_t* buffer = phys->getBuffer();
             if (!buffer) continue;
 
-            uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+            uint8_t bytesPerPixel = bufferStride(phys);
             uint32_t stripRequestedCurrent = _powerManager.calculateTotalCurrent(
                 buffer, ledCount, bytesPerPixel, 255);
 
@@ -766,7 +790,7 @@ void NeoPixelManager::applyPowerLimit()
 
             if (buffer)
             {
-                uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+                uint8_t bytesPerPixel = bufferStride(phys);
                 stripRequestedCurrent = _powerManager.calculateTotalCurrent(
                     buffer, ledCount, bytesPerPixel, 255);
             }
@@ -909,7 +933,7 @@ void NeoPixelManager::applyPowerLimit()
 
             if (buffer)
             {
-                uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+                uint8_t bytesPerPixel = bufferStride(phys);
                 stripRequestedCurrent = _powerManager.calculateTotalCurrent(
                     buffer, ledCount, bytesPerPixel, 255);
             }
@@ -1082,7 +1106,7 @@ void NeoPixelManager::applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scal
         return;
 
     uint16_t ledCount = phys->getLedCount();
-    uint8_t bytesPerPixel = ProtocolHelper::getBytesPerLed(phys->getColorOrder());
+    uint8_t bytesPerPixel = bufferStride(phys);
     uint8_t* buffer = phys->getBuffer();
     size_t bufferSize = phys->getBufferSize();
 
@@ -1194,7 +1218,10 @@ bool NeoPixelManager::showAll()
     // (A PIO-fallback strip without DMA blocks inside show() and is simply done by phase 2.)
     for (auto strip : _strips)
     {
-        if (strip && !strip->show())
+        // Skip strips that never came up: init() now keeps the device running on a partial
+        // set, so an uninitialized strip here is expected, not an error to count.
+        if (!strip || !strip->isInitialized()) continue;
+        if (!strip->show())
         {
             allSuccess = false;
             _errorCount++;
@@ -1203,7 +1230,8 @@ bool NeoPixelManager::showAll()
     // Phase 2: wait for every in-flight transfer to finish (100 ms cap per strip).
     for (auto strip : _strips)
     {
-        if (strip && !strip->waitForTransfer(100))
+        if (!strip || !strip->isInitialized()) continue;
+        if (!strip->waitForTransfer(100))
         {
             allSuccess = false;
             _errorCount++;
