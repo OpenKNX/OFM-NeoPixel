@@ -25,22 +25,22 @@ struct PhysicalStripConfig;
 enum class LedProtocol
 {
     // 1-Wire Protocols (Clock embedded in data)
-    WS2812,  // 5V RGB, 800kHz, GRB order
-    WS2812B, // Same as WS2812 (common variant)
-    WS2813,  // 5V RGB, 800kHz, GRB, data backup
-    WS2815,  // 12V RGB, 800kHz, GRB, data backup
+    WS2812,        // 5V RGB, 800kHz, GRB order
+    WS2812B,       // Same as WS2812 (common variant)
+    WS2813,        // 5V RGB, 800kHz, GRB, data backup
+    WS2815,        // 12V RGB, 800kHz, GRB, data backup
     WS2811,        // 12V RGB, modern 800kHz, RGB order
     WS2811_400KHZ, // Legacy half-speed WS2811/WS2812, 400kHz, GRB order
-    SK6812,  // 5V/12V RGBW, 800kHz, GRBW order
-    SK6805,  // 5V RGBW, 800kHz, GRBW order
-    WS2814,  // 12V RGBW, 800kHz, GRBW order
-    TM1814,  // 12V RGBW, 800kHz, GRBW order
-    GS8208,  // 12V RGB, 800kHz, GRB order
+    SK6812,        // 5V/12V RGBW, 800kHz, GRBW order
+    SK6805,        // 5V RGBW, 800kHz, GRBW order
+    WS2814,        // 12V RGBW, 800kHz, GRBW order
+    TM1814,        // 12V RGBW, 800kHz, GRBW order
+    GS8208,        // 12V RGB, 800kHz, GRB order
 
     // 5-Channel Protocols (RGB + Warm White + Cool White = CCT)
     SK6812_RGBCCT, // 5V RGBCCT (5-channel), 800kHz, GRBCCT order
     WS2814_RGBCCT, // 12V RGBCCT (5-channel), 800kHz, GRBCCT order
-    WS2805_RGBCCT, // 12V/24V RGBCCT (5-channel), 917kHz, RGBCCT (RGBW1W2) order
+    WS2805_RGBCCT, // 12V/24V RGBCCT (5-channel), 800kHz, RGBCCT (RGBW1W2) order
     SM16825,       // 5V/12V RGBCW, 16-bit channels, 800kHz, RGBCTW order
 
     // SPI Protocols (Separate clock and data)
@@ -256,12 +256,36 @@ namespace ProtocolHelper
     {
         switch (order)
         {
-            case ColorOrder::RGB: first = r; second = g; third = b; return true;
-            case ColorOrder::RBG: first = r; second = b; third = g; return true;
-            case ColorOrder::GRB: first = g; second = r; third = b; return true;
-            case ColorOrder::GBR: first = g; second = b; third = r; return true;
-            case ColorOrder::BGR: first = b; second = g; third = r; return true;
-            case ColorOrder::BRG: first = b; second = r; third = g; return true;
+            case ColorOrder::RGB:
+                first = r;
+                second = g;
+                third = b;
+                return true;
+            case ColorOrder::RBG:
+                first = r;
+                second = b;
+                third = g;
+                return true;
+            case ColorOrder::GRB:
+                first = g;
+                second = r;
+                third = b;
+                return true;
+            case ColorOrder::GBR:
+                first = g;
+                second = b;
+                third = r;
+                return true;
+            case ColorOrder::BGR:
+                first = b;
+                second = g;
+                third = r;
+                return true;
+            case ColorOrder::BRG:
+                first = b;
+                second = r;
+                third = g;
+                return true;
             default: return false;
         }
     }
@@ -384,7 +408,7 @@ namespace ProtocolHelper
     {
         if (protocol == LedProtocol::WS2805_RGBCCT)
         {
-            return 917431; // 1.09 us bit cell (300 ns + 790 ns)
+            return 800000; // 1.25 us bit cell (312 ns + 938 ns)
         }
         if (protocol == LedProtocol::WS2811_400KHZ)
         {

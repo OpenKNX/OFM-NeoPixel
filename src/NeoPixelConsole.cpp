@@ -4279,20 +4279,7 @@ bool NeoPixel::processPowerCommand(const std::string& args)
 
                 // Get protocol name
                 LedProtocol protocol = phys->getProtocol();
-                const char* protocolName = "Unknown";
-                switch (protocol)
-                {
-                    case LedProtocol::WS2812:
-                    case LedProtocol::WS2812B: protocolName = "WS2812B"; break;
-                    case LedProtocol::WS2813: protocolName = "WS2813"; break;
-                    case LedProtocol::SK6812: protocolName = "SK6812"; break;
-                    case LedProtocol::APA102: protocolName = "APA102"; break;
-                    case LedProtocol::APA102_CLONE: protocolName = "APA102_CLONE"; break;
-                    case LedProtocol::SK9822: protocolName = "SK9822"; break;
-                    case LedProtocol::WS2801: protocolName = "WS2801"; break;
-                    case LedProtocol::LPD8806: protocolName = "LPD8806"; break;
-                    default: break;
-                }
+                const char* protocolName = getProtocolName(protocol);
 
                 openknx.logger.logWithValues("Strip %u: Protocol=%-12s Pin=%2u LEDs=%3u %2uV Mode=%-10s Limit=%4u mA Current=%4u mA Load=%3u%% (%5.2f W)",
                                              i, protocolName, phys->getDataPin(), phys->getLedCount(), voltage, modeName,
@@ -4981,18 +4968,7 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
         openknx.logger.logWithValues("  LED Count:       %d", strip->getLedCount());
 
         LedProtocol protocol = strip->getProtocol();
-        const char* protocolName = "Unknown";
-        switch (protocol)
-        {
-            case LedProtocol::WS2812B: protocolName = "WS2812B"; break;
-            case LedProtocol::SK6812: protocolName = "SK6812"; break;
-            case LedProtocol::WS2812: protocolName = "WS2812"; break;
-            case LedProtocol::APA102: protocolName = "APA102"; break;
-            case LedProtocol::SK9822: protocolName = "SK9822"; break;
-            case LedProtocol::WS2801: protocolName = "WS2801"; break;
-            case LedProtocol::LPD8806: protocolName = "LPD8806"; break;
-            default: break;
-        }
+        const char* protocolName = getProtocolName(protocol);
         openknx.logger.logWithValues("  Protocol:        %s", protocolName);
 
         // Color order (helps spot an RGBW/GRBW mixup that swaps R/G on clones)

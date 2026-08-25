@@ -1156,7 +1156,7 @@ void NeoPixelManager::applyScaleToBuffer(VirtualStrip* vstrip, float scale)
  *       [brightness,R,G,B] per LED + end frames), not a flat RGB(W) array from offset 0 - read
  *       the correct per-LED offset and fold in that LED's hardware brightness byte.
  */
-uint32_t NeoPixelManager::calculatePhysicalStripCurrent(PhysicalStrip* phys)
+uint32_t NeoPixelManager::calculatePhysicalStripCurrent(PhysicalStrip* phys) const
 {
     if (!phys) return 0;
     const uint8_t* buffer = phys->getBuffer();
@@ -2213,17 +2213,13 @@ float NeoPixelManager::getTotalPowerWatts() const
 {
     float totalPower = 0.0f;
 
-    for (auto vstrip : _virtualStrips)
+    // Physical strips carry the configured supply voltage and the frame layout
+    // that calculatePhysicalStripCurrent() knows how to walk; virtual buffers
+    // have neither, so summing those assumed 5 V for every strip.
+    for (auto phys : _strips)
     {
-        if (vstrip && vstrip->getBuffer())
-        {
-            uint16_t ledCount = vstrip->getLedCount();
-            uint8_t bytesPerPixel = vstrip->getBytesPerLed();
-            const uint8_t* buffer = vstrip->getBuffer();
-            uint8_t hardwareBrightness = vstrip->getHardwareBrightness();
-
-            totalPower += _powerManager.calculatePowerWatts(buffer, ledCount, bytesPerPixel, hardwareBrightness);
-        }
+        if (!phys) continue;
+        totalPower += phys->getPowerWatts(calculatePhysicalStripCurrent(phys));
     }
 
     return totalPower;

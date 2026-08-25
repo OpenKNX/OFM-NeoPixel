@@ -20,13 +20,13 @@ static void testProfiles()
     const OneWireTimingProfile& rgbcct = getOneWireTimingProfile(LedProtocol::SK6812_RGBCCT);
     assert(rgbcct.channelCount == 5 && rgbcct.defaultColorOrder == ColorOrder::GRBCCT);
     const OneWireTimingProfile& ws2805 = getOneWireTimingProfile(LedProtocol::WS2805_RGBCCT);
-    assert(ws2805.bitRateHz == 917431 && ws2805.resetTimeUs == 300);
+    assert(ws2805.bitRateHz == 800000 && ws2805.resetTimeUs == 300);
     assert(ws2805.pioCadence == OneWirePioCadence::FOUR_STEP);
     assert(ws2805.channelCount == 5 && ws2805.defaultColorOrder == ColorOrder::RGBCCT);
-    assert(ws2805.t0hNs == 300 && ws2805.t0lNs == 790);
-    assert(ws2805.t1hNs == 790 && ws2805.t1lNs == 300);
-    assert(ws2805.t0hNs + ws2805.t0lNs == 1090);
-    assert(ws2805.t1hNs + ws2805.t1lNs == 1090);
+    assert(ws2805.t0hNs == 312 && ws2805.t0lNs == 938);
+    assert(ws2805.t1hNs == 938 && ws2805.t1lNs == 312);
+    assert(ws2805.t0hNs + ws2805.t0lNs == 1250);
+    assert(ws2805.t1hNs + ws2805.t1lNs == 1250);
     const OneWireTimingProfile& sm16825 = getOneWireTimingProfile(LedProtocol::SM16825);
     assert(sm16825.bitRateHz == 800000 && sm16825.channelCount == 5);
     assert(sm16825.bytesPerChannel == 2 && sm16825.frameSettingsBytes == 4);
@@ -38,10 +38,19 @@ static void testProfiles()
 static void testColorOrderCompatibility()
 {
     uint8_t first = 0, second = 0, third = 0;
-    const struct { ColorOrder order; uint8_t first; uint8_t second; uint8_t third; } cases[] = {
-        {ColorOrder::RGB, 1, 2, 3}, {ColorOrder::RBG, 1, 3, 2},
-        {ColorOrder::GRB, 2, 1, 3}, {ColorOrder::GBR, 2, 3, 1},
-        {ColorOrder::BGR, 3, 2, 1}, {ColorOrder::BRG, 3, 1, 2},
+    const struct
+    {
+        ColorOrder order;
+        uint8_t first;
+        uint8_t second;
+        uint8_t third;
+    } cases[] = {
+        {ColorOrder::RGB, 1, 2, 3},
+        {ColorOrder::RBG, 1, 3, 2},
+        {ColorOrder::GRB, 2, 1, 3},
+        {ColorOrder::GBR, 2, 3, 1},
+        {ColorOrder::BGR, 3, 2, 1},
+        {ColorOrder::BRG, 3, 1, 2},
     };
     for (const auto& value : cases)
     {
@@ -51,7 +60,7 @@ static void testColorOrderCompatibility()
     assert(!ProtocolHelper::mapRgbChannels(ColorOrder::RGBW, 1, 2, 3, first, second, third));
     assert(ProtocolHelper::getDefaultFrequency(LedProtocol::WS2811) == 800000);
     assert(ProtocolHelper::getDefaultFrequency(LedProtocol::WS2811_400KHZ) == 400000);
-    assert(ProtocolHelper::getDefaultFrequency(LedProtocol::WS2805_RGBCCT) == 917431);
+    assert(ProtocolHelper::getDefaultFrequency(LedProtocol::WS2805_RGBCCT) == 800000);
     assert(ProtocolHelper::getColorOrder(LedProtocol::WS2811) == ColorOrder::RGB);
     assert(ProtocolHelper::getColorOrder(LedProtocol::WS2811_400KHZ) == ColorOrder::GRB);
     assert(ProtocolHelper::isColorOrderCompatible(LedProtocol::SK6812, ColorOrder::GRB));
@@ -94,8 +103,8 @@ static void testQuantization()
     assert(oneWireMakeBalancedSymbols(ws2805.t0hNs, ws2805.t0lNs,
                                       ws2805.t1hNs, ws2805.t1lNs,
                                       40000000U, 32767U, symbols));
-    assert(symbols.period == 44 && symbols.zeroHigh == 12 && symbols.zeroLow == 32);
-    assert(symbols.oneHigh == 32 && symbols.oneLow == 12);
+    assert(symbols.period == 50 && symbols.zeroHigh == 12 && symbols.zeroLow == 38);
+    assert(symbols.oneHigh == 38 && symbols.oneLow == 12);
 }
 
 static void testBitrateOverrides()
@@ -179,8 +188,16 @@ static void testExactPacking()
     // Two pixels ensure the byte-stream path cannot hide an inserted FIFO
     // padding word or a missing fifth channel at a pixel boundary.
     const uint8_t rgbcctPixels[] = {
-        0x11, 0x22, 0x33, 0x44, 0x55,
-        0x66, 0x77, 0x88, 0x99, 0xaa,
+        0x11,
+        0x22,
+        0x33,
+        0x44,
+        0x55,
+        0x66,
+        0x77,
+        0x88,
+        0x99,
+        0xaa,
     };
     assert(oneWirePackedWordCount(sizeof(rgbcctPixels), 5) == sizeof(rgbcctPixels));
     for (size_t i = 0; i < sizeof(rgbcctPixels); ++i)

@@ -306,6 +306,6 @@ class NeoPixelManager
     void rebuildPhysToVirtualMapping();                                               // Rebuild Physical→Virtual mapping table
     void applyPowerLimitToStrip(PhysicalStrip* phys, uint32_t stripLimit);            // Apply power limit to a specific PhysicalStrip
     void applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scale);                // Apply brightness scale to PhysicalStrip buffer
-    uint32_t calculatePhysicalStripCurrent(PhysicalStrip* phys);                      // Requested current (mA), SPI-frame aware
+    uint32_t calculatePhysicalStripCurrent(PhysicalStrip* phys) const;                // Requested current (mA), SPI-frame aware
     void reportTransferFailure(uint32_t stripIndex, const PhysicalStrip* strip, const char* operation);
 };

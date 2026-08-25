@@ -132,9 +132,11 @@ inline const OneWireTimingProfile& getOneWireTimingProfile(LedProtocol protocol)
         3, 1, 0, ColorOrder::GRB, false};
     static constexpr OneWireTimingProfile ws2805 = {
         // Worldsemi's windows are T0H 220-380, T1H/T0L 580-1600, T1L 220-420 ns and
-        // a latch after >280 us low. 300/790 centres all four and matches WLED via
-        // NeoPixelBus; RMT quantises it to 300/800, the four-step PIO to 272/818.
-        "WS2805", 917431, 300, 790, 790, 300, 300, false, OneWirePioCadence::FOUR_STEP,
+        // a latch after >280 us low, at the nominal 800 kbit/s. The four-step
+        // complement centres all four; RMT quantises it to 300/950 and 950/300.
+        // Faster cells are in spec but leave too little T1H margin for a slow
+        // level shifter (measured on KNeoPiX ESP32-S3 + TXS0108E).
+        "WS2805", 800000, 312, 938, 938, 312, 300, false, OneWirePioCadence::FOUR_STEP,
         5, 1, 0, ColorOrder::RGBCCT, false};
     static constexpr OneWireTimingProfile sm16825 = {
         // SM16825 uses the WS2812x waveform, 16-bit MSB-first channels and
