@@ -6,11 +6,14 @@
 #if defined(ARDUINO_ARCH_ESP32)
 
     #include "rmt_neopixel_serial.h"
+#include "../SerialTimingProfile.h"
     #include "../PhysicalStripConfig.h"
     #include <Arduino.h>
     #include <esp_log.h>
 
-    #define RMT_LED_STRIP_RESOLUTION_HZ 10000000 // 10MHz for RMT
+    #define RMT_LED_STRIP_RESOLUTION_HZ 40000000 // 40 MHz = 25 ns per tick (matches NeoPixelBus)
+    /// Duration of one RMT tick in ns, derived from the resolution above.
+    static constexpr uint32_t kRmtTickNs = 1000000000UL / RMT_LED_STRIP_RESOLUTION_HZ;
 
 // Static instance mapping
 RMT_NeoPixel_Serial* RMT_NeoPixel_Serial::_instances[8] = {nullptr};
@@ -179,12 +182,26 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
     _inst->initialized = false;
     _inst->busy = false;
 
-    // Allocate buffer
-    _inst->bufferSize = ledCount * _inst->bytesPerLed;
+    // TM1814 expects C1 C2 D1..Dn: two 4-byte constant-current commands, the second the
+    // bit complement of the first.
+    _inst->prefixBytes = (protocol == LedProtocol::TM1814) ? 8 : 0;
+
+    _inst->bufferSize = (size_t)_inst->prefixBytes + (size_t)ledCount * _inst->bytesPerLed;
     _inst->buffer = (uint8_t*)malloc(_inst->bufferSize);
     if (_inst->buffer)
     {
         memset(_inst->buffer, 0, _inst->bufferSize);
+
+        if (_inst->prefixBytes == 8)
+        {
+            // Current level in bits [5:0]; bits 7 and 6 stay 0. Order is W R G B.
+            const uint8_t level = ProtocolHelper::tm1814CurrentLevel(180); // 18.0 mA
+            for (uint8_t i = 0; i < 4; ++i)
+            {
+                _inst->buffer[i] = level;
+                _inst->buffer[4 + i] = (uint8_t)~level;
+            }
+        }
     }
 }
 
@@ -192,26 +209,32 @@ RMT_NeoPixel_Serial::~RMT_NeoPixel_Serial()
 {
     if (_inst)
     {
-        if (_inst->initialized)
+        // Release outside the initialized guard: a half-built instance owns handles too.
+        for (int i = 0; i < 8; i++)
         {
-            // Unregister callback
-            for (int i = 0; i < 8; i++)
-            {
-                if (_instances[i] == this)
-                {
-                    _instances[i] = nullptr;
-                }
-            }
+            if (_instances[i] == this) _instances[i] = nullptr;
+        }
 
-            // Cleanup RMT resources
-            if (_inst->encoder)
+        if (_inst->encoder)
+        {
+            rmt_del_encoder(_inst->encoder);
+            _inst->encoder = nullptr;
+        }
+        if (_inst->channel)
+        {
+            // rmt_del_channel() refuses an enabled channel; without this disable its
+            // memory blocks and GPIO routing stay claimed until reboot.
+            esp_err_t derr = rmt_disable(_inst->channel);
+            if (derr != ESP_OK && derr != ESP_ERR_INVALID_STATE)
             {
-                rmt_del_encoder(_inst->encoder);
+                ESP_LOGW("RMT_NeoPixel", "rmt_disable failed (err=%d)", derr);
             }
-            if (_inst->channel)
+            derr = rmt_del_channel(_inst->channel);
+            if (derr != ESP_OK)
             {
-                rmt_del_channel(_inst->channel);
+                ESP_LOGE("RMT_NeoPixel", "rmt_del_channel failed (err=%d) - channel leaked", derr);
             }
+            _inst->channel = nullptr;
         }
 
         if (_inst->buffer)
@@ -263,10 +286,12 @@ bool RMT_NeoPixel_Serial::init()
         .gpio_num = (gpio_num_t)_inst->pin,
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .resolution_hz = RMT_LED_STRIP_RESOLUTION_HZ,
-        .mem_block_symbols = 64, // 64 symbols per block
+        // One hardware block. More than SOC_RMT_MEM_WORDS_PER_CHANNEL makes the IDF take
+        // the neighbour channel too, leaving C3/C6/C5 room for a single strip.
+        .mem_block_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL,
         .trans_queue_depth = 4,  // 4 transaction queue
         .flags = {
-            .invert_out = false,
+            .invert_out = SerialTiming::profileFor(_inst->protocol).inverted,
             .with_dma = should_request_rmt_dma(),
         }};
 
@@ -285,14 +310,18 @@ bool RMT_NeoPixel_Serial::init()
         return false;
     }
 
-    // Create encoder (bytes encoder for LED data)
-    // Select timing based on protocol – WS2811 uses 400kHz, all others use 800kHz
-    bool isWS2811 = (_inst->protocol == LedProtocol::WS2811);
+    // Encoder symbols come from the protocol profile, the same source the PIO backend
+    // uses, so a chip produces one waveform regardless of which backend drives it.
+    SerialTiming::Profile prof = SerialTiming::profileFor(_inst->protocol);
+    if (prof.t1h == 0) prof = SerialTiming::profileFor(LedProtocol::WS2812B);
+    _inst->resetTimeUs = prof.resetUs;
+
+    const SerialTiming::Ticks tk = SerialTiming::toTicks(prof, kRmtTickNs);
     rmt_bytes_encoder_config_t encoder_config = {
-        .bit0 = isWS2811 ? ws2811_zero : ws2812_zero,
-        .bit1 = isWS2811 ? ws2811_one  : ws2812_one,
+        .bit0 = { .duration0 = tk.t0h, .level0 = 1, .duration1 = tk.t0l, .level1 = 0 },
+        .bit1 = { .duration0 = tk.t1h, .level0 = 1, .duration1 = tk.t1l, .level1 = 0 },
         .flags = {
-            .msb_first = 1 // MSB first for WS2812/WS2811
+            .msb_first = 1
         }};
 
     if (rmt_new_bytes_encoder(&encoder_config, &_inst->encoder) != ESP_OK)
@@ -362,77 +391,32 @@ void RMT_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
 {
     if (!_inst || !_inst->buffer) return;
 
-    uint32_t offset = index * _inst->bytesPerLed;
+    const size_t offset = (size_t)_inst->prefixBytes + (size_t)index * _inst->bytesPerLed;
+    if (offset + _inst->bytesPerLed > _inst->bufferSize) return; // the PIO twin bounds-checks too
 
-    switch (_inst->colorOrder)
+    // Swap runs on the logical components, before the colour order is applied.
+    ProtocolHelper::applyChannelSwap(_inst->channelSwap, r, g, b, ww, cw);
+
+    uint8_t ch[6] = {0};
+    uint8_t count = ProtocolHelper::orderChannels(_inst->colorOrder, r, g, b, ww, cw, ch);
+
+    const uint8_t bits = ProtocolHelper::getBitsPerChannel(_inst->protocol);
+    const uint8_t chBytes = (uint8_t)(bits / 8);
+    if (count * chBytes > _inst->bytesPerLed) count = (uint8_t)(_inst->bytesPerLed / chBytes);
+
+    if (bits == 16)
     {
-        case ColorOrder::RGB:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            break;
-
-        case ColorOrder::GRB:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            break;
-
-        case ColorOrder::BGR:
-            _inst->buffer[offset] = b;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = r;
-            break;
-
-        case ColorOrder::RGBW:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww; // Use ww as single white
-            break;
-
-        case ColorOrder::GRBW:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww; // Use ww as single white
-            break;
-
-        // 5-channel color orders (RGBCCT)
-        case ColorOrder::RGBCCT:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww;
-            _inst->buffer[offset + 4] = cw;
-            break;
-
-        case ColorOrder::GRBCCT:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww;
-            _inst->buffer[offset + 4] = cw;
-            break;
-
-        case ColorOrder::RGBCTW:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = cw; // Cool white first
-            _inst->buffer[offset + 4] = ww; // Warm white second
-            break;
-
-        case ColorOrder::GRBCTW:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = cw; // Cool white first
-            _inst->buffer[offset + 4] = ww; // Warm white second
-            break;
-
-        default:
-            break;
+        for (uint8_t i = 0; i < count; ++i)
+        {
+            const uint16_t v = (uint16_t)(ch[i] * 257);
+            _inst->buffer[offset + i * 2] = (uint8_t)(v >> 8);
+            _inst->buffer[offset + i * 2 + 1] = (uint8_t)(v & 0xFF);
+        }
+    }
+    else
+    {
+        for (uint8_t i = 0; i < count; ++i)
+            _inst->buffer[offset + i] = ch[i];
     }
 }
 
@@ -450,7 +434,8 @@ bool RMT_NeoPixel_Serial::show()
             .eot_level = 0, // LOW after transfer (reset)
             .queue_nonblocking = 0}};
 
-    // Send data via RMT
+    // Send data via RMT. The call queues the transfer and returns; waiting happens in
+    // isBusy() so several strips overlap instead of running one after another.
     esp_err_t err = rmt_transmit(_inst->channel, _inst->encoder, _inst->buffer, _inst->bufferSize, &tx_config);
     if (err != ESP_OK)
     {
@@ -459,16 +444,32 @@ bool RMT_NeoPixel_Serial::show()
         return false;
     }
 
-    // Wait for completion (blocking for now)
-    rmt_tx_wait_all_done(_inst->channel, portMAX_DELAY);
-    _inst->busy = false;
-
     return true;
 }
 
 bool RMT_NeoPixel_Serial::isBusy()
 {
-    return _inst ? _inst->busy : false;
+    if (!_inst || !_inst->initialized) return false;
+
+    if (_inst->busy)
+    {
+        // Bounded, unlike the portMAX_DELAY this used to sit on: a stalled channel must
+        // not hold loop() past the watchdog. 0 polls without blocking.
+        esp_err_t err = rmt_tx_wait_all_done(_inst->channel, 0);
+        if (err == ESP_ERR_TIMEOUT) return true;
+
+        _inst->busy = false;
+        _inst->lastTxEndUs = micros();
+        _inst->waitingForReset = true;
+    }
+
+    if (_inst->waitingForReset)
+    {
+        if ((uint32_t)(micros() - _inst->lastTxEndUs) < _inst->resetTimeUs) return true;
+        _inst->waitingForReset = false;
+    }
+
+    return false;
 }
 
 void RMT_NeoPixel_Serial::clear()
@@ -506,8 +507,11 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     const SerialStripConfig* serialCfg = config->isSerialConfig() ? static_cast<const SerialStripConfig*>(config) : nullptr;
     if (!serialCfg) return false;
 
-    // Apply ColorOrder
-    _inst->colorOrder = serialCfg->getColorOrder();
+    // Never let a NONE config stomp the live driver order: that turns the strip into
+    // wrong colours rather than leaving it alone.
+    _inst->channelSwap = serialCfg->getChannelSwap();
+    const ColorOrder cfgOrder = serialCfg->getColorOrder();
+    if (cfgOrder != ColorOrder::NONE) _inst->colorOrder = cfgOrder;
 
     // Apply level-shifter GPIO optimizations
     _inst->levelShifterType = serialCfg->getLevelShifter();
@@ -531,54 +535,49 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
                  (_inst->levelShifterType == LevelShifterType::SN74AHCT125) ? "74AHCT125" : "74HCT125");
     }
 
-    // Apply custom timing if T0H is set.
-    // RMT encodes T0H/T0L and T1H/T1L independently via rmt_symbol_word_t.
-    // Resolution: 10MHz = 100ns per tick  →  ticks = ns / 100
-    uint16_t t0h = serialCfg->getT0H();
-    uint16_t t0l = serialCfg->getT0L();
-    uint16_t t1h = serialCfg->getT1H();
-    uint16_t t1l = serialCfg->getT1L();
+    // Reset/latch time is independent of the bit timing, so apply it either way.
+    const uint32_t cfgResetUs = serialCfg->getResetTime();
+    if (cfgResetUs > 0) _inst->resetTimeUs = cfgResetUs;
+
+    // Ticks derive from ONE rounded bit period, so 0-bit and 1-bit last equally long;
+    // rounding the four values separately lets the halves land on different periods.
+    const uint16_t t0h = serialCfg->getT0H();
+    const uint16_t t0l = serialCfg->getT0L();
+    const uint16_t t1h = serialCfg->getT1H();
+    const uint16_t t1l = serialCfg->getT1L();
     if (t0h > 0 && t0l > 0 && t1h > 0 && t1l > 0 && _inst->initialized)
     {
-        // Build custom symbol words (ticks at 10 MHz = 100 ns per tick)
-        rmt_symbol_word_t custom_zero = {
-            .duration0 = (uint16_t)(t0h / 100),
-            .level0    = 1,
-            .duration1 = (uint16_t)(t0l / 100),
-            .level1    = 0,
-        };
-        rmt_symbol_word_t custom_one = {
-            .duration0 = (uint16_t)(t1h / 100),
-            .level0    = 1,
-            .duration1 = (uint16_t)(t1l / 100),
-            .level1    = 0,
-        };
+        SerialTiming::Profile custom = { t0h, t0l, t1h, t1l,
+                                         cfgResetUs ? cfgResetUs : _inst->resetTimeUs,
+                                         SerialTiming::profileFor(_inst->protocol).inverted };
+        const SerialTiming::Ticks tk = SerialTiming::toTicks(custom, kRmtTickNs);
 
-        // Recreate the bytes encoder with the new symbols
-        if (_inst->encoder)
-        {
-            rmt_del_encoder(_inst->encoder);
-            _inst->encoder = nullptr;
-        }
         rmt_bytes_encoder_config_t encoder_config = {
-            .bit0  = custom_zero,
-            .bit1  = custom_one,
+            .bit0  = { .duration0 = tk.t0h, .level0 = 1, .duration1 = tk.t0l, .level1 = 0 },
+            .bit1  = { .duration0 = tk.t1h, .level0 = 1, .duration1 = tk.t1l, .level1 = 0 },
             .flags = { .msb_first = 1 },
         };
-        if (rmt_new_bytes_encoder(&encoder_config, &_inst->encoder) != ESP_OK)
+
+        // Build the replacement before dropping the old one: a failed rebuild used to
+        // leave the encoder NULL while initialized stayed true.
+        rmt_encoder_handle_t rebuilt = nullptr;
+        if (rmt_new_bytes_encoder(&encoder_config, &rebuilt) != ESP_OK)
         {
-            ESP_LOGE("RMT_NeoPixel", "Failed to recreate encoder for custom timing");
+            ESP_LOGE("RMT_NeoPixel", "Failed to recreate encoder for custom timing, keeping previous");
             return false;
         }
+        if (_inst->encoder) rmt_del_encoder(_inst->encoder);
+        _inst->encoder = rebuilt;
 
-        // Store in inst for display
         _inst->customT0H = t0h;
         _inst->customT0L = t0l;
         _inst->customT1H = t1h;
         _inst->customT1L = t1l;
 
-        // Update reset time if provided
-        // (reset is handled in show() via delay, not via encoder)
+        _inst->realizedT0hNs = (uint16_t)(tk.t0h * kRmtTickNs);
+        _inst->realizedT0lNs = (uint16_t)(tk.t0l * kRmtTickNs);
+        _inst->realizedT1hNs = (uint16_t)(tk.t1h * kRmtTickNs);
+        _inst->realizedT1lNs = (uint16_t)(tk.t1l * kRmtTickNs);
     }
 
     return true;

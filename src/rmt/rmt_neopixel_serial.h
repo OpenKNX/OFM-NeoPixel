@@ -56,6 +56,24 @@ struct rmt_neopixel_serial_inst
     bool initialized;   // Initialized?
     volatile bool busy; // Transfer running?
 
+    // Latch/reset gate. The chip needs a quiet line after the last bit before it
+    // accepts the next frame; "transfer done" is not the same as "ready".
+    uint32_t          resetTimeUs;
+    volatile uint32_t lastTxEndUs;
+    volatile bool     waitingForReset;
+
+    // Realized signal, for diagnostics: what the encoder actually emits.
+    uint16_t realizedT0hNs;
+    uint16_t realizedT0lNs;
+    uint16_t realizedT1hNs;
+    uint16_t realizedT1lNs;
+
+    // Bytes sent ahead of the pixel data (TM1814 C1/C2 current commands).
+    uint8_t prefixBytes;
+
+    /// Per-strip channel swap (ProtocolHelper::ChannelSwap).
+    uint8_t channelSwap;
+
     LevelShifterType levelShifterType; // Level-shifter type (NONE or TXS0108E)
 };
 typedef struct rmt_neopixel_serial_inst rmt_neopixel_serial_inst_t;
