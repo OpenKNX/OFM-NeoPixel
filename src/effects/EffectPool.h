@@ -5,6 +5,56 @@
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 #pragma once
+
+// ============================================================================
+//  NEOPIXEL_DISABLE_2D - drop every 2D effect at once
+//
+//  The 2D effects only render on a matrix topology. On a device that drives plain
+//  strips they are dead weight, so one flag stands in for the thirteen individual
+//  ones below. Setting a single effect's flag still works on its own.
+// ============================================================================
+#ifdef NEOPIXEL_DISABLE_2D
+    #ifndef NEOPIXEL_DISABLE_AURORA2D
+        #define NEOPIXEL_DISABLE_AURORA2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_CLOCK2D
+        #define NEOPIXEL_DISABLE_CLOCK2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_DNA2D
+        #define NEOPIXEL_DISABLE_DNA2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_GAMEOFLIFE2D
+        #define NEOPIXEL_DISABLE_GAMEOFLIFE2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_LISSAJOUS2D
+        #define NEOPIXEL_DISABLE_LISSAJOUS2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_MATRIX2D
+        #define NEOPIXEL_DISABLE_MATRIX2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_METABALLS2D
+        #define NEOPIXEL_DISABLE_METABALLS2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_PLASMANEBULA2D
+        #define NEOPIXEL_DISABLE_PLASMANEBULA2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_SNAKE2D
+        #define NEOPIXEL_DISABLE_SNAKE2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_STARFIELDWARP2D
+        #define NEOPIXEL_DISABLE_STARFIELDWARP2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_TETRIS2D
+        #define NEOPIXEL_DISABLE_TETRIS2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_TRON2D
+        #define NEOPIXEL_DISABLE_TRON2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_UFOSWARM2D
+        #define NEOPIXEL_DISABLE_UFOSWARM2D
+    #endif
+#endif
+
 /**
  * Memory Optimization:
  * - Without Pool: 10 Segments × 500 bytes = 5000 bytes
