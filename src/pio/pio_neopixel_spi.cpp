@@ -1219,7 +1219,8 @@ void PIO_NeoPixel_SPI::setStartFrameDelayUs(uint32_t delayUs)
     if (!_inst) return;
     if (delayUs != 0)
     {
-        logWarningP("PIO NeoPixel SPI: startFrameDelayUs is unsupported");
+        openknx.logger.logWithPrefixAndValues("PIO NeoPixel SPI",
+                                              "WARNING: startFrameDelayUs is unsupported");
         return;
     }
     _inst->startFrameDelayUs = 0;

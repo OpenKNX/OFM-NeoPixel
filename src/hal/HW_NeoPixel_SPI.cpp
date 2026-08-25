@@ -364,11 +364,14 @@ bool HW_NeoPixel_SPI::init()
     // RP2040 routes SPI signals through the GPIO matrix selected before
     // begin(). Without these calls a custom-pin WS2801/LPD8806 strip is sent
     // on the board defaults instead of the pins held by PhysicalStrip.
-    _inst->spi->setSCK(_inst->sckPin);
-    _inst->spi->setTX(_inst->mosiPin);
+    // SPIClass is just an alias for the abstract arduino::HardwareSPI base on this
+    // platform, so the pin-remap setters need the concrete SPIClassRP2040 type.
+    auto* rp2040Spi = static_cast<SPIClassRP2040*>(_inst->spi);
+    rp2040Spi->setSCK(_inst->sckPin);
+    rp2040Spi->setTX(_inst->mosiPin);
     if (_inst->csPin >= 0)
     {
-        _inst->spi->setCS(_inst->csPin);
+        rp2040Spi->setCS(_inst->csPin);
     }
     _inst->spi->begin();
 #elif defined(ARDUINO_ARCH_ESP32)
