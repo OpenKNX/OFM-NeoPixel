@@ -4917,30 +4917,19 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
             openknx.logger.logWithValues("  PIO Instance:    %s", pioName);
             openknx.logger.logWithValues("  State Machine:   SM%d", pioSerialDriver->getStateMachine());
 
-            uint32_t target_freq = pioSerialDriver->getFrequency();
-            float actual_bitrate = pioSerialDriver->getActualBitrate();
-            float actual_clkdiv = pioSerialDriver->getActualClkdiv();
+            // Everything below is what the hardware actually produces, not what was asked for.
+            const uint16_t bitNs = pioSerialDriver->getRealizedBitNs();
 
-            openknx.logger.logWithValues("  Target Freq:     %.0f kHz", actual_bitrate / 1000.0f);
-            openknx.logger.logWithValues("  Calc. ClkDiv:    %.3f", actual_clkdiv);
-            openknx.logger.logWithValues("  Actual Bitrate:  %.0f kHz", actual_bitrate / 1000.0f);
-
-            // Timing tolerance (compare actual to protocol target)
-            float deviation = ((actual_bitrate - target_freq) / target_freq) * 100.0f;
-            openknx.logger.logWithValues("  Deviation:       %.1f%%", deviation);
-
-            if (fabs(deviation) < 1.0f)
-            {
-                openknx.logger.log("  Status:          Optimal");
-            }
-            else if (fabs(deviation) < 5.0f)
-            {
-                openknx.logger.log("  Status:          Acceptable");
-            }
-            else
-            {
-                openknx.logger.log("  Status:          Out of spec");
-            }
+            openknx.logger.logWithValues("  ClkDiv:          %.0f (integer, no dither)", pioSerialDriver->getActualClkdiv());
+            openknx.logger.logWithValues("  Cycles per bit:  %u", pioSerialDriver->getCyclesPerBit());
+            openknx.logger.logWithValues("  Realized T0H:    %u ns", pioSerialDriver->getRealizedT0hNs());
+            openknx.logger.logWithValues("  Realized T0L:    %u ns", pioSerialDriver->getRealizedT0lNs());
+            openknx.logger.logWithValues("  Realized T1H:    %u ns", pioSerialDriver->getRealizedT1hNs());
+            openknx.logger.logWithValues("  Realized T1L:    %u ns", pioSerialDriver->getRealizedT1lNs());
+            openknx.logger.logWithValues("  Bit period:      %u ns (%.1f kHz)", bitNs,
+                                         bitNs ? (1000000.0f / (float)bitNs) : 0.0f);
+            openknx.logger.logWithValues("  Latch:           %u us", pioSerialDriver->getResetTimeUs());
+            openknx.logger.logWithValues("  Polarity:        %s", pioSerialDriver->isInverted() ? "inverted" : "normal");
         }
         else if (pioSpiDriver)
         {
