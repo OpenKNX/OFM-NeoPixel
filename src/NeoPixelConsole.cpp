@@ -13,7 +13,6 @@
 // BStandard library includes
 #include <cstdarg>
 #include <cstdio>
-#include <sstream>
 
 // Effect system includes
 #include "effects/Effect.h"
@@ -679,7 +678,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         if (sub.compare(0, 6, "start ") == 0)
         {
             int seg = 0, em = 0;
-            if (sscanf(sub.c_str() + 6, "%d %d", &seg, &em) != 2 || seg < 0)
+            if (!(ConsoleArgStream(sub.c_str() + 6) >> seg >> em) || seg < 0)
             {
                 openknx.logger.log("Usage: neo em start <seg> <em>");
                 return true;
@@ -707,7 +706,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         if (sub.compare(0, 4, "cue ") == 0)
         {
             int seg = 0, cue = 0;
-            if (sscanf(sub.c_str() + 4, "%d %d", &seg, &cue) != 2 || seg < 0)
+            if (!(ConsoleArgStream(sub.c_str() + 4) >> seg >> cue) || seg < 0)
             {
                 openknx.logger.log("Usage: neo em cue <seg> <cue>");
                 return true;
@@ -719,7 +718,9 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         if (sub.compare(0, 7, "config ") == 0)
         {
             int em = 0, loop = 0, nextEm = 0;
-            int n = sscanf(sub.c_str() + 7, "%d %d %d", &em, &loop, &nextEm);
+            ConsoleArgStream cfgArgs(sub.c_str() + 7);
+            cfgArgs >> em >> loop >> nextEm;
+            const size_t n = cfgArgs.count();
             if (n < 2 || em < 1)
             {
                 openknx.logger.log("Usage: neo em config <em> <loop 0|1> [nextEm]");
@@ -785,8 +786,9 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         if (sub.compare(0, 4, "set ") == 0)
         {
             int em = 0, cue = 0, eff = 0, dur = 0, fade = 0, bri = 255, r = 255, g = 255, b = 255;
-            int n = sscanf(sub.c_str() + 4, "%d %d %d %d %d %d %d %d %d",
-                           &em, &cue, &eff, &dur, &fade, &bri, &r, &g, &b);
+            ConsoleArgStream setArgs(sub.c_str() + 4);
+            setArgs >> em >> cue >> eff >> dur >> fade >> bri >> r >> g >> b;
+            const size_t n = setArgs.count();
             if (n < 5 || em < 1 || cue < 1)
             {
                 openknx.logger.log("Usage: neo cue set <em> <cue> <effectId> <durSec> <fadeMs> [bri] [r g b]");
@@ -803,7 +805,9 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         if (sub.compare(0, 6, "param ") == 0)
         {
             int em = 0, cue = 0, idx = -1, val = 0;
-            int n = sscanf(sub.c_str() + 6, "%d %d %d %d", &em, &cue, &idx, &val);
+            ConsoleArgStream paramArgs(sub.c_str() + 6);
+            paramArgs >> em >> cue >> idx >> val;
+            const size_t n = paramArgs.count();
             if (n != 4 || em < 1 || cue < 1 || idx < 0)
             {
                 openknx.logger.log("Usage: neo cue param <em> <cue> <paramIdx> <value>   (override one effect param; cue must exist)");
@@ -817,8 +821,11 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         }
         if (sub.compare(0, 5, "text ") == 0)
         {
-            int em = 0, cue = 0, pos = 0;
-            int n = sscanf(sub.c_str() + 5, "%d %d %n", &em, &cue, &pos);
+            int em = 0, cue = 0;
+            ConsoleArgStream textArgs(sub.c_str() + 5);
+            textArgs >> em >> cue;
+            const size_t n = textArgs.count();
+            const size_t pos = textArgs.offset(); // start of the free-form text
             if (n < 2 || em < 1 || cue < 1)
             {
                 openknx.logger.log("Usage: neo cue text <em> <cue> <text>   (Scroll Text etc.; quotes optional, \\\" = literal quote; long text auto-stored & applied on cue activation)");
@@ -860,7 +867,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         }
 
         int seg = 0, cue = 0;
-        if (sscanf(sub.c_str(), "%d %d", &seg, &cue) != 2 || seg < 0)
+        if (!(ConsoleArgStream(sub.c_str()) >> seg >> cue) || seg < 0)
         {
             openknx.logger.log("Usage: neo cue [<seg> <cue>] | list [all|seg] | set <em> <cue> <eff> <dur> <fade> [bri r g b] | param <em> <cue> <idx> <val> | text <em> <cue> <text> | clear <em>");
             return true;
@@ -899,7 +906,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         {
             int seg = 0;
             char mode[16] = {0};
-            if (sscanf(sub.c_str() + 4, "%d %15s", &seg, mode) != 2 || seg < 0)
+            if (!(ConsoleArgStream(sub.c_str() + 4) >> seg >> mode) || seg < 0)
             {
                 openknx.logger.log("Usage: neo chain set <seg> <off|master|slave>");
                 return true;
@@ -922,7 +929,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         if (sub.compare(0, 9, "override ") == 0)
         {
             int seg = 0, flag = 0;
-            if (sscanf(sub.c_str() + 9, "%d %d", &seg, &flag) != 2 || seg < 0 || (flag != 0 && flag != 1))
+            if (!(ConsoleArgStream(sub.c_str() + 9) >> seg >> flag) || seg < 0 || (flag != 0 && flag != 1))
             {
                 openknx.logger.log("Usage: neo chain override <seg> <0|1>");
                 return true;
@@ -2489,9 +2496,11 @@ bool NeoPixel::processPhysAddCommand(const std::string& args)
     // Parse arguments: <gpio> <led_count> [protocol] [data_gpio]
     // For WS2812B/SK6812: neo phys add <gpio> <count> [ws2812b|sk6812]
     // For APA102: neo phys add <clk_gpio> <count> apa102 <data_gpio>
-    int gpio, ledCount, dataGpio = -1;
+    int gpio = -1, ledCount = 0, dataGpio = -1;
     char protocolStr[20] = "";
-    int parsed = sscanf(args.c_str(), "%d %d %19s %d", &gpio, &ledCount, protocolStr, &dataGpio);
+    ConsoleArgStream addArgs(args);
+    addArgs >> gpio >> ledCount >> protocolStr >> dataGpio;
+    const size_t parsed = addArgs.count();
 
     if (parsed < 2)
     {
@@ -2780,9 +2789,11 @@ bool NeoPixel::processVirtAddCommand(const std::string& args)
     }
 
     // Parse LED count and optional RGBW flag
-    int ledCount;
+    int ledCount = 0;
     char typeStr[10] = "";
-    int parsed = sscanf(args.c_str(), "%d %9s", &ledCount, typeStr);
+    ConsoleArgStream virtArgs(args);
+    virtArgs >> ledCount >> typeStr;
+    const size_t parsed = virtArgs.count();
 
     if (parsed < 1 || ledCount <= 0 || ledCount > 1000)
     {
@@ -2883,8 +2894,8 @@ bool NeoPixel::processVirtAttachCommand(const std::string& args)
     }
 
     // Parse arguments: <virt_id> <phys_id>
-    int virtId, physId;
-    if (sscanf(args.c_str(), "%d %d", &virtId, &physId) != 2)
+    int virtId = -1, physId = -1;
+    if (!(ConsoleArgStream(args) >> virtId >> physId))
     {
         openknx.logger.log("ERROR: Usage: neo virt attach <virt_id> <phys_id>");
         return true;
@@ -2943,8 +2954,10 @@ bool NeoPixel::processVirtDetachCommand(const std::string& args)
     }
 
     // Parse arguments: <virt_id> [phys_id]
-    int virtId, physId = -1;
-    int parsed = sscanf(args.c_str(), "%d %d", &virtId, &physId);
+    int virtId = -1, physId = -1;
+    ConsoleArgStream detachArgs(args);
+    detachArgs >> virtId >> physId;
+    const size_t parsed = detachArgs.count();
 
     if (parsed < 1)
     {
@@ -3046,7 +3059,9 @@ bool NeoPixel::processSegCommand(const std::string& args)
             return true;
         }
         int id = -1, w = 0, h = 0, a4 = -1, a5 = -1;
-        int n = sscanf(args.c_str() + 4, "%d %d %d %d %d", &id, &w, &h, &a4, &a5);
+        ConsoleArgStream geoArgs(args.c_str() + 4);
+        geoArgs >> id >> w >> h >> a4 >> a5;
+        const size_t n = geoArgs.count();
         if (n < 3 || id < 0 || (uint32_t)id >= _manager->getSegmentCount() || w < 1 || h < 1)
         {
             openknx.logger.log("Usage: neo seg geo <id> <w> <h> [topology]");
@@ -3170,8 +3185,8 @@ bool NeoPixel::processSegAddCommand(const std::string& args)
     }
 
     // Parse arguments: <virt_id> <start> <end>
-    int virtId, startLed, endLed;
-    if (sscanf(args.c_str(), "%d %d %d", &virtId, &startLed, &endLed) != 3)
+    int virtId = -1, startLed = -1, endLed = -1;
+    if (!(ConsoleArgStream(args) >> virtId >> startLed >> endLed))
     {
         openknx.logger.log("ERROR: Usage: neo seg add <virt_id> <start_led> <end_led>");
         return true;
@@ -3413,13 +3428,15 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
         return true;
     }
 
-    int segId;
+    int segId = -1;
     char cmd[8] = "";
-    int paramIdx;
+    int paramIdx = -1;
 
     // Parse: <seg> or <seg> get <idx> or <seg> set <idx>
     // Note: We don't parse the value here because it might be a string with spaces
-    int parsed = sscanf(args.c_str(), "%d %7s %d", &segId, cmd, &paramIdx);
+    ConsoleArgStream cfgArgs(args);
+    cfgArgs >> segId >> cmd >> paramIdx;
+    const size_t parsed = cfgArgs.count();
 
     if (parsed < 1)
     {
@@ -3556,8 +3573,8 @@ bool NeoPixel::processEffectConfigCommand(const std::string& args)
         else
         {
             // Parse numeric value - need to parse again since we skipped it earlier
-            uint32_t numValue;
-            if (sscanf(valueStart, "%u", &numValue) == 1)
+            uint32_t numValue = 0;
+            if (ConsoleArgStream(valueStart) >> numValue)
             {
                 effect->setParameter(seg, paramIdx, numValue);
                 openknx.logger.logWithValues("Set %s.%s = %u",
@@ -3601,7 +3618,7 @@ bool NeoPixel::processEffectCommand(const std::string& args)
     // Parse arguments: <str_action> <seg_id> [<effect_id_or_name>]
     // str_action values: set, stop, clear, pause, resume
     std::string action;
-    int segId, effId;
+    int segId = -1, effId = -1;
 
     // Check if help requested or no arguments provided
     if (args.empty() || args.compare("?") == 0)
@@ -3614,7 +3631,7 @@ bool NeoPixel::processEffectCommand(const std::string& args)
 
     // action and segId are mandatory
     char _action[7] = "";
-    if (sscanf(args.c_str(), "%6s %d", _action, &segId) != 2)
+    if (!(ConsoleArgStream(args) >> _action >> segId))
     {
         openknx.logger.log("ERROR! Action and Segment ID must be provided!");
         return true;
@@ -3625,7 +3642,7 @@ bool NeoPixel::processEffectCommand(const std::string& args)
     {
         // Try to parse the third argument as a numeric effect ID first
         char _effArg[64] = "";
-        if (sscanf(args.c_str(), "%*s %*d %63s", _effArg) != 1)
+        if (!(ConsoleArgStream(args).skip(2) >> _effArg))
         {
             openknx.logger.log("ERROR! Action 'set' requires Segment ID and Effect ID or Name!");
             return true;
@@ -3791,8 +3808,10 @@ bool NeoPixel::processColorCommand(const std::string& args)
     }
 
     // Parse arguments: <seg_id> <r> <g> <b> [w]
-    int segId, r, g, b, w = 0;
-    int parsed = sscanf(args.c_str(), "%d %d %d %d %d", &segId, &r, &g, &b, &w);
+    int segId = -1, r = -1, g = -1, b = -1, w = 0;
+    ConsoleArgStream colorArgs(args);
+    colorArgs >> segId >> r >> g >> b >> w;
+    const size_t parsed = colorArgs.count();
 
     if (parsed < 4)
     {
@@ -3889,7 +3908,7 @@ bool NeoPixel::processBrightnessCommand(const std::string& args)
     int segId = -1;
     int brightness = -1;
 
-    if (sscanf(args.c_str(), "%d %d", &segId, &brightness) != 2)
+    if (!(ConsoleArgStream(args) >> segId >> brightness))
     {
         openknx.logger.log("Usage: neo brightness <segment_id> <brightness>");
         openknx.logger.log("       segment_id: ID of the segment");
@@ -3945,7 +3964,7 @@ bool NeoPixel::processHardwareBrightnessCommand(const std::string& args)
     int segId = -1;
     int brightness = -1;
 
-    if (sscanf(args.c_str(), "%d %d", &segId, &brightness) != 2)
+    if (!(ConsoleArgStream(args) >> segId >> brightness))
     {
         openknx.logger.log("Usage: neo hwbrightness <segment_id> <brightness>");
         openknx.logger.log("       segment_id: ID of the segment");
@@ -4763,9 +4782,11 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
     }
 
     // Parse arguments
-    int stripId;
+    int stripId = -1;
     char modeStr[32] = "";
-    int parsed = sscanf(args.c_str(), "%d %31s", &stripId, modeStr);
+    ConsoleArgStream timingArgs(args);
+    timingArgs >> stripId >> modeStr;
+    const size_t parsed = timingArgs.count();
 
     if (parsed < 1)
     {
@@ -4994,8 +5015,9 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
         uint16_t t0h = 0, t0l = 0, t1h = 0, t1l = 0;
         uint32_t resetUs = 0;
         // Parse remaining values after "custom": t0h t0l t1h t1l [resetUs]
-        int customParsed = sscanf(args.c_str(), "%*d %*s %hu %hu %hu %hu %u",
-                                  &t0h, &t0l, &t1h, &t1l, &resetUs);
+        ConsoleArgStream customArgs(args);
+        customArgs.skip(2) >> t0h >> t0l >> t1h >> t1l >> resetUs;
+        const size_t customParsed = customArgs.count();
 
         if (customParsed < 4 || t0h == 0 || t0l == 0 || t1h == 0 || t1l == 0)
         {
@@ -5031,8 +5053,8 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
     {
         unsigned int freqKhz = 0;
         // Parse kHz after "freq": args = "<id> freq <kHz>"
-        int parsed = sscanf(args.c_str(), "%*d %*s %u", &freqKhz);
-        if (parsed < 1 || freqKhz < 400 || freqKhz > 1200)
+        const bool parsedFreq = (bool)(ConsoleArgStream(args).skip(2) >> freqKhz);
+        if (!parsedFreq || freqKhz < 400 || freqKhz > 1200)
         {
             openknx.logger.log("ERROR: Usage: neo phys timing <id> freq <kHz>");
             openknx.logger.log("  Bitrate in kHz (400-1200). Standard = 800; Clones oft 760-790.");
@@ -5092,7 +5114,7 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
     if (strcmp(modeStr, "profile") == 0)
     {
         int profileIdx = -1;
-        sscanf(args.c_str(), "%*d %*s %d", &profileIdx);
+        ConsoleArgStream(args).skip(2) >> profileIdx;
         if (profileIdx < 0 || profileIdx >= (int)kCloneProfileCount)
         {
             openknx.logger.logWithValues("ERROR: Usage: neo phys timing <id> profile <0-%d>", (int)kCloneProfileCount - 1);
@@ -5579,7 +5601,7 @@ bool NeoPixel::processPhysTimingTuneCommand(uint32_t stripId, const std::string&
     // ── parameter adjustment: "t1h +50", "reset 280", … ──────────────────────
     char   paramBuf[16] = {};
     char   valBuf[16]   = {};
-    if (sscanf(subArgs.c_str(), "%15s %15s", paramBuf, valBuf) < 2)
+    if (!(ConsoleArgStream(subArgs) >> paramBuf >> valBuf))
     {
         openknx.logger.log("ERROR: Usage: neo phys timing <id> tune <param> <value|+delta|-delta>");
         openknx.logger.log("  Params: t0h  t0l  t1h  t1l  reset");
@@ -5648,8 +5670,8 @@ bool NeoPixel::processPhysTimingTuneCommand(uint32_t stripId, const std::string&
 bool NeoPixel::processPhysConfigCommand(const std::string& args)
 {
     // Parse: <id> <subcommand> [params...]
-    std::istringstream iss(args);
-    uint32_t stripId;
+    ConsoleArgStream iss(args);
+    uint32_t stripId = UINT32_MAX;
     std::string subCmd;
 
     if (!(iss >> stripId >> subCmd))
@@ -5664,7 +5686,7 @@ bool NeoPixel::processPhysConfigCommand(const std::string& args)
     }
     else if (subCmd == "dummy")
     {
-        int modeInt;
+        int modeInt = 0;
         if (!(iss >> modeInt))
         {
             openknx.logger.log("ERROR: Usage: neo phys config <id> dummy <0-2>");
@@ -5674,7 +5696,7 @@ bool NeoPixel::processPhysConfigCommand(const std::string& args)
     }
     else if (subCmd == "frames")
     {
-        int startInt, endInt;
+        int startInt = 0, endInt = 0;
         if (!(iss >> startInt >> endInt))
         {
             openknx.logger.log("ERROR: Usage: neo phys config <id> frames <start> <end>");
@@ -5695,7 +5717,7 @@ bool NeoPixel::processPhysConfigCommand(const std::string& args)
     }
     else if (subCmd == "brightness")
     {
-        int brightnessInt;
+        int brightnessInt = 0;
         if (!(iss >> brightnessInt))
         {
             openknx.logger.log("ERROR: Usage: neo phys config <id> brightness <0-31>");
@@ -5705,17 +5727,17 @@ bool NeoPixel::processPhysConfigCommand(const std::string& args)
     }
     else if (subCmd == "freq" || subCmd == "frequency")
     {
-        float freqMHz;
-        if (!(iss >> freqMHz))
+        uint32_t freqKHz = 0; // MHz * 1000
+        if (!iss.readScaled1000(freqKHz))
         {
             openknx.logger.log("ERROR: Usage: neo phys config <id> freq <MHz> (e.g. 7.5, 10, 15)");
             return true;
         }
-        return processPhysConfigFrequencyCommand(stripId, (uint32_t)(freqMHz * 1000000.0f));
+        return processPhysConfigFrequencyCommand(stripId, freqKHz * 1000);
     }
     else if (subCmd == "delay")
     {
-        int delayUs;
+        int delayUs = 0;
         if (!(iss >> delayUs))
         {
             openknx.logger.log("ERROR: Usage: neo phys config <id> delay <us> (0-1000)");
@@ -5740,7 +5762,7 @@ bool NeoPixel::processPhysConfigCommand(const std::string& args)
     }
     else if (subCmd == "skipfirst")
     {
-        int count;
+        int count = 0;
         if (!(iss >> count))
         {
             openknx.logger.log("ERROR: Usage: neo phys config <id> skipfirst <count>");
@@ -6435,7 +6457,7 @@ bool NeoPixel::processPhysConfigLevelShifterCommand(uint32_t stripId, LevelShift
 /**
  * @brief Process 'neo phys config <id> skipmask <init|clear|set|list>' command
  */
-bool NeoPixel::processPhysConfigSkipMaskCommand(uint32_t stripId, const std::string& maskCmd, std::istringstream& iss)
+bool NeoPixel::processPhysConfigSkipMaskCommand(uint32_t stripId, const std::string& maskCmd, ConsoleArgStream& iss)
 {
     auto strip = _manager->getStrip(stripId);
     if (!strip)
@@ -6465,7 +6487,7 @@ bool NeoPixel::processPhysConfigSkipMaskCommand(uint32_t stripId, const std::str
     }
     else if (maskCmd == "set")
     {
-        uint16_t index;
+        uint16_t index = 0;
         int value;
         if (!(iss >> index >> value))
         {

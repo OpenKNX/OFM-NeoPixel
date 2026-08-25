@@ -9,6 +9,7 @@
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
 
+#include "ConsoleArgStream.h"
 #include "LevelShifterType.h"
 #include "NeoPixelManager.h"
 #include "OpenKNX.h"
@@ -134,7 +135,7 @@ class NeoPixel : public OpenKNX::Module
     bool processPhysConfigAutoDetectCommand(uint32_t stripId, bool enable);
     bool processPhysConfigDetectCommand(uint32_t stripId);
     bool processPhysConfigSkipFirstCommand(uint32_t stripId, uint8_t count);
-    bool processPhysConfigSkipMaskCommand(uint32_t stripId, const std::string& maskCmd, std::istringstream& iss);
+    bool processPhysConfigSkipMaskCommand(uint32_t stripId, const std::string& maskCmd, ConsoleArgStream& iss);
     bool processPhysConfigLevelShifterCommand(uint32_t stripId, LevelShifterType type);
 
     // VirtualStrip management commands
