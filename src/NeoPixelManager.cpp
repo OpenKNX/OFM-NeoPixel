@@ -1284,6 +1284,32 @@ void NeoPixelManager::updateEffects(uint32_t deltaTime)
  * Full pipeline: Phase 1-4
  * @param deltaTime Time since last update in milliseconds
  */
+/**
+ * @brief Re-send the frame on strips configured for it while output is switched off
+ *
+ * Called instead of the normal pipeline when global power is off, where update() never
+ * runs and the data line would stay silent indefinitely. Each strip decides for itself;
+ * the buffers are already dark, so this only re-transmits them.
+ */
+void NeoPixelManager::loopOffRefresh()
+{
+    if (!_initialized) return;
+
+    const uint32_t now = millis();
+    for (auto strip : _strips)
+    {
+        if (!strip || !strip->isInitialized()) continue;
+
+        auto* cfg = strip->getConfig();
+        if (!cfg || !cfg->getOffRefresh()) continue;
+
+        // Unsigned subtraction stays correct across the millis() wrap.
+        if ((uint32_t)(now - strip->getLastShowMs()) < kOffRefreshIntervalMs) continue;
+
+        strip->show();
+    }
+}
+
 void NeoPixelManager::update(uint32_t deltaTime)
 {
     if (!_initialized)

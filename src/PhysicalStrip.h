@@ -54,6 +54,11 @@ class PhysicalStrip
     // Display Control
     // ====================================================================
     bool show();
+
+    /**
+     * @brief millis() of the last show(), for idle detection
+     */
+    uint32_t getLastShowMs() const { return _lastShowMs; }
     bool waitForTransfer(uint32_t timeoutMs = 0);
     bool isBusy() const;
 
@@ -210,6 +215,7 @@ class PhysicalStrip
     uint32_t _clockPin;           // GPIO pin (Clock for SPI)
     uint16_t _ledCount;           // Number of LEDs
     LedProtocol _protocol;        // LED protocol
+    uint32_t _lastShowMs = 0; ///< millis() of the last successful show()
     bool _initialized;            // Initialized?
     ColorOrder _colorOrder;       // Color order for this strip
     bool _hasColorOrder;          // Whether ColorOrder was explicitly set

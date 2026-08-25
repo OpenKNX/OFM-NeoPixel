@@ -399,6 +399,11 @@ VirtualStrip* NeoPixel::addVirtualStrip(uint16_t totalLeds, ColorOrder colorOrde
 /**
  * @brief Update all strips
  */
+void NeoPixel::loopOffRefresh()
+{
+    if (_manager) _manager->loopOffRefresh();
+}
+
 void NeoPixel::updateAll()
 {
     if (_manager)

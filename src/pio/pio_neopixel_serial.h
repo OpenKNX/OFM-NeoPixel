@@ -101,6 +101,9 @@ struct pio_neopixel_serial_inst
 
     /// Per-strip channel swap (ProtocolHelper::ChannelSwap).
     uint8_t channelSwap;
+
+    /// 0 = chip profile, 1 = force normal, 2 = force inverted.
+    uint8_t polarityOverride;
 };
 typedef struct pio_neopixel_serial_inst pio_neopixel_serial_inst_t;
 
@@ -114,6 +117,7 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
 
     // IHardwareDriver interface implementation
     bool init() override;
+    void setPolarityOverride(uint8_t mode) override { if (_inst) _inst->polarityOverride = mode; }
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b) override;
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w) override;
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw) override;

@@ -417,6 +417,17 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
 
     // Apply ColorOrder (never let a NONE config stomp the live driver order)
     _inst->channelSwap = serialCfg->getChannelSwap();
+
+    // Polarity can change without a driver rebuild: the GPIO override is live.
+    const uint8_t polMode = serialCfg->getSignalPolarity();
+    if (polMode != _inst->polarityOverride)
+    {
+        _inst->polarityOverride = polMode;
+        const bool profInv = SerialTiming::profileFor(_inst->protocol).inverted;
+        _inst->inverted = (polMode == 1) ? false : (polMode == 2) ? true : profInv;
+        if (_inst->initialized)
+            gpio_set_outover(_inst->pin, _inst->inverted ? GPIO_OVERRIDE_INVERT : GPIO_OVERRIDE_NORMAL);
+    }
     const ColorOrder cfgOrder = serialCfg->getColorOrder();
     if (cfgOrder != ColorOrder::NONE) _inst->colorOrder = cfgOrder;
 
@@ -641,7 +652,11 @@ bool PIO_NeoPixel_Serial::initPIO()
     _inst->program.instructions = _inst->programWords;
     _inst->program.length = 4;
     _inst->program.origin = -1;
-    _inst->inverted = profile.inverted;
+    // 0 keeps the chip profile, 1 forces normal, 2 forces inverted. An inverting level
+    // shifter in the wiring is the case the profile cannot know about.
+    _inst->inverted = (_inst->polarityOverride == 1) ? false
+                    : (_inst->polarityOverride == 2) ? true
+                                                     : profile.inverted;
 
     const uint8_t cycles_per_bit = (uint8_t)sol.cyclesPerBit;
     float clkdiv = (float)sol.clkdiv;

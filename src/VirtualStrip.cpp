@@ -572,7 +572,12 @@ bool VirtualStrip::syncToPhysical()
             }
             else if (physicalIsRGBW && _bytesPerLed >= 4)
             {
-                // Physical strip supports RGBW and virtual buffer has W channel
+                // Physical strip supports RGBW and virtual buffer has W channel.
+                // Without this an RGB effect leaves the white LED dark and mixes white
+                // from the three colours instead.
+                auto* wcfg = pstrip->getConfig();
+                if (wcfg && wcfg->getWhiteMode() != 0)
+                    ProtocolHelper::applyWhiteMode(wcfg->getWhiteMode(), r, g, b, ww);
                 pstrip->setPixel(i, r, g, b, ww);
             }
             else

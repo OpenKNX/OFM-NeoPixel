@@ -291,7 +291,10 @@ bool RMT_NeoPixel_Serial::init()
         .mem_block_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL,
         .trans_queue_depth = 4,  // 4 transaction queue
         .flags = {
-            .invert_out = SerialTiming::profileFor(_inst->protocol).inverted,
+            // Fixed when the channel is created, so PhysicalStrip sets the override first.
+            .invert_out = (_inst->polarityOverride == 1) ? false
+                        : (_inst->polarityOverride == 2) ? true
+                                                         : SerialTiming::profileFor(_inst->protocol).inverted,
             .with_dma = should_request_rmt_dma(),
         }};
 
@@ -510,6 +513,14 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     // Never let a NONE config stomp the live driver order: that turns the strip into
     // wrong colours rather than leaving it alone.
     _inst->channelSwap = serialCfg->getChannelSwap();
+
+    // The RMT channel fixes invert_out at creation; a later change needs a restart.
+    if (serialCfg->getSignalPolarity() != _inst->polarityOverride)
+    {
+        _inst->polarityOverride = serialCfg->getSignalPolarity();
+        ESP_LOGW("RMT_NeoPixel", "GPIO%lu: polarity change takes effect after restart",
+                 (unsigned long)_inst->pin);
+    }
     const ColorOrder cfgOrder = serialCfg->getColorOrder();
     if (cfgOrder != ColorOrder::NONE) _inst->colorOrder = cfgOrder;
 

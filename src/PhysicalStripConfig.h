@@ -52,6 +52,39 @@ struct PhysicalStripConfig
     void setChannelSwap(uint8_t mode) { _channelSwap = mode; }
 
     /**
+     * @brief Set the signal polarity override
+     * @param mode 0 = follow the chip profile, 1 = force normal, 2 = force inverted
+     */
+    void setSignalPolarity(uint8_t mode) { _signalPolarity = mode; }
+
+    /**
+     * @brief Re-send the frame periodically while the strip is dark
+     * @note Some clone chips start their own demo pattern when data stops arriving.
+     */
+    void setOffRefresh(bool enabled) { _offRefresh = enabled; }
+
+    /**
+     * @brief Set how RGB values feed the white channel
+     * @param mode 0 = off, 1 = move the common part onto white and reduce RGB
+     */
+    void setWhiteMode(uint8_t mode) { _whiteMode = mode; }
+
+    /**
+     * @brief Get the white calculation mode
+     */
+    uint8_t getWhiteMode() const { return _whiteMode; }
+
+    /**
+     * @brief Whether periodic refresh while dark is enabled
+     */
+    bool getOffRefresh() const { return _offRefresh; }
+
+    /**
+     * @brief Get the signal polarity override
+     */
+    uint8_t getSignalPolarity() const { return _signalPolarity; }
+
+    /**
      * @brief Get the per-strip channel swap
      */
     uint8_t getChannelSwap() const { return _channelSwap; }
@@ -389,7 +422,10 @@ struct PhysicalStripConfig
     std::vector<bool> _skipMask;               // Flexible skip mask (empty = disabled)
     float _gammaCorrection = 1.0f;             // Default: 1.0 (linear, no correction)
     bool _gammaCorrectionEnabled = false;      // Default: disabled
-    uint8_t _channelSwap = 0; ///< ProtocolHelper::ChannelSwap, 0 = none
+    uint8_t _channelSwap = 0;    ///< ProtocolHelper::ChannelSwap, 0 = none
+    uint8_t _signalPolarity = 0; ///< 0 = chip profile, 1 = normal, 2 = inverted
+    bool    _offRefresh = false; ///< re-send periodically while dark
+    uint8_t _whiteMode = 0;      ///< 0 = off, 1 = accurate
     uint8_t _gammaLookupTable[256];            // Lookup table for color gamma
     // White balance
     bool _whiteBalanceEnabled = false; // Default: disabled

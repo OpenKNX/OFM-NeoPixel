@@ -155,6 +155,14 @@ class IHardwareDriver
     // Check if driver supports hardware brightness byte (APA102/SK9822)
     virtual bool supportsHardwareBrightness() const { return false; }
 
+    /**
+     * @brief Set the signal polarity override before init()
+     * @param mode 0 = follow the chip profile, 1 = force normal, 2 = force inverted
+     * @note Called before init() because a backend may fix the polarity when it creates
+     *       its hardware channel. Drivers without polarity support ignore it.
+     */
+    virtual void setPolarityOverride(uint8_t mode) { (void)mode; }
+
     // Allow changing ColorOrder after construction (default: no-op for drivers that don't support it)
     virtual void setColorOrder(ColorOrder order) { /* Default: ignore */ }
     virtual ColorOrder getColorOrder() const { return ColorOrder::RGB; } // Default fallback
@@ -415,6 +423,25 @@ namespace ProtocolHelper
             case ChannelSwap::None:
             default: break;
         }
+    }
+
+    /**
+     * @brief Move the common part of R, G and B onto the white channel
+     * @param mode 0 = off, 1 = move the common part onto white and reduce RGB
+     * @param w receives the white value; untouched unless it is still zero
+     * @note Only fills an unused white channel. A caller that set white itself keeps it.
+     */
+    constexpr void applyWhiteMode(uint8_t mode, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& w)
+    {
+        if (mode == 0 || w != 0) return;
+
+        const uint8_t common = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
+        if (common == 0) return;
+
+        w = common;
+        r = (uint8_t)(r - common);
+        g = (uint8_t)(g - common);
+        b = (uint8_t)(b - common);
     }
 
     /**

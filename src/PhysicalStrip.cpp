@@ -234,6 +234,9 @@ bool PhysicalStrip::init()
         _config = _driver->createDefaultConfig();
     }
 
+    // Before init(): the RMT backend fixes the polarity when it creates its channel.
+    if (_config) _driver->setPolarityOverride(_config->getSignalPolarity());
+
     if (!_driver->init())
     {
         Serial.println("PhysicalStrip: Driver init failed");
@@ -497,6 +500,7 @@ void PhysicalStrip::clear()
  */
 bool PhysicalStrip::show()
 {
+    _lastShowMs = millis();
     if (!_driver || !isInitialized()) return false;
     return _driver->show();
 }

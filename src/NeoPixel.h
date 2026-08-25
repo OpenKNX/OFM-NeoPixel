@@ -87,6 +87,12 @@ class NeoPixel : public OpenKNX::Module
 
     // Update Control
     void updateAll();
+
+    /**
+     * @brief Idle refresh while output is switched off
+     * @note Call instead of loop() when global power is off; each strip decides for itself.
+     */
+    void loopOffRefresh();
     void clearAll();
     void setUpdateSpeed(UpdateSpeed speed);
     void setAutoUpdate(bool enabled);

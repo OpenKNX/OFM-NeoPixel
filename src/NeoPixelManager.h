@@ -147,6 +147,14 @@ class NeoPixelManager
     // ====================================================================
     // Update Control (4-Phase Pipeline)
     // ====================================================================
+    /// Interval for the idle refresh, well below the seconds a clone needs to fall into demo mode.
+    static constexpr uint32_t kOffRefreshIntervalMs = 5000;
+
+    /**
+     * @brief Re-send the frame on strips configured for it while output is off
+     */
+    void loopOffRefresh();
+
     void update(uint32_t deltaTime);        // Phase 1-4: Full pipeline (non-blocking)
     void updateEffects(uint32_t deltaTime); // Phase 1: Effect calculations only
     void applyPowerLimit();                 // Phase 2: Global power scaling
