@@ -85,6 +85,23 @@ namespace LedProfiles
 
     // Conservative estimate for 5-channel
     static const LedCurrentProfile CONSERVATIVE_5CH(20, 20, 20, 20, 20);
+
+    /**
+     * @brief Current profile for a protocol
+     * @note A single global profile counted the white channels of an RGBW strip as 0 mA,
+     *       so a mixed installation under-reported by a quarter on those strips.
+     */
+    inline LedCurrentProfile forProtocol(LedProtocol protocol)
+    {
+        if (ProtocolHelper::isSPI(protocol)) return APA102;
+        switch (ProtocolHelper::getChannelCount(protocol))
+        {
+            case 6: // FW1906: RGB + CW + WW + unused
+            case 5: return CONSERVATIVE_5CH;
+            case 4: return SK6812_RGBW;
+            default: return WS2812B;
+        }
+    }
 } // namespace LedProfiles
 
 /**
@@ -524,6 +541,30 @@ class PowerManager
      * @param hardwareBrightness Hardware brightness (0-255, default 255 = full)
      * @return Total current in mA
      */
+    /**
+     * @brief Total current using an explicit profile instead of the configured one
+     */
+    uint32_t calculateTotalCurrent(const uint8_t* pixels, uint16_t numPixels, uint8_t bytesPerPixel,
+                                   uint8_t hardwareBrightness, const LedCurrentProfile& profile) const
+    {
+        if (!pixels || numPixels == 0) return 0;
+
+        uint32_t totalCurrent = 0;
+        for (uint16_t i = 0; i < numPixels; i++)
+        {
+            const uint16_t offset = i * bytesPerPixel;
+            const uint8_t ww = (bytesPerPixel >= 4) ? pixels[offset + 3] : 0;
+            const uint8_t cw = (bytesPerPixel >= 5) ? pixels[offset + 4] : 0;
+            const uint32_t hw = hardwareBrightness;
+            totalCurrent += (pixels[offset] * profile.redMA * hw) / 65025;
+            totalCurrent += (pixels[offset + 1] * profile.greenMA * hw) / 65025;
+            totalCurrent += (pixels[offset + 2] * profile.blueMA * hw) / 65025;
+            totalCurrent += (ww * profile.warmWhiteMA * hw) / 65025;
+            totalCurrent += (cw * profile.coolWhiteMA * hw) / 65025;
+        }
+        return totalCurrent;
+    }
+
     uint32_t calculateTotalCurrent(const uint8_t* pixels, uint16_t numPixels, uint8_t bytesPerPixel, uint8_t hardwareBrightness = 255) const
     {
         if (!pixels || numPixels == 0)
@@ -632,16 +673,14 @@ class PowerManager
      */
     bool applyCurrentLimit(uint8_t* pixels, uint16_t numPixels, uint8_t bytesPerPixel, uint8_t hardwareBrightness = 255, uint32_t deltaTimeMs = 0)
     {
-        if (!_enabled)
-        {
-            _lastCalculatedCurrent = 0;
-            _lastActualCurrent = 0;
-            return false;
-        }
-
-        // Calculate BEFORE limiting (cache for getRequestedPower)
+        // Measure first, regardless of _enabled. Reporting the consumption and limiting it
+        // are separate jobs; returning zero when limiting is off left the console showing
+        // 0 mA on a running installation.
         uint32_t totalCurrent = calculateTotalCurrent(pixels, numPixels, bytesPerPixel, hardwareBrightness);
         _lastCalculatedCurrent = totalCurrent;
+        _lastActualCurrent = totalCurrent;
+
+        if (!_enabled) return false;
 
         // Calculate target scale factor
         float targetScale = calculateBrightnessScale(pixels, numPixels, bytesPerPixel, hardwareBrightness);

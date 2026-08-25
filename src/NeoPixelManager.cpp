@@ -591,8 +591,8 @@ void NeoPixelManager::applyPowerLimit()
             uint8_t bytesPerPixel = bufferStride(phys);
             uint8_t hardwareBrightness = 255; // syncAll() already applied brightness
 
-            uint32_t stripCurrent = _powerManager.calculateTotalCurrent(
-                buffer, ledCount, bytesPerPixel, hardwareBrightness);
+            uint32_t stripCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, hardwareBrightness,
+                    LedProfiles::forProtocol(phys->getProtocol()));
             totalRequestedCurrent += stripCurrent;
         }
 
@@ -657,8 +657,8 @@ void NeoPixelManager::applyPowerLimit()
             if (buffer)
             {
                 uint8_t bytesPerPixel = bufferStride(phys);
-                stripCurrent = _powerManager.calculateTotalCurrent(
-                    buffer, ledCount, bytesPerPixel, 255);
+                stripCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, 255,
+                    LedProfiles::forProtocol(phys->getProtocol()));
             }
 
             // Determine effective limit based on mode
@@ -723,8 +723,8 @@ void NeoPixelManager::applyPowerLimit()
             if (!buffer) continue;
 
             uint8_t bytesPerPixel = bufferStride(phys);
-            uint32_t stripRequestedCurrent = _powerManager.calculateTotalCurrent(
-                buffer, ledCount, bytesPerPixel, 255);
+            uint32_t stripRequestedCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, 255,
+                    LedProfiles::forProtocol(phys->getProtocol()));
 
             // Get ABL parameters
             uint8_t autoBrLimit = cfg->getAutoBrightnessLimit();
@@ -791,8 +791,8 @@ void NeoPixelManager::applyPowerLimit()
             if (buffer)
             {
                 uint8_t bytesPerPixel = bufferStride(phys);
-                stripRequestedCurrent = _powerManager.calculateTotalCurrent(
-                    buffer, ledCount, bytesPerPixel, 255);
+                stripRequestedCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, 255,
+                    LedProfiles::forProtocol(phys->getProtocol()));
             }
 
             // Determine strip limit
@@ -934,8 +934,8 @@ void NeoPixelManager::applyPowerLimit()
             if (buffer)
             {
                 uint8_t bytesPerPixel = bufferStride(phys);
-                stripRequestedCurrent = _powerManager.calculateTotalCurrent(
-                    buffer, ledCount, bytesPerPixel, 255);
+                stripRequestedCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, 255,
+                    LedProfiles::forProtocol(phys->getProtocol()));
             }
 
             // Determine strip limit
