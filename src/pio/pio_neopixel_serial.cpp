@@ -2,6 +2,7 @@
 
     #include "pio_neopixel_serial.h"
     #include "../PhysicalStripConfig.h"
+    #include "../SerialTimingProfile.h"
     #include "OpenKNX.h"
     #include "pio_dma_shared.h"
     #include <Arduino.h>
@@ -52,14 +53,14 @@ static const uint16_t ws2812b_program_instructions[] = {
     0xa242, //  3: nop                    side 0 [2]  ; 0-bit: LOW 3 (T2)
 };
 
+/// TM1814 default constant current in 0.1 mA steps (18.0 mA, mid of the 6.5-38 mA range).
+static constexpr uint16_t kTm1814DefaultCurrent10 = 180;
+
 static const pio_program_t neopixel_serial_program = {
     .instructions = ws2812b_program_instructions,
     .length = 4,
     .origin = -1,
 };
-
-// Static member initialization. Our DMA handlers array.
-PIO_NeoPixel_Serial* PIO_NeoPixel_Serial::_dmaHandlers[12] = {nullptr};
 
 /**
  * Initialize NeoPixel PIO program
@@ -220,12 +221,28 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
 
     // Allocate buffers
     // CRITICAL: Cast to size_t to prevent overflow (e.g., 22000 * 3 = 66000 > uint16_t max 65535)
-    _inst->bufferSize = (size_t)ledCount * _inst->bytesPerLed;
+    // TM1814 expects C1 C2 D1..Dn: two 4-byte constant-current commands, the second the
+    // bit complement of the first (datasheet section "One frame of complete data structure").
+    _inst->prefixBytes = (protocol == LedProtocol::TM1814) ? 8 : 0;
+
+    _inst->bufferSize = (size_t)_inst->prefixBytes + (size_t)ledCount * _inst->bytesPerLed;
     _inst->buffer = new uint8_t[_inst->bufferSize];
 
     if (_inst->buffer)
     {
         memset(_inst->buffer, 0, _inst->bufferSize);
+
+        if (_inst->prefixBytes == 8)
+        {
+            // C1 carries the current level in bits [5:0]; bits 7 and 6 are fixed 0.
+            // Order is W R G B, matching the pixel frame.
+            const uint8_t level = ProtocolHelper::tm1814CurrentLevel(kTm1814DefaultCurrent10);
+            for (uint8_t i = 0; i < 4; ++i)
+            {
+                _inst->buffer[i] = level;
+                _inst->buffer[4 + i] = (uint8_t)~level;
+            }
+        }
     }
 
     // DMA buffer (if needed)
@@ -241,7 +258,11 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     {
         // Calculate DMA buffer size based on LED type
         // CRITICAL: Cast to size_t to prevent overflow
-        if (_inst->bytesPerLed == 5)
+        // Wide frames and frames carrying a prefix stream the byte buffer directly with
+        // 32-bit autopull. That path works on the whole buffer, so it does not care how
+        // many bytes a LED takes or that C1 and C2 sit ahead of the pixel data. The packed
+        // path below indexes by LED and would drop the last LEDs of a prefixed frame.
+        if (_inst->bytesPerLed >= 5 || _inst->prefixBytes > 0)
         {
             // RGBCCT: direct buffer DMA with bswap
             //
@@ -395,6 +416,7 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     if (!serialCfg) return false;
 
     // Apply ColorOrder (never let a NONE config stomp the live driver order)
+    _inst->channelSwap = serialCfg->getChannelSwap();
     const ColorOrder cfgOrder = serialCfg->getColorOrder();
     if (cfgOrder != ColorOrder::NONE) _inst->colorOrder = cfgOrder;
 
@@ -415,33 +437,86 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
     {
         // 74HCT/AHCT: unidirectional transparent buffer; OE=GND, always enabled.
         // TTL input threshold VIH >= 2.0V is satisfied by 3.3V output; no GPIO changes needed.
-        // Default 4mA drive + FAST slew (from pio_gpio_init) is sufficient for a logic input.
+        // The pin keeps the drive strength set in neopixel_serial_program_init().
         #ifdef OPENKNX_DEBUG
         const char* lsN = (_inst->levelShifterType == LevelShifterType::SN74AHCT125) ? "74AHCT125" : "74HCT125";
         openknx.logger.logWithValues("PIO NeoPixel Serial GPIO%u: %s mode - no GPIO changes needed", _inst->pin, lsN);
         #endif
     }
 
-    // Apply custom timing if T1H is set (CUSTOM mode)
-    // PIO program has fixed 3:7:6:4 cycle ratio → only T1H determines the bit period.
-    // Formula: clkdiv = sys_clk_hz * T1H_ns * 1e-9 / 6.0  (6 HIGH cycles per 10-cycle bit)
-    uint16_t t1h = serialCfg->getT1H();
-    if (t1h > 0 && _inst->initialized)
+    // Applied outside the custom-timing branch: a config carrying only a reset time
+    // used to be dropped.
+    const uint32_t cfgResetUs = serialCfg->getResetTime();
+    if (cfgResetUs > 0) _inst->resetTimeUs = cfgResetUs;
+
+    // Custom timing: all four edges are honoured, not just T1H. The program delays carry
+    // the ratio, so an arbitrary T0H:T0L:T1H:T1L is reachable instead of the old fixed 3:7:6:4.
+    const uint16_t cT0h = serialCfg->getT0H();
+    const uint16_t cT0l = serialCfg->getT0L();
+    const uint16_t cT1h = serialCfg->getT1H();
+    const uint16_t cT1l = serialCfg->getT1L();
+
+    if (_inst->initialized)
     {
-        float sys_clk = (float)clock_get_hz(clk_sys);
-        float clkdiv  = sys_clk * (float)t1h * 1e-9f / 6.0f;
-        clkdiv = (clkdiv < 1.0f) ? 1.0f : clkdiv; // clkdiv < 1 not allowed
+        SerialTiming::Profile custom = SerialTiming::profileFor(_inst->protocol);
+        if (custom.t1h == 0) custom = SerialTiming::profileFor(LedProtocol::WS2812B);
 
-        pio_sm_set_clkdiv(_inst->pio, _inst->sm, clkdiv);
-        pio_sm_clkdiv_restart(_inst->pio, _inst->sm); // apply immediately
+        // T1H of zero means the caller cleared the override, so fall back to the chip
+        // profile. Returning early instead would leave the previous program running and
+        // make "neo phys timing <id> reset" a no-op until the next reboot.
+        if (cT1h > 0)
+        {
+            // A caller may set only T1H; keep the chip's ratios for whatever it left at zero.
+            if (cT0h > 0) custom.t0h = cT0h;
+            if (cT0l > 0) custom.t0l = cT0l;
+            custom.t1h = cT1h;
+            if (cT1l > 0) custom.t1l = cT1l;
+        }
+        if (cfgResetUs > 0) custom.resetUs = cfgResetUs;
+        _inst->resetTimeUs = custom.resetUs ? custom.resetUs : _inst->resetTimeUs;
 
-        _inst->actual_clkdiv = clkdiv;
-        _inst->actual_bitrate = sys_clk / clkdiv / 10.0f; // 10 cycles per bit
-        _inst->timingMode = TimingMode::CUSTOM;
+        SerialTiming::PioSolution sol = SerialTiming::solvePio(custom, (uint32_t)clock_get_hz(clk_sys));
+        if (sol.valid)
+        {
+            uint16_t words[4];
+            SerialTiming::encodeProgram(sol, words);
 
-        // Update reset time if provided
-        uint32_t resetUs = serialCfg->getResetTime();
-        if (resetUs > 0) _inst->resetTimeUs = resetUs;
+            // pio_add_program relocates jmp targets when it loads a program; writing
+            // instruction memory directly does not, so do it here.
+            SerialTiming::relocateProgram(words, (uint8_t)_inst->offset);
+
+            if (_inst->offset + 4 > 32) return false; // would run past instruction memory
+
+            // Patch the 4 instruction words in place. The SM must be stopped while the
+            // instruction memory behind its PC changes.
+            pio_sm_set_enabled(_inst->pio, _inst->sm, false);
+            pio_sm_clear_fifos(_inst->pio, _inst->sm);
+            for (uint i = 0; i < 4; ++i)
+            {
+                _inst->programWords[i] = words[i];
+                _inst->pio->instr_mem[_inst->offset + i] = words[i];
+            }
+            pio_sm_set_clkdiv(_inst->pio, _inst->sm, (float)sol.clkdiv);
+            pio_sm_restart(_inst->pio, _inst->sm);
+            pio_sm_clkdiv_restart(_inst->pio, _inst->sm);
+            pio_sm_exec(_inst->pio, _inst->sm, pio_encode_jmp(_inst->offset));
+            pio_sm_set_enabled(_inst->pio, _inst->sm, true);
+
+            const uint32_t cycleNs1000 = sol.realizedBit * 1000u / (sol.cyclesPerBit ? sol.cyclesPerBit : 1);
+            _inst->actual_clkdiv   = (float)sol.clkdiv;
+            _inst->actual_bitrate  = sol.realizedBit ? (1000000000.0f / (float)sol.realizedBit) : 0.0f;
+            _inst->cyclesPerBit    = (uint8_t)sol.cyclesPerBit;
+            _inst->realizedT0hNs   = (uint16_t)sol.realizedT0h;
+            _inst->realizedT1hNs   = (uint16_t)sol.realizedT1h;
+            _inst->realizedT0lNs   = (uint16_t)((sol.b + sol.c) * cycleNs1000 / 1000u);
+            _inst->realizedT1lNs   = (uint16_t)(sol.c * cycleNs1000 / 1000u);
+            _inst->realizedBitNs   = (uint16_t)sol.realizedBit;
+            _inst->timingMode      = (cT1h > 0) ? TimingMode::CUSTOM : TimingMode::AUTO;
+        }
+        else
+        {
+            openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "GPIO%u: no integer divider for this timing, keeping current", _inst->pin);
+        }
     }
 
     return true;
@@ -509,101 +584,82 @@ bool PIO_NeoPixel_Serial::initPIO()
     if (!_inst) return false;
 
     bool rgbw = (_inst->bytesPerLed == 4);
-    bool rgbcct = (_inst->bytesPerLed == 5);
+    bool rgbcct = (_inst->bytesPerLed >= 5 || _inst->prefixBytes > 0); // wide or prefixed frame -> 32-bit autopull
 
-    // Detect WS2805 protocol (for reset time configuration)
-    bool isWS2805 = (_inst->protocol == LedProtocol::WS2805_RGBCCT);
+    // Resolve the protocol timing profile. The bit ratio comes from the chip, not
+    // from a bitrate: two chips can share a bitrate and need different pulse widths.
+    SerialTiming::Profile profile = SerialTiming::profileFor(_inst->protocol);
+    if (profile.t1h == 0) profile = SerialTiming::profileFor(LedProtocol::WS2812B);
 
-    // ALL protocols use 10 cycles per bit (standard WS2812B program)
-    const uint8_t cycles_per_bit = 10;
-
-    // Calculate clock divider based on frequency and timing mode
-    // PIO clock = sys_clock / clkdiv
-    // Need: frequency * cycles_per_bit = PIO clock
-    // clkdiv = sys_clock / (frequency * cycles_per_bit)
-    //
-    // NOTE: RP2040 runs at 125 MHz, RP2350 at 150 MHz by default
-    // The timing modes are overclock-safe: they work at any system clock speed
-    //
-    // AUTO_LEGACY: Optimized for WS2812C/D onboard LEDs
-    // Targets 960 kHz bitrate which works better for newer LED chips that prefer
-    // slightly faster timing than standard 800 kHz. Automatically calculates the
-    // correct clkdiv for any CPU frequency to maintain consistent 960 kHz output.
     float actual_sys_clk = (float)clock_get_hz(clk_sys);
-    float clkdiv = 1.0f;         // Initialize to safe default
-    float actual_bitrate = 0.0f; // Initialize to safe default
     float bitrate_multiplier = 1.0f;
     const char* mode_name = "AUTO";
 
     switch (_inst->timingMode)
     {
         case TimingMode::AUTO_LEGACY:
-            // Target 960 kHz for WS2812C/D (adapts to any CPU frequency)
-            // WS2805 uses standard frequency (800kHz) like other protocols
-            clkdiv = actual_sys_clk / (960000.0f * (float)cycles_per_bit);
-            actual_bitrate = (actual_sys_clk / clkdiv) / (float)cycles_per_bit;
+            // WS2812C/D onboard parts prefer a faster bit rate than the chip default.
+            bitrate_multiplier = 960000.0f / (1000000000.0f / (float)SerialTiming::bitPeriodNs(profile));
             mode_name = "AUTO_LEGACY";
             break;
 
-        case TimingMode::SLOW_20PCT:
-            bitrate_multiplier = 0.80f;
-            mode_name = "SLOW_20PCT";
-            break;
-        case TimingMode::SLOW_15PCT:
-            bitrate_multiplier = 0.85f;
-            mode_name = "SLOW_15PCT";
-            break;
-        case TimingMode::SLOW_10PCT:
-            bitrate_multiplier = 0.90f;
-            mode_name = "SLOW_10PCT";
-            break;
-        case TimingMode::SLOW_5PCT:
-            bitrate_multiplier = 0.95f;
-            mode_name = "SLOW_5PCT";
-            break;
-
-        case TimingMode::FAST_5PCT:
-            bitrate_multiplier = 1.05f;
-            mode_name = "FAST_5PCT";
-            break;
-        case TimingMode::FAST_10PCT:
-            bitrate_multiplier = 1.10f;
-            mode_name = "FAST_10PCT";
-            break;
-        case TimingMode::FAST_15PCT:
-            bitrate_multiplier = 1.15f;
-            mode_name = "FAST_15PCT";
-            break;
-        case TimingMode::FAST_20PCT:
-            bitrate_multiplier = 1.20f;
-            mode_name = "FAST_20PCT";
-            break;
-        case TimingMode::FAST_25PCT:
-            bitrate_multiplier = 1.25f;
-            mode_name = "FAST_25PCT";
-            break;
+        case TimingMode::SLOW_20PCT: bitrate_multiplier = 0.80f; mode_name = "SLOW_20PCT"; break;
+        case TimingMode::SLOW_15PCT: bitrate_multiplier = 0.85f; mode_name = "SLOW_15PCT"; break;
+        case TimingMode::SLOW_10PCT: bitrate_multiplier = 0.90f; mode_name = "SLOW_10PCT"; break;
+        case TimingMode::SLOW_5PCT:  bitrate_multiplier = 0.95f; mode_name = "SLOW_5PCT";  break;
+        case TimingMode::FAST_5PCT:  bitrate_multiplier = 1.05f; mode_name = "FAST_5PCT";  break;
+        case TimingMode::FAST_10PCT: bitrate_multiplier = 1.10f; mode_name = "FAST_10PCT"; break;
+        case TimingMode::FAST_15PCT: bitrate_multiplier = 1.15f; mode_name = "FAST_15PCT"; break;
+        case TimingMode::FAST_20PCT: bitrate_multiplier = 1.20f; mode_name = "FAST_20PCT"; break;
+        case TimingMode::FAST_25PCT: bitrate_multiplier = 1.25f; mode_name = "FAST_25PCT"; break;
 
         case TimingMode::AUTO:
-        default:
-            bitrate_multiplier = 1.0f;
-            mode_name = "AUTO";
-            break;
+        default: bitrate_multiplier = 1.0f; mode_name = "AUTO"; break;
     }
 
-    // Calculate clkdiv for all modes except AUTO_LEGACY (which has custom calculation)
-    if (_inst->timingMode != TimingMode::AUTO_LEGACY)
+    // A speed override bends the chip profile; it never replaces its pulse ratios.
+    if (bitrate_multiplier != 1.0f && bitrate_multiplier > 0.0f)
     {
-        float target_bitrate = (float)_inst->frequency * bitrate_multiplier;
-        clkdiv = actual_sys_clk / (target_bitrate * (float)cycles_per_bit);
-        actual_bitrate = target_bitrate;
+        const uint32_t nominalHz = 1000000000UL / SerialTiming::bitPeriodNs(profile);
+        profile = SerialTiming::scaledTo(profile, (uint32_t)((float)nominalHz * bitrate_multiplier));
     }
 
-    // Store actual values for debugging/info display
+    // Solve for segment cycles plus an INTEGER divider. A fractional divider makes the
+    // state machine dither, which jitters every bit edge and eats clone decode margin.
+    SerialTiming::PioSolution sol = SerialTiming::solvePio(profile, (uint32_t)actual_sys_clk);
+    if (!sol.valid)
+    {
+        openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "GPIO%u: no divider fits this profile, using WS2812B", _inst->pin);
+        profile = SerialTiming::profileFor(LedProtocol::WS2812B);
+        sol = SerialTiming::solvePio(profile, (uint32_t)actual_sys_clk);
+        if (!sol.valid) return false;
+    }
+
+    // Build this strip's own program: the delays carry the ratio, so one program
+    // source drives every chip without a per-protocol PIO zoo.
+    SerialTiming::encodeProgram(sol, _inst->programWords);
+    _inst->program.instructions = _inst->programWords;
+    _inst->program.length = 4;
+    _inst->program.origin = -1;
+    _inst->inverted = profile.inverted;
+
+    const uint8_t cycles_per_bit = (uint8_t)sol.cyclesPerBit;
+    float clkdiv = (float)sol.clkdiv;
+    float actual_bitrate = sol.realizedBit ? (1000000000.0f / (float)sol.realizedBit) : 0.0f;
+
+    // Record what the hardware really produces, so diagnostics never report a request.
+    const uint32_t cycleNs1000 = sol.realizedBit * 1000u / (sol.cyclesPerBit ? sol.cyclesPerBit : 1);
+    _inst->realizedT0hNs = (uint16_t)sol.realizedT0h;
+    _inst->realizedT1hNs = (uint16_t)sol.realizedT1h;
+    _inst->realizedT0lNs = (uint16_t)((sol.b + sol.c) * cycleNs1000 / 1000u);
+    _inst->realizedT1lNs = (uint16_t)(sol.c * cycleNs1000 / 1000u);
+    _inst->realizedBitNs = (uint16_t)sol.realizedBit;
+    _inst->cyclesPerBit = cycles_per_bit;
+    _inst->resetTimeUs = profile.resetUs ? profile.resetUs : 300;
     _inst->actual_bitrate = actual_bitrate;
     _inst->actual_clkdiv = clkdiv;
 
-    // Use standard WS2812B PIO program for ALL protocols
-    const pio_program_t* selected_program = &neopixel_serial_program;
+    const pio_program_t* selected_program = &_inst->program;
 
     #ifdef OPENKNX_DEBUG
     openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "GPIO%u: sys_clk=%.0f MHz, clkdiv=%.3f, bitrate=%.0f kHz [%s], cycles=%d",
@@ -675,6 +731,10 @@ bool PIO_NeoPixel_Serial::initPIO()
     // Initialize the PIO program with calculated clock divider
     neopixel_serial_program_init(_inst->pio, _inst->sm, _inst->offset, _inst->pin, clkdiv, rgbw, rgbcct, _inst->fifoWordBits);
 
+    // Inverted protocols (TM1814 family) idle high and carry the complemented waveform.
+    // A GPIO output override does this without a second PIO program.
+    gpio_set_outover(_inst->pin, _inst->inverted ? GPIO_OVERRIDE_INVERT : GPIO_OVERRIDE_NORMAL);
+
     #ifdef OPENKNX_DEBUG
     const char* pioName = (_inst->pio == pio0) ? "PIO0" : (_inst->pio == pio1) ? "PIO1"
                                                                                : "PIO2";
@@ -683,18 +743,7 @@ bool PIO_NeoPixel_Serial::initPIO()
                                           pioName, _inst->sm, _inst->pin, _inst->actual_bitrate / 1000.0f, channelType);
     #endif
 
-    // Set reset/latch time based on protocol
-    // Intentionally longer than spec for compatibility
-    if (isWS2805)
-    {
-        _inst->resetTimeUs = 300; // WS2805 spec is 280µs, use 300µs for margin
-    }
-    else
-    {
-        // WS2812B/SK6812: spec is 50µs, but use 300µs for compatibility
-        // with older/clone chips that may need longer reset
-        _inst->resetTimeUs = 300;
-    }
+    // Reset/latch time already comes from the protocol profile above.
 
     return true;
 }
@@ -725,7 +774,7 @@ bool PIO_NeoPixel_Serial::initDMA()
 {
     // For RGBCCT: use byte buffer directly with bswap
     // For RGB/RGBW: Use packed DMA buffer (bswap=false)
-    bool isRGBCCT = (_inst->bytesPerLed == 5);
+    bool isRGBCCT = (_inst->bytesPerLed >= 5 || _inst->prefixBytes > 0);
 
     if (!_inst) return false;
     if (!isRGBCCT && !_inst->dmaBuffer) return false; // RGB/RGBW needs DMA buffer
@@ -921,7 +970,7 @@ void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
 
     // CRITICAL: Cast to size_t to prevent overflow (index * bytesPerLed can exceed uint16_t)
     // Example: index=22000, bytesPerLed=3 → 66000 > 65535 → OVERFLOW!
-    size_t offset = (size_t)index * _inst->bytesPerLed;
+    size_t offset = (size_t)_inst->prefixBytes + (size_t)index * _inst->bytesPerLed;
 
     // CRITICAL: Bounds check to prevent buffer overflow
     if (offset + _inst->bytesPerLed > _inst->bufferSize)
@@ -934,75 +983,30 @@ void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
         return;
     }
 
-    switch (_inst->colorOrder)
+    // Swap runs on the logical components, before the colour order is applied.
+    ProtocolHelper::applyChannelSwap(_inst->channelSwap, r, g, b, ww, cw);
+
+    uint8_t ch[6] = {0};
+    uint8_t count = ProtocolHelper::orderChannels(_inst->colorOrder, r, g, b, ww, cw, ch);
+
+    const uint8_t bits = ProtocolHelper::getBitsPerChannel(_inst->protocol);
+    const uint8_t chBytes = (uint8_t)(bits / 8);
+    if (count * chBytes > _inst->bytesPerLed) count = (uint8_t)(_inst->bytesPerLed / chBytes);
+
+    if (bits == 16)
     {
-        case ColorOrder::RGB:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            break;
-
-        case ColorOrder::GRB:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            break;
-
-        case ColorOrder::BGR:
-            _inst->buffer[offset] = b;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = r;
-            break;
-
-        case ColorOrder::RGBW:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww; // Use ww as single white
-            break;
-
-        case ColorOrder::GRBW:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww; // Use ww as single white
-            break;
-
-        // 5-channel color orders (RGBCCT)
-        case ColorOrder::RGBCCT:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww;
-            _inst->buffer[offset + 4] = cw;
-            break;
-
-        case ColorOrder::GRBCCT:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = ww;
-            _inst->buffer[offset + 4] = cw;
-            break;
-
-        case ColorOrder::RGBCTW:
-            _inst->buffer[offset] = r;
-            _inst->buffer[offset + 1] = g;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = cw; // Cool white first
-            _inst->buffer[offset + 4] = ww; // Warm white second
-            break;
-
-        case ColorOrder::GRBCTW:
-            _inst->buffer[offset] = g;
-            _inst->buffer[offset + 1] = r;
-            _inst->buffer[offset + 2] = b;
-            _inst->buffer[offset + 3] = cw; // Cool white first
-            _inst->buffer[offset + 4] = ww; // Warm white second
-            break;
-
-        default:
-            break;
+        // 8-bit value widened to 16: v*257 maps 0..255 onto 0..65535 with no gap at either end.
+        for (uint8_t i = 0; i < count; ++i)
+        {
+            const uint16_t v = (uint16_t)(ch[i] * 257);
+            _inst->buffer[offset + i * 2] = (uint8_t)(v >> 8);
+            _inst->buffer[offset + i * 2 + 1] = (uint8_t)(v & 0xFF);
+        }
+    }
+    else
+    {
+        for (uint8_t i = 0; i < count; ++i)
+            _inst->buffer[offset + i] = ch[i];
     }
 }
 
@@ -1036,10 +1040,20 @@ bool PIO_NeoPixel_Serial::show()
     {
         if ((uint32_t)(micros() - waitStartUs) > kShowWaitTimeoutUs)
         {
-            // Wedge recovery: abort any in-flight DMA and clear the transfer
-            // state so the next show() can re-arm cleanly.
+            // Re-arm the SM after a wedge: aborting DMA alone leaves stale words in the
+            // TX FIFO, which bit-shifts every later frame until a reboot re-runs initPIO().
             if (_inst->useDMA && _inst->dmaChannel >= 0)
                 dma_channel_abort(_inst->dmaChannel);
+            if (_inst->pio)
+            {
+                pio_sm_set_enabled(_inst->pio, _inst->sm, false);
+                pio_sm_clear_fifos(_inst->pio, _inst->sm);
+                pio_sm_restart(_inst->pio, _inst->sm);
+                pio_sm_clkdiv_restart(_inst->pio, _inst->sm);
+                pio_sm_exec(_inst->pio, _inst->sm, pio_encode_jmp(_inst->offset)); // PC -> program start
+                pio_sm_set_pins_with_mask(_inst->pio, _inst->sm, 0, (1u << _inst->pin)); // idle LOW = reset/latch
+                pio_sm_set_enabled(_inst->pio, _inst->sm, true);
+            }
             _inst->busy = false;
             _inst->waitingForReset = false;
 
@@ -1199,7 +1213,7 @@ void PIO_NeoPixel_Serial::sendDataDMA()
 {
     if (!_inst || _inst->dmaChannel < 0) return;
 
-    bool isRGBCCT = (_inst->bytesPerLed == 5);
+    bool isRGBCCT = (_inst->bytesPerLed >= 5 || _inst->prefixBytes > 0);
     void* srcBuffer;
 
     if (isRGBCCT)
@@ -1288,7 +1302,7 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
                      (uint32_t)src[idx + 3];          // Byte3 → bits 7-0 (sent last!)
         }
     }
-    // RGBCCT (bytesPerLed == 5): Not packed here!
+    // 5 bytes and wider are not packed here: they stream from the byte buffer.
     // Uses raw buffer sent directly with bswap=true
 }
 
@@ -1381,7 +1395,7 @@ DriverCapabilities PIO_NeoPixel_Serial::getCapabilities() const
 {
     DriverCapabilities caps;
     caps.supportsRGBW = (_inst && _inst->bytesPerLed >= 4);
-    caps.supportsRGBCCT = (_inst && _inst->bytesPerLed == 5);
+    caps.supportsRGBCCT = (_inst && ProtocolHelper::isRGBCCT(_inst->protocol));
     caps.supportsDMA = (_inst && _inst->useDMA);
     caps.supportsAsync = caps.supportsDMA;
     caps.maxFrequency = _inst ? _inst->frequency : 800000;

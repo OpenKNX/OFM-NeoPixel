@@ -79,6 +79,28 @@ struct pio_neopixel_serial_inst
     volatile bool waitingForReset;   // True after FIFO empty, waiting for reset pulse
 
     LevelShifterType levelShifterType; // Level-shifter type (NONE or TXS0108E)
+
+    // Per-strip PIO program: the 4 instruction words carry this protocol's cycle
+    // ratio in their delay fields, so one program source serves every chip.
+    uint16_t       programWords[4];
+    pio_program_t  program;
+    bool           inverted;      // drive the complemented waveform (TM1814 family)
+
+    // Realized signal, for diagnostics. What the hardware actually produces,
+    // not what was requested.
+    uint16_t realizedT0hNs;
+    uint16_t realizedT0lNs;
+    uint16_t realizedT1hNs;
+    uint16_t realizedT1lNs;
+    uint16_t realizedBitNs;
+    uint8_t  cyclesPerBit;
+
+    // Bytes sent ahead of the pixel data. TM1814 needs its C1/C2 constant-current
+    // command pair there; every other protocol leaves this at 0.
+    uint8_t prefixBytes;
+
+    /// Per-strip channel swap (ProtocolHelper::ChannelSwap).
+    uint8_t channelSwap;
 };
 typedef struct pio_neopixel_serial_inst pio_neopixel_serial_inst_t;
 
@@ -129,6 +151,23 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
      * @return true if using DMA, false otherwise
      */
     inline bool isDmaEnabled() const { return _inst ? _inst->useDMA : false; }
+
+    /// Realized 0-bit high time in ns, as produced by the hardware.
+    inline uint16_t getRealizedT0hNs() const { return _inst ? _inst->realizedT0hNs : 0; }
+    /// Realized 0-bit low time in ns.
+    inline uint16_t getRealizedT0lNs() const { return _inst ? _inst->realizedT0lNs : 0; }
+    /// Realized 1-bit high time in ns.
+    inline uint16_t getRealizedT1hNs() const { return _inst ? _inst->realizedT1hNs : 0; }
+    /// Realized 1-bit low time in ns.
+    inline uint16_t getRealizedT1lNs() const { return _inst ? _inst->realizedT1lNs : 0; }
+    /// Realized bit period in ns.
+    inline uint16_t getRealizedBitNs() const { return _inst ? _inst->realizedBitNs : 0; }
+    /// PIO cycles the program spends per bit.
+    inline uint8_t getCyclesPerBit() const { return _inst ? _inst->cyclesPerBit : 0; }
+    /// Latch time enforced between frames, in us.
+    inline uint32_t getResetTimeUs() const { return _inst ? _inst->resetTimeUs : 0; }
+    /// Whether the output drives the complemented waveform.
+    inline bool isInverted() const { return _inst ? _inst->inverted : false; }
 
     /**
      * @brief Get PIO program offset in instruction memory
@@ -196,7 +235,6 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
     static void dmaIRQHandler();
     void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww = 0, uint8_t cw = 0);
 
-    static PIO_NeoPixel_Serial* _dmaHandlers[12];
     static void registerDMAHandler(int channel, PIO_NeoPixel_Serial* instance);
     static void unregisterDMAHandler(int channel);
 };
