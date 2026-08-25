@@ -1,8 +1,8 @@
 #if defined(ARDUINO_ARCH_RP2040)
 
-#include "pio_neopixel_spi.h"
-#include "../PhysicalStripConfig.h"
-#include "../SpiFrameMath.h"
+    #include "pio_neopixel_spi.h"
+    #include "../PhysicalStripConfig.h"
+    #include "../SpiFrameMath.h"
     #include "OpenKNX.h"
     #include "pio_dma_shared.h"
     #include <Arduino.h>
@@ -293,7 +293,10 @@ PIO_NeoPixel_SPI::~PIO_NeoPixel_SPI()
                 // freed/unregistered handler (use-after-free → reboot).
                 dma_channel_set_irq1_enabled(_inst->dmaChannel, false); // SPI strips use DMA_IRQ_1
                 dma_channel_abort(_inst->dmaChannel);
-                while (dma_channel_is_busy(_inst->dmaChannel)) { tight_loop_contents(); }
+                while (dma_channel_is_busy(_inst->dmaChannel))
+                {
+                    tight_loop_contents();
+                }
                 unregisterDMAHandler(_inst->dmaChannel);
                 dma_channel_unclaim(_inst->dmaChannel);
             }
@@ -677,11 +680,29 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
     uint8_t channels[3] = {r, g, b};
     switch (_inst->colorOrder)
     {
-        case ColorOrder::RBG: channels[1] = b; channels[2] = g; break;
-        case ColorOrder::GRB: channels[0] = g; channels[1] = r; break;
-        case ColorOrder::GBR: channels[0] = g; channels[1] = b; channels[2] = r; break;
-        case ColorOrder::BRG: channels[0] = b; channels[1] = r; channels[2] = g; break;
-        case ColorOrder::BGR: channels[0] = b; channels[1] = g; channels[2] = r; break;
+        case ColorOrder::RBG:
+            channels[1] = b;
+            channels[2] = g;
+            break;
+        case ColorOrder::GRB:
+            channels[0] = g;
+            channels[1] = r;
+            break;
+        case ColorOrder::GBR:
+            channels[0] = g;
+            channels[1] = b;
+            channels[2] = r;
+            break;
+        case ColorOrder::BRG:
+            channels[0] = b;
+            channels[1] = r;
+            channels[2] = g;
+            break;
+        case ColorOrder::BGR:
+            channels[0] = b;
+            channels[1] = g;
+            channels[2] = r;
+            break;
         case ColorOrder::RGB:
         default: break;
     }

@@ -40,7 +40,7 @@ enum class LedProtocol
     // 5-Channel Protocols (RGB + Warm White + Cool White = CCT)
     SK6812_RGBCCT, // 5V RGBCCT (5-channel), 800kHz, GRBCCT order
     WS2814_RGBCCT, // 12V RGBCCT (5-channel), 800kHz, GRBCCT order
-    WS2805_RGBCCT, // 12V/24V RGBCCT (5-channel), 800kHz, RGBCCT (RGBW1W2) order
+    WS2805_RGBCCT, // 12V/24V RGBCCT (5-channel), 917kHz, RGBCCT (RGBW1W2) order
     SM16825,       // 5V/12V RGBCW, 16-bit channels, 800kHz, RGBCTW order
 
     // SPI Protocols (Separate clock and data)
@@ -384,7 +384,7 @@ namespace ProtocolHelper
     {
         if (protocol == LedProtocol::WS2805_RGBCCT)
         {
-            return 800000; // Worldsemi minimum 1.25 us bit cell
+            return 917431; // 1.09 us bit cell (300 ns + 790 ns)
         }
         if (protocol == LedProtocol::WS2811_400KHZ)
         {
