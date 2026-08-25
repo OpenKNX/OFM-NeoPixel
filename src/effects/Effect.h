@@ -26,16 +26,40 @@
 // Multi-Language Helper Macro
 // ====================================================================
 /**
+ * @brief Compile the parameter description texts into the firmware
+ *
+ * Parameter descriptions are build-time documentation, not runtime data: the
+ * ETS help files under src/Baggages/Help_de are generated from these literals
+ * by scripts/Build-EffectParameters.ps1, which parses the headers as text and
+ * never looks at the binary. No caller of getParameterDescription() exists in
+ * any product, but the method is virtual, so the linker cannot drop it and its
+ * texts stay in flash - about 20 KB on a full effect set.
+ *
+ * Default off. Set -D NEOPIXEL_EFFECT_PARAM_DESCRIPTIONS=1 to keep the texts in
+ * the image, e.g. when adding a console command that prints them.
+ */
+#ifndef NEOPIXEL_EFFECT_PARAM_DESCRIPTIONS
+    #define NEOPIXEL_EFFECT_PARAM_DESCRIPTIONS 0
+#endif
+
+/**
  * @brief Helper macro for multi-language parameter descriptions
  * @param de_text German text
  * @param en_text English text
- * @return Selected text based on language parameter
+ * @return Selected text based on language parameter, or nullptr when the
+ *         descriptions are compiled out - the same value the Effect base class
+ *         returns for an effect that implements no descriptions at all
  *
  * Usage:
  *   return PARAM_DESC_DE_EN("Deutscher Text", "English text");
  */
-#define PARAM_DESC_DE_EN(de_text, en_text) \
-    (lang && strcmp(lang, "de") == 0 ? (de_text) : (en_text))
+#if NEOPIXEL_EFFECT_PARAM_DESCRIPTIONS
+    #define PARAM_DESC_DE_EN(de_text, en_text) \
+        (lang && strcmp(lang, "de") == 0 ? (de_text) : (en_text))
+#else
+    // must not name the literals at all - even a discarded reference keeps them
+    #define PARAM_DESC_DE_EN(de_text, en_text) ((const char*)nullptr)
+#endif
 /**
  * Macro for multi-language effect names
  * @param de_name German effect name
