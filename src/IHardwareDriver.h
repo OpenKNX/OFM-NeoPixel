@@ -36,10 +36,21 @@ enum class LedProtocol
     TM1814,  // 12V RGBW, 800kHz, GRBW order
     GS8208,  // 12V RGB, 800kHz, GRB order
 
+    TM1829,  // 12V RGB, 800kHz, BRG order, inverted line
+    TM1914,  // 12V RGB, 800kHz, inverted line
+    APA106,  // 5V RGB, 800kHz, RGB order (PL9823 equivalent)
+
     // 5-Channel Protocols (RGB + Warm White + Cool White = CCT)
     SK6812_RGBCCT, // 5V RGBCCT (5-channel), 800kHz, GRBCCT order
     WS2814_RGBCCT, // 12V RGBCCT (5-channel), 800kHz, GRBCCT order
     WS2805_RGBCCT, // 12V/24V RGBCCT (5-channel), 800kHz, GRBCCT order
+
+    // 16-bit-per-channel 1-Wire protocols. WS2812x bit timing, wider frame.
+    UCS8903, // 5V RGB,    16 bit/channel ->  6 bytes/LED
+    UCS8904, // 5V RGBW,   16 bit/channel ->  8 bytes/LED
+    SM16825, // RGB+CW+WW, 16 bit/channel -> 10 bytes/LED
+
+    FW1906,  // RGB + CW + WW + unused, 8 bit/channel -> 6 bytes/LED
 
     // SPI Protocols (Separate clock and data)
     APA102,       // 5V RGB+Brightness, up to 20MHz (original chip)
@@ -47,6 +58,8 @@ enum class LedProtocol
     SK9822,       // 5V RGB+Brightness, up to 15MHz (APA102 clone)
     WS2801,       // 5V RGB, up to 25MHz
     LPD8806,      // 5V RGB (7-bit), up to 20MHz
+    LPD6803,      // 5V RGB, 2 bytes/LED (5-5-5), no APA102 start/end frames
+    P9813,        // 5V RGB, 4 bytes/LED with a checksum flag byte
 };
 
 /**
@@ -94,6 +107,8 @@ enum class ColorOrder
     GRBCCT, // Green, Red, Blue, Warm White, Cool White (standard for 5-channel)
     RGBCTW, // Red, Green, Blue, Cool White, Warm White (CW first)
     GRBCTW, // Green, Red, Blue, Cool White, Warm White
+
+    WRGB,   // White, Red, Green, Blue (TM1814 frame order)
 };
 
 /**
@@ -169,47 +184,47 @@ namespace ProtocolHelper
     /**
      * Check if protocol is 1-Wire
      */
-    inline bool is1Wire(LedProtocol protocol)
+    constexpr bool isSPI(LedProtocol protocol);
+
+    /**
+     * @brief Whether a protocol carries its clock in the data line
+     * @note Defined against isSPI so a new protocol cannot fall out of both sets.
+     */
+    constexpr bool is1Wire(LedProtocol protocol)
     {
-        // Standard 1-Wire protocols (WS2812 to GS8208)
-        if (protocol >= LedProtocol::WS2812 && protocol <= LedProtocol::GS8208)
-            return true;
-        // 5-Channel RGBCCT protocols (also 1-Wire)
-        if (protocol == LedProtocol::SK6812_RGBCCT ||
-            protocol == LedProtocol::WS2814_RGBCCT ||
-            protocol == LedProtocol::WS2805_RGBCCT)
-            return true;
-        return false;
+        return !isSPI(protocol);
     }
 
     /**
      * Check if protocol is SPI
      */
-    inline bool isSPI(LedProtocol protocol)
+    constexpr bool isSPI(LedProtocol protocol)
     {
         return protocol >= LedProtocol::APA102 &&
-               protocol <= LedProtocol::LPD8806;
+               protocol <= LedProtocol::P9813;
     }
 
     /**
      * Check if protocol supports RGBW (4 channels)
      */
-    inline bool isRGBW(LedProtocol protocol)
+    constexpr bool isRGBW(LedProtocol protocol)
     {
         return protocol == LedProtocol::SK6812 ||
                protocol == LedProtocol::SK6805 ||
                protocol == LedProtocol::WS2814 ||
-               protocol == LedProtocol::TM1814;
+               protocol == LedProtocol::TM1814 ||
+               protocol == LedProtocol::UCS8904;
     }
 
     /**
      * Check if protocol supports RGBCCT (5 channels - RGB + Warm White + Cool White)
      */
-    inline bool isRGBCCT(LedProtocol protocol)
+    constexpr bool isRGBCCT(LedProtocol protocol)
     {
         return protocol == LedProtocol::SK6812_RGBCCT ||
                protocol == LedProtocol::WS2814_RGBCCT ||
-               protocol == LedProtocol::WS2805_RGBCCT;
+               protocol == LedProtocol::WS2805_RGBCCT ||
+               protocol == LedProtocol::SM16825;
     }
 
     /**
@@ -217,7 +232,7 @@ namespace ProtocolHelper
      */
     inline bool hasWhiteChannel(ColorOrder order)
     {
-        return order == ColorOrder::RGBW || order == ColorOrder::GRBW ||
+        return order == ColorOrder::RGBW || order == ColorOrder::GRBW || order == ColorOrder::WRGB ||
                order == ColorOrder::RGBCCT || order == ColorOrder::GRBCCT ||
                order == ColorOrder::RGBCTW || order == ColorOrder::GRBCTW;
     }
@@ -234,17 +249,32 @@ namespace ProtocolHelper
     /**
      * Get color order for protocol
      */
-    inline ColorOrder getColorOrder(LedProtocol protocol)
+    constexpr ColorOrder getColorOrder(LedProtocol protocol)
     {
         switch (protocol)
         {
             case LedProtocol::WS2811:
+            case LedProtocol::TM1914:
+            case LedProtocol::APA106:
+            case LedProtocol::UCS8903:
                 return ColorOrder::RGB;
+
+            case LedProtocol::TM1829:
+                return ColorOrder::BRG;
+
+            case LedProtocol::UCS8904:
+                return ColorOrder::RGBW;
+
+            case LedProtocol::SM16825:
+            case LedProtocol::FW1906:
+                return ColorOrder::GRBCCT;
+
+            case LedProtocol::TM1814:
+                return ColorOrder::WRGB; // datasheet frame order is W R G B
 
             case LedProtocol::SK6812:
             case LedProtocol::SK6805:
             case LedProtocol::WS2814:
-            case LedProtocol::TM1814:
                 return ColorOrder::GRBW;
 
             // 5-Channel protocols
@@ -266,17 +296,163 @@ namespace ProtocolHelper
     /**
      * Get bytes per LED for protocol
      */
-    inline uint8_t getBytesPerLed(LedProtocol protocol)
+    constexpr uint8_t getBitsPerChannel(LedProtocol protocol)
     {
+        switch (protocol)
+        {
+            case LedProtocol::UCS8903:
+            case LedProtocol::UCS8904:
+            case LedProtocol::SM16825:
+                return 16;
+            default:
+                return 8;
+        }
+    }
+
+    /**
+     * @brief Colour channels a protocol clocks in per LED
+     */
+    constexpr uint8_t getChannelCount(LedProtocol protocol)
+    {
+        if (protocol == LedProtocol::FW1906) return 6; // RGB + CW + WW + unused
         if (isRGBCCT(protocol)) return 5;
         if (isRGBW(protocol)) return 4;
         return 3;
     }
 
+    constexpr uint8_t getBytesPerLed(LedProtocol protocol)
+    {
+        // SPI frame widths are set by the frame format, not by channels x bit depth.
+        switch (protocol)
+        {
+            case LedProtocol::APA102:
+            case LedProtocol::APA102_CLONE:
+            case LedProtocol::SK9822:  return 4; // global-brightness byte + BGR
+            case LedProtocol::WS2801:  return 3; // raw RGB, no framing
+            case LedProtocol::LPD8806: return 3; // 7-bit channels, MSB set
+            case LedProtocol::LPD6803: return 2; // one 5-5-5 word
+            case LedProtocol::P9813:   return 4; // flag byte with checksum + B + G + R
+            default: break;
+        }
+        return (uint8_t)(getChannelCount(protocol) * (getBitsPerChannel(protocol) / 8));
+    }
+
+    // =====================================================================
+    // SPI frame packing. constexpr so the expected bytes can be asserted at
+    // compile time against the datasheets.
+    // =====================================================================
+
+    /**
+     * @brief TM1814 constant-current level from tenths of a mA
+     * @param mA10 current in 0.1 mA steps, 65 (6.5 mA) to 380 (38 mA)
+     * @return level 0..63, the value carried in bits [5:0] of a C1 byte
+     */
+    constexpr uint8_t tm1814CurrentLevel(uint16_t mA10)
+    {
+        return (mA10 <= 65) ? (uint8_t)0
+             : (mA10 >= 380) ? (uint8_t)63
+             : (uint8_t)((((uint32_t)mA10 - 65) * 63 + 157) / 315);
+    }
+
+    /**
+     * @brief LPD8806 data byte: 7-bit value with bit 7 marking data
+     */
+    constexpr uint8_t packLpd8806(uint8_t value)
+    {
+        return (uint8_t)(0x80 | (value >> 1));
+    }
+
+    /**
+     * @brief LPD6803 word: leading 1 bit then 5 bits per channel, MSB first
+     */
+    constexpr uint16_t packLpd6803(uint8_t c0, uint8_t c1, uint8_t c2)
+    {
+        return (uint16_t)(0x8000 |
+                          ((uint16_t)(c0 >> 3) << 10) |
+                          ((uint16_t)(c1 >> 3) << 5) |
+                          (uint16_t)(c2 >> 3));
+    }
+
+    /**
+     * @brief P9813 flag byte: 0xC0 plus the inverted top two bits of each channel
+     * @note Channel order in the frame is flag, then c2, c1, c0.
+     */
+    constexpr uint8_t packP9813Flag(uint8_t c0, uint8_t c1, uint8_t c2)
+    {
+        return (uint8_t)(0xC0 |
+                         ((uint8_t)((uint8_t)(~c2) >> 6) << 4) |
+                         ((uint8_t)((uint8_t)(~c1) >> 6) << 2) |
+                         (uint8_t)((uint8_t)(~c0) >> 6));
+    }
+
+    /**
+     * @brief Channel swap offered per strip in ETS
+     * @note Clone strips sometimes wire the white channel to a different output.
+     */
+    enum class ChannelSwap : uint8_t
+    {
+        None = 0,
+        WhiteBlue = 1,
+        WhiteGreen = 2,
+        WhiteRed = 3,
+        WarmCoolWhite = 4,
+    };
+
+    /**
+     * @brief Swap a channel pair before the colour order is applied
+     * @note Operates on the logical components, so the result is order independent.
+     */
+    constexpr void applyChannelSwap(uint8_t mode, uint8_t& r, uint8_t& g, uint8_t& b,
+                                    uint8_t& ww, uint8_t& cw)
+    {
+        uint8_t tmp = 0;
+        switch ((ChannelSwap)mode)
+        {
+            case ChannelSwap::WhiteBlue:     tmp = ww; ww = b;  b = tmp;  break;
+            case ChannelSwap::WhiteGreen:    tmp = ww; ww = g;  g = tmp;  break;
+            case ChannelSwap::WhiteRed:      tmp = ww; ww = r;  r = tmp;  break;
+            case ChannelSwap::WarmCoolWhite: tmp = ww; ww = cw; cw = tmp; break;
+            case ChannelSwap::None:
+            default: break;
+        }
+    }
+
+    /**
+     * @brief Lay out colour components in a strip's channel order
+     * @param out receives up to 6 channel values
+     * @return number of channels written
+     * @note NONE falls back to GRB, the order most 1-wire parts use.
+     */
+    constexpr uint8_t orderChannels(ColorOrder order, uint8_t r, uint8_t g, uint8_t b,
+                                    uint8_t ww, uint8_t cw, uint8_t* out)
+    {
+        switch (order)
+        {
+            case ColorOrder::RGB: out[0] = r; out[1] = g; out[2] = b; return 3;
+            case ColorOrder::RBG: out[0] = r; out[1] = b; out[2] = g; return 3;
+            case ColorOrder::GBR: out[0] = g; out[1] = b; out[2] = r; return 3;
+            case ColorOrder::BGR: out[0] = b; out[1] = g; out[2] = r; return 3;
+            case ColorOrder::BRG: out[0] = b; out[1] = r; out[2] = g; return 3;
+
+            case ColorOrder::WRGB: out[0] = ww; out[1] = r; out[2] = g; out[3] = b; return 4;
+            case ColorOrder::RGBW: out[0] = r; out[1] = g; out[2] = b; out[3] = ww; return 4;
+            case ColorOrder::GRBW: out[0] = g; out[1] = r; out[2] = b; out[3] = ww; return 4;
+
+            case ColorOrder::RGBCCT: out[0] = r; out[1] = g; out[2] = b; out[3] = ww; out[4] = cw; return 5;
+            case ColorOrder::GRBCCT: out[0] = g; out[1] = r; out[2] = b; out[3] = ww; out[4] = cw; return 5;
+            case ColorOrder::RGBCTW: out[0] = r; out[1] = g; out[2] = b; out[3] = cw; out[4] = ww; return 5;
+            case ColorOrder::GRBCTW: out[0] = g; out[1] = r; out[2] = b; out[3] = cw; out[4] = ww; return 5;
+
+            case ColorOrder::GRB:
+            case ColorOrder::NONE:
+            default: out[0] = g; out[1] = r; out[2] = b; return 3;
+        }
+    }
+
     /**
      * Get bytes per LED for color order
      */
-    inline uint8_t getBytesPerLed(ColorOrder order)
+    constexpr uint8_t getBytesPerLed(ColorOrder order)
     {
         switch (order)
         {
@@ -287,6 +463,7 @@ namespace ProtocolHelper
                 return 5;
             case ColorOrder::RGBW:
             case ColorOrder::GRBW:
+            case ColorOrder::WRGB:
                 return 4;
             default:
                 return 3;
