@@ -40,7 +40,9 @@ class RainbowEffect : public Effect
     RainbowEffect() = default;
 
     const char* getName(const char* lang = nullptr) override { return "Rainbow"; }
-    const char* getDescription(const char* lang = nullptr) override { return "Full spectrum rainbow cycle"; }
+    const char* getDescription(const char* lang = nullptr) override { return EFFECT_DESC_DE_EN(
+                "Regenbogen über das gesamte Farbspektrum",
+                "Full spectrum rainbow cycle"); }
 
     // ====================================================================
     // Parameter API

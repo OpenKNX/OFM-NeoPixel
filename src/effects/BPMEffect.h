@@ -28,7 +28,9 @@ class BPMEffect : public Effect
     BPMEffect() = default;
 
     const char* getName(const char* lang = nullptr) override { return "BPM"; }
-    const char* getDescription(const char* lang = nullptr) override { return "Beats per minute - pulsing colored waves"; }
+    const char* getDescription(const char* lang = nullptr) override { return EFFECT_DESC_DE_EN(
+                "Pulsierende Farbwellen im eingestellten Takt (BPM)",
+                "Beats per minute - pulsing colored waves"); }
 
     // ====================================================================
     // Parameter API

@@ -23,7 +23,9 @@ class GradientEffect : public Effect
 {
   public:
     const char* getName(const char* lang = nullptr) override { return "Gradient"; }
-    const char* getDescription(const char* lang = nullptr) override { return "Linear HSV gradient across the strip"; }
+    const char* getDescription(const char* lang = nullptr) override { return EFFECT_DESC_DE_EN(
+                "Linearer HSV-Farbverlauf über den Streifen",
+                "Linear HSV gradient across the strip"); }
 
     uint8_t getParameterCount() const override { return 4; }
     const char* getParameterName(uint8_t idx) const override

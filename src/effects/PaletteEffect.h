@@ -24,7 +24,9 @@ class PaletteEffect : public Effect
 {
   public:
     const char* getName(const char* lang = nullptr) override { return "Palette"; }
-    const char* getDescription(const char* lang = nullptr) override { return "Fixed 16-color palettes with optional blending + scroll"; }
+    const char* getDescription(const char* lang = nullptr) override { return EFFECT_DESC_DE_EN(
+                "Feste 16-Farben-Paletten, wahlweise weich überblendet und scrollend",
+                "Fixed 16-color palettes with optional blending + scroll"); }
 
     uint8_t getParameterCount() const override { return 4; }
     const char* getParameterName(uint8_t idx) const override

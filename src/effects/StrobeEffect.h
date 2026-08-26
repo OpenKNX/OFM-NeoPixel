@@ -143,7 +143,9 @@ class StrobeEffect : public Effect
 
     const char* getDescription(const char* lang = nullptr) override
     {
-        return "Fast on/off flashing strobe light";
+        return EFFECT_DESC_DE_EN(
+                "Schnelles Blitzen wie ein Stroboskop",
+                "Fast on/off flashing strobe light");
     }
 
     // Parameter API

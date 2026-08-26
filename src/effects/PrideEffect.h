@@ -22,7 +22,9 @@ class PrideEffect : public Effect
     PrideEffect() = default;
 
     const char* getName(const char* lang = nullptr) override { return "Pride2015"; }
-    const char* getDescription(const char* lang = nullptr) override { return "Rainbow colors with dynamic brightness waves"; }
+    const char* getDescription(const char* lang = nullptr) override { return EFFECT_DESC_DE_EN(
+                "Regenbogenfarben mit wandernden Helligkeitswellen",
+                "Rainbow colors with dynamic brightness waves"); }
 
     // ====================================================================
     // Parameter API

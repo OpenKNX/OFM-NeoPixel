@@ -66,7 +66,9 @@ class EffectWipe : public Effect
 
     void update(Segment* segment, uint32_t deltaTime) override;
     const char* getName(const char* lang = nullptr) override { return "Wipe"; }
-    const char* getDescription(const char* lang = nullptr) override { return "Color wipe animation from start to end"; }
+    const char* getDescription(const char* lang = nullptr) override { return EFFECT_DESC_DE_EN(
+                "Farbe läuft vom Anfang bis zum Ende über den Streifen",
+                "Color wipe animation from start to end"); }
 
     // ====================================================================
     // Parameter API

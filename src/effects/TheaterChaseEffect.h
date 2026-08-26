@@ -190,7 +190,9 @@ class TheaterChaseEffect : public Effect
 
     const char* getDescription(const char* lang = nullptr) override
     {
-        return "Movie theater chase light effect";
+        return EFFECT_DESC_DE_EN(
+                "Laufende Punktmuster wie bei einer Marquee-Lichterkette",
+                "Movie theater chase light effect");
     }
 
     // Parameter API

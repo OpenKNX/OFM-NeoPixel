@@ -184,7 +184,9 @@ class FireEffect : public Effect
 
     const char* getDescription(const char* lang = nullptr) override
     {
-        return "Realistic fire simulation with flickering";
+        return EFFECT_DESC_DE_EN(
+                "Realistische Feuersimulation mit Flackern",
+                "Realistic fire simulation with flickering");
     }
 
     // Parameter API
