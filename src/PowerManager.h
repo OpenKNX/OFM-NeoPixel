@@ -190,6 +190,36 @@ class PowerManager
      * @brief Check if power management is enabled
      * @return true if enabled
      */
+    /**
+     * @brief Current per LED as configured in ETS (0 = not configured)
+     *
+     * profileForProtocol() splits this across the channels the protocol actually has,
+     * so a 4-channel strip and a 5-channel strip on the same device each get it right.
+     */
+    void setCurrentPerLedMa(uint16_t currentPerLedMa) { _userCurrentPerLedMa = currentPerLedMa; }
+
+    /**
+     * @brief Current profile to measure a strip of this protocol with
+     *
+     * The ETS value wins when the user configured one; the per-protocol table is the
+     * fallback. Measuring with the table while ETS says otherwise silently changed the
+     * measured current, which moved the limiter threshold.
+     */
+    LedCurrentProfile profileForProtocol(LedProtocol protocol) const
+    {
+        if (_userCurrentPerLedMa == 0) return LedProfiles::forProtocol(protocol);
+
+        const uint8_t channels = ProtocolHelper::getChannelCount(protocol);
+        const uint16_t perChannel = (channels > 0) ? (uint16_t)(_userCurrentPerLedMa / channels) : 0;
+        switch (channels)
+        {
+            case 5:
+            case 6: return LedCurrentProfile(perChannel, perChannel, perChannel, perChannel, perChannel);
+            case 4: return LedCurrentProfile(perChannel, perChannel, perChannel, perChannel);
+            default: return LedCurrentProfile(perChannel, perChannel, perChannel, 0);
+        }
+    }
+
     bool isEnabled() const
     {
         return _enabled;
@@ -840,6 +870,7 @@ class PowerManager
     // Core settings
     uint32_t _maxCurrentMA;     // Maximum allowed current (mA) - GLOBAL mode
     bool _enabled;              // Enable/disable power management
+    uint16_t _userCurrentPerLedMa = 0; // ETS current per LED, 0 = use the per-protocol table
     LedCurrentProfile _profile; // Current profile for LEDs
 
     // Statistics
