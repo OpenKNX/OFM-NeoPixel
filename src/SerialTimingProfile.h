@@ -266,24 +266,34 @@ namespace SerialTiming
     {
         switch (protocol)
         {
-            // SK6812 family: WS2812x bit timing, shorter latch (NeoPixelBus Sk6812).
+            // SK6812, datasheet SPC/SK6812 Rev.06: T0H 200..400, T0L >=800, T1H 580..1000,
+            // T1L >=200, code period >=1200, Trst >80.
             case LedProtocol::SK6812:
-            case LedProtocol::SK6805:
             case LedProtocol::SK6812_RGBCCT:
                 return { 400, 850, 800, 450, 80, false };
 
-            // WS2814 is the RGBW sibling of the WS2815 generation: long latch.
+            // SK6805 has its own, tighter window (SPC/SK6805-2427 Rev.01): T0H 150..450,
+            // T0L 750..1050, T1H 450..750, T1L 450..750. The SK6812 profile above exceeds
+            // T1H max by 50 ns, so this family cannot share one entry.
+            case LedProtocol::SK6805:
+                return { 350, 900, 650, 600, 80, false };
+
+            // WS2814B datasheet: T0H 220..380, T0L 580..1000, T1H 580..1000, T1L 580..1000,
+            // data cycle >=1250, RES >=280. Despite the name this is not WS2812 timing - the
+            // WS2812 profile misses T0H max by 20 ns and T1L min by 130 ns.
             case LedProtocol::WS2814:
             case LedProtocol::WS2814_RGBCCT:
-                return { 400, 850, 800, 450, 300, false };
+                return { 300, 950, 670, 580, 300, false };
 
             // NeoPixelBus Ws2811, 800 kHz variant.
             case LedProtocol::WS2811:
                 return { 300, 950, 900, 350, 300, false };
 
-            // NeoPixelBus Ws2805, 5-channel 1090 ns bit.
+            // WS2805 datasheet: T0H 220..380, T0L 580..1000, T1H 580..1000, T1L 580..1000,
+            // data cycle >=1250, RES >280. The NeoPixelBus values (1090 ns bit, T1L 300) are
+            // below both the cycle minimum and the T1L minimum.
             case LedProtocol::WS2805_RGBCCT:
-                return { 300, 790, 790, 300, 300, false };
+                return { 300, 950, 670, 580, 300, false };
 
             // NeoPixelBus Tm1814: inverted line. Needs a current-setting frame we
             // do not send yet, so the chip is not driveable on this build.
