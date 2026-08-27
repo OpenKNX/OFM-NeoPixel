@@ -218,6 +218,46 @@ function Get-ProfilesFromHeader {
     return $profiles
 }
 
+# Datasheet windows, one entry per protocol that we hold a datasheet for (doc/Datasheets).
+# These are NOT the profile - they are the independent limits the profile has to sit inside.
+# A protocol without an entry is only checked for solver feasibility, not against a datasheet.
+$DatasheetLimits = @{
+    'WS2812B'        = @{ T0H = @(250, 550);  T0L = @(700, 1000); T1H = @(700, 1000); T1L = @(250, 550);  Cycle = @(650, 1850); Res = 50;  Sheet = 'WS2812B-LED-datasheet.pdf' }
+    'SK6812'         = @{ T0H = @(200, 400);  T0L = @(800, 9999); T1H = @(580, 1000); T1L = @(200, 9999); Cycle = @(1200, 9999); Res = 80; Sheet = 'SK6812.pdf' }
+    'SK6805'         = @{ T0H = @(150, 450);  T0L = @(750, 1050); T1H = @(450, 750);  T1L = @(450, 750);  Cycle = @(650, 1850); Res = 80;  Sheet = 'SK6805.pdf' }
+    'WS2814'         = @{ T0H = @(220, 380);  T0L = @(580, 1000); T1H = @(580, 1000); T1L = @(580, 1000); Cycle = @(1250, 9999); Res = 280; Sheet = 'WS2814B.pdf' }
+    'WS2805_RGBCCT'  = @{ T0H = @(220, 380);  T0L = @(580, 1000); T1H = @(580, 1000); T1L = @(580, 1000); Cycle = @(1250, 9999); Res = 280; Sheet = 'WS2805.pdf' }
+    'TM1914'         = @{ T0H = @(310, 410);  T0L = @(0, 9999);   T1H = @(650, 1000); T1L = @(0, 9999);   Cycle = @(1250, 9999); Res = 0;   Sheet = 'TM1914.pdf' }
+}
+
+function Test-AgainstDatasheet {
+    <#
+        .SYNOPSIS
+            Check a profile against the limits printed in the chip datasheet.
+        .DESCRIPTION
+            The solver test alone only proves the PIO can produce what the table asks for.
+            It cannot tell whether the table itself is inside what the chip accepts - that
+            is how a 1090 ns WS2805 bit and a 300 ns T1L survived, both below the datasheet.
+    #>
+    param($Profile, $Limits)
+
+    $bad = @()
+    foreach ($edge in @('T0H', 'T0L', 'T1H', 'T1L')) {
+        $value = [int]$Profile[$edge]
+        $lo = [int]$Limits[$edge][0]
+        $hi = [int]$Limits[$edge][1]
+        if ($value -lt $lo -or $value -gt $hi) { $bad += "$edge $value not in $lo..$hi" }
+    }
+    $cycle = [int]$Profile.T0H + [int]$Profile.T0L
+    if ($cycle -lt [int]$Limits.Cycle[0] -or $cycle -gt [int]$Limits.Cycle[1]) {
+        $bad += "cycle $cycle not in $($Limits.Cycle[0])..$($Limits.Cycle[1])"
+    }
+    if ([int]$Limits.Res -gt 0 -and [int]$Profile.ResetUs -lt [int]$Limits.Res) {
+        $bad += "reset $($Profile.ResetUs) us below $($Limits.Res) us"
+    }
+    return $bad
+}
+
 $HeaderPath = Join-Path $PSScriptRoot "..\..\src\SerialTimingProfile.h"
 $Profiles = Get-ProfilesFromHeader -HeaderPath $HeaderPath
 
@@ -278,6 +318,34 @@ foreach ($p in $Profiles) {
     Write-Host ("  {0,-20} T0 {1,5}/{2,-5} T1 {3,5}/{4,-5} bit {5,5} ns  equal={6}  {7}" -f `
         $p.Name, ($t.T0H * $RmtTickNs), ($t.T0L * $RmtTickNs), ($t.T1H * $RmtTickNs), ($t.T1L * $RmtTickNs),
         ($t.Bit * $RmtTickNs), $(if ($zero -eq $one) { 'yes' } else { 'NO' }), $verdict) -ForegroundColor $colour
+}
+
+Write-Host ""
+Write-Host "Datasheet windows (doc/Datasheets)" -ForegroundColor Yellow
+$sheeted = 0
+foreach ($p in $Profiles) {
+    # The parser joins the case labels, so match any of them against the limit table.
+    $key = $null
+    foreach ($part in ($p.Name -split '/')) {
+        if ($DatasheetLimits.ContainsKey($part)) { $key = $part; break }
+    }
+    if (-not $key) { continue }
+
+    $sheeted++
+    $checks++
+    $bad = Test-AgainstDatasheet -Profile $p -Limits $DatasheetLimits[$key]
+    if ($bad.Count -gt 0) {
+        $failures++
+        Write-Host ("  {0,-20} {1,-24} FAIL" -f $key, $DatasheetLimits[$key].Sheet) -ForegroundColor Red
+        foreach ($b in $bad) { Write-Host ("      {0}" -f $b) -ForegroundColor Red }
+    }
+    else {
+        Write-Host ("  {0,-20} {1,-24} OK" -f $key, $DatasheetLimits[$key].Sheet) -ForegroundColor Green
+    }
+}
+$unsheeted = $Profiles.Count - $sheeted
+if ($unsheeted -gt 0) {
+    Write-Host ("  {0} profile(s) have no datasheet here and were not checked against one." -f $unsheeted) -ForegroundColor DarkYellow
 }
 
 Write-Host ""
