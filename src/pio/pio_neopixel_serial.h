@@ -79,6 +79,8 @@ struct pio_neopixel_serial_inst
     bool initialized;   // Initialization state
     volatile bool busy; // DMA transfer in progress
 
+    volatile bool framePending; // A frame is queued or still inside its drain/latch window
+
     // Latch timing - prevents starting new transfer too early
     volatile uint32_t fifoEmptyTime; // micros() when FIFO became empty (for reset timing)
     uint32_t resetTimeUs;            // Required reset/latch time (50-300µs depending on protocol)

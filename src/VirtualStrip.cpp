@@ -541,6 +541,14 @@ bool VirtualStrip::syncToPhysical()
             continue;
         }
 
+        // A driver rejects every setPixel() while it streams the previous frame, so an
+        // extra show() shortly after the periodic update would fail the whole sync.
+        if (pstrip->isBusy() && !pstrip->waitForTransfer())
+        {
+            allSuccess = false;
+            continue;
+        }
+
         // Hardware brightness is now managed via PhysicalStripConfig
         // VirtualStrip's hardwareBrightness is ignored for SPI strips
         // Use 'neo phys config <id> brightness <16-30>' to change it

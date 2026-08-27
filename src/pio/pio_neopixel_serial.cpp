@@ -582,6 +582,9 @@ bool PIO_NeoPixel_Serial::init()
     }
 
     _inst->initialized = true;
+    _inst->framePending = false;
+    _inst->busy = false;
+    _inst->waitingForReset = false;
     return true;
 }
 
@@ -1098,6 +1101,7 @@ bool PIO_NeoPixel_Serial::show()
             _inst->recoveryCount++;
             _inst->busy = false;
             _inst->waitingForReset = false;
+            _inst->framePending = false;
 
             // Throttle the log (shared across strips) to ~1/s so a persistent
             // wedge doesn't flood the console/bus.
@@ -1118,6 +1122,7 @@ bool PIO_NeoPixel_Serial::show()
     // Reset state for new transfer
     _inst->busy = true;
     _inst->waitingForReset = false;
+    _inst->framePending = true;
 
     if (_inst->useDMA && _inst->dmaChannel >= 0)
     {
@@ -1125,6 +1130,7 @@ bool PIO_NeoPixel_Serial::show()
         {
             _inst->busy = false;
             _inst->waitingForReset = false;
+            _inst->framePending = false;
             return false;
         }
     }
@@ -1135,6 +1141,7 @@ bool PIO_NeoPixel_Serial::show()
             recoverDirectPioTransfer(_inst);
             _inst->busy = false;
             _inst->waitingForReset = false;
+            _inst->framePending = false;
             return false;
         }
 
@@ -1151,6 +1158,7 @@ bool PIO_NeoPixel_Serial::show()
                 recoverDirectPioTransfer(_inst);
                 _inst->busy = false;
                 _inst->waitingForReset = false;
+                _inst->framePending = false;
                 openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial",
                     "direct PIO transfer timed out on GPIO%u SM%u after %lums",
                     _inst->pin, _inst->sm,
@@ -1324,6 +1332,11 @@ bool PIO_NeoPixel_Serial::isBusy()
 {
     if (!_inst) return false;
 
+    // The drain/latch window belongs to a queued frame. Without this gate every
+    // poll of an idle strip would re-arm the window below and report busy, which
+    // made applyConfig() fail after init() and show() reject the next frame.
+    if (!_inst->framePending) return false;
+
     // Direct PIO writes set busy while they drain the FIFO, final OSR word and
     // reset interval. An idle no-DMA strip must still report ready immediately.
     if (!_inst->useDMA && !_inst->busy) return false;
@@ -1377,6 +1390,7 @@ bool PIO_NeoPixel_Serial::isBusy()
 
     // Ready for next transfer
     _inst->waitingForReset = false;
+    _inst->framePending = false;
     return false;
 }
 
