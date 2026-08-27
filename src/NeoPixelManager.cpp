@@ -552,12 +552,53 @@ void NeoPixelManager::reset()
  * Phase 3: Must be called AFTER syncAll() (works on PhysicalStrip buffers)
  * @public
  */
+/**
+ * @brief Sum the current across all strips without changing a single pixel
+ *
+ * Used while limiting is switched off, so the console and the power KO keep a live
+ * value without paying for it on every frame.
+ */
+void NeoPixelManager::measureCurrentOnly()
+{
+    uint32_t total = 0;
+    for (auto phys : _strips)
+    {
+        if (!phys) continue;
+        const uint8_t* buffer = phys->getBuffer();
+        if (!buffer) continue;
+
+        total += _powerManager.calculateTotalCurrent(buffer, phys->getLedCount(), bufferStride(phys), 255,
+                _powerManager.profileForProtocol(phys->getProtocol()));
+    }
+
+    const uint32_t limit = _powerManager.getMaxCurrent();
+    _powerManager.setCachedCurrentValues(total, total);
+    _globalCurrentMa = total;
+    _globalLimitMa = limit;
+    _globalLoadPercent = (limit > 0) ? (uint8_t)((total * 100) / limit) : 0;
+}
+
 void NeoPixelManager::applyPowerLimit()
 {
     // Rebuild mapping if needed (for LED count calculations)
     if (_mappingDirty)
     {
         rebuildPhysToVirtualMapping();
+    }
+
+    // Limiting switched off in ETS: never touch the pixels. The consumption is still
+    // reported, but the console and the KO read it seconds apart - walking every pixel
+    // of every strip once per frame for that only costs frame rate, and a lower frame
+    // rate shows up directly in millis()-driven effects.
+    if (!_powerManager.isEnabled())
+    {
+        const uint32_t now = millis();
+        if ((uint32_t)(now - _lastIdleCurrentMeasureMs) >= kIdleCurrentMeasureIntervalMs)
+        {
+            _lastIdleCurrentMeasureMs = now;
+            measureCurrentOnly();
+        }
+        return;
     }
 
     PowerLimitMode mode = _powerManager.getPowerLimitMode();

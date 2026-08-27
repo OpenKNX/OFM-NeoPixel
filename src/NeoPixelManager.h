@@ -158,6 +158,7 @@ class NeoPixelManager
     void update(uint32_t deltaTime);        // Phase 1-4: Full pipeline (non-blocking)
     void updateEffects(uint32_t deltaTime); // Phase 1: Effect calculations only
     void applyPowerLimit();                 // Phase 2: Global power scaling
+    void measureCurrentOnly();              // Consumption only, used while limiting is off
     void syncAll();                         // Phase 3: VirtualStrip → PhysicalStrip
     bool showAll();                         // Phase 4: Hardware transfer
     bool updateAll();                       // Phase 2-4: Convenience method
@@ -287,6 +288,10 @@ class NeoPixelManager
         uint8_t loadPercent; // Load percentage (0-100)
     };
     mutable std::map<PhysicalStrip*, StripPowerStats> _stripPowerCache; // Cache per PhysicalStrip
+    // Limiting switched off: measure at the reporting cadence instead of once per frame.
+    static constexpr uint32_t kIdleCurrentMeasureIntervalMs = 1000;
+    uint32_t _lastIdleCurrentMeasureMs = 0;
+
     mutable uint32_t _globalCurrentMa;                                  // Global total current (all strips)
     mutable uint32_t _globalLimitMa;                                    // Global limit
     mutable uint8_t _globalLoadPercent;                                 // Global load percentage
