@@ -3,6 +3,9 @@
 #include "hal/HW_NeoPixel_SPI.h"
 #include <Arduino.h>
 
+// Compile-time checks for the protocol and colour-order tables (no code emitted).
+#include "ProtocolTableAsserts.h"
+
 #ifdef ARDUINO_ARCH_RP2040
     #include "pio/pio_neopixel_serial.h"
     #include "pio/pio_neopixel_spi.h"
