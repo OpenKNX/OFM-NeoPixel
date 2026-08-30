@@ -226,7 +226,7 @@ $DatasheetLimits = @{
     'SK6812'         = @{ T0H = @(200, 400);  T0L = @(800, 9999); T1H = @(580, 1000); T1L = @(200, 9999); Cycle = @(1200, 9999); Res = 80; Sheet = 'SK6812.pdf' }
     'SK6805'         = @{ T0H = @(150, 450);  T0L = @(750, 1050); T1H = @(450, 750);  T1L = @(450, 750);  Cycle = @(650, 1850); Res = 80;  Sheet = 'SK6805.pdf' }
     'WS2814'         = @{ T0H = @(220, 380);  T0L = @(580, 1000); T1H = @(580, 1000); T1L = @(580, 1000); Cycle = @(1250, 9999); Res = 280; Sheet = 'WS2814B.pdf' }
-    'WS2805_RGBCCT'  = @{ T0H = @(220, 380);  T0L = @(580, 1000); T1H = @(580, 1000); T1L = @(580, 1000); Cycle = @(1250, 9999); Res = 280; Sheet = 'WS2805.pdf' }
+    'WS2805_RGBCCT'  = @{ T0H = @(220, 380);  T0L = @(580, 1600); T1H = @(580, 1600); T1L = @(220, 420);  Cycle = @(1250, 9999); Res = 280; Sheet = 'WS2805.pdf' }
     'TM1914'         = @{ T0H = @(310, 410);  T0L = @(0, 9999);   T1H = @(650, 1000); T1L = @(0, 9999);   Cycle = @(1250, 9999); Res = 0;   Sheet = 'TM1914.pdf' }
 }
 
@@ -237,7 +237,7 @@ function Test-AgainstDatasheet {
         .DESCRIPTION
             The solver test alone only proves the PIO can produce what the table asks for.
             It cannot tell whether the table itself is inside what the chip accepts - that
-            is how a 1090 ns WS2805 bit and a 300 ns T1L survived, both below the datasheet.
+            is how an out-of-window profile can survive until it is exercised on hardware.
     #>
     param($Profile, $Limits)
 

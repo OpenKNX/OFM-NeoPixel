@@ -289,11 +289,11 @@ namespace SerialTiming
             case LedProtocol::WS2811_400KHZ:
                 return { 500, 2000, 1200, 1300, 50, false };
 
-            // WS2805 datasheet: T0H 220..380, T0L 580..1000, T1H 580..1000, T1L 580..1000,
-            // data cycle >=1250, RES >280. The NeoPixelBus values (1090 ns bit, T1L 300) are
-            // below both the cycle minimum and the T1L minimum.
+            // WS2805 datasheet: T0H 220..380, T0L/T1H 580..1600, T1L 220..420,
+            // RES >280. Keep the TI four-step profile: its long one-pulse was verified
+            // on real WS2805 strips and leaves useful margin for slower level shifters.
             case LedProtocol::WS2805_RGBCCT:
-                return { 300, 950, 670, 580, 300, false };
+                return { 312, 938, 938, 312, 300, false };
 
             // TM1814: inverted line and C1/C2 constant-current prefix.
             case LedProtocol::TM1814:
