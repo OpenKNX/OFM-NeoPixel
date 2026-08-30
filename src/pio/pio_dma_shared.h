@@ -17,6 +17,7 @@
 
     #include <Arduino.h>
     #include <hardware/dma.h>
+    #include <pico/platform.h>
     #include <stdint.h>
 
     // DMA channel count is chip-specific: RP2040 has 12, RP2350 has 16. Use the SDK's
@@ -40,6 +41,6 @@ class PIO_NeoPixel_SPI;    // Forward declaration for SPI strips
 inline PIO_NeoPixel_Serial* volatile g_serialHandlers[MAX_DMA_CHANNELS] = {nullptr};
 inline PIO_NeoPixel_SPI* volatile g_spiHandlers[MAX_DMA_CHANNELS] = {nullptr};
 
-void unifiedDmaIRQHandler(); // Unified DMA IRQ Handler declaration
+void __isr __not_in_flash_func(unifiedDmaIRQHandler)(); // Unified DMA IRQ Handler declaration
 
 #endif // ARDUINO_ARCH_RP2040
