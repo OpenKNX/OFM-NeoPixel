@@ -44,7 +44,7 @@ enum class LedProtocol
     // 5-Channel Protocols (RGB + Warm White + Cool White = CCT)
     SK6812_RGBCCT, // 5V RGBCCT (5-channel), 800kHz, GRBCCT order
     WS2814_RGBCCT, // 12V RGBCCT (5-channel), 800kHz, GRBCCT order
-    WS2805_RGBCCT, // 12V/24V RGBCCT (5-channel), 800kHz, GRBCCT order
+    WS2805_RGBCCT, // 12V/24V RGBCCT (5-channel), 800kHz, RGBW1W2 order
 
     // 16-bit-per-channel 1-Wire protocols. WS2812x bit timing, wider frame.
     UCS8903, // 5V RGB,    16 bit/channel ->  6 bytes/LED
@@ -299,8 +299,10 @@ namespace ProtocolHelper
             // 5-Channel protocols
             case LedProtocol::SK6812_RGBCCT:
             case LedProtocol::WS2814_RGBCCT:
-            case LedProtocol::WS2805_RGBCCT:
                 return ColorOrder::GRBCCT;
+
+            case LedProtocol::WS2805_RGBCCT:
+                return ColorOrder::RGBCCT; // datasheet frame order is R G B W1 W2
 
             case LedProtocol::WS2812:
             case LedProtocol::WS2812B:
