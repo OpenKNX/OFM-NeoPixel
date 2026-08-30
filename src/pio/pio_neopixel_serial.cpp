@@ -61,6 +61,23 @@ static constexpr uint8_t sm16825SettingsBytes(LedProtocol protocol)
     return protocol == LedProtocol::SM16825 ? 4 : 0;
 }
 
+/**
+ * PIO autopull width for the FIFO representation used by sendDataPIO()/DMA.
+ *
+ * RGB and RGBW are packed into one FIFO word per pixel. Wider frames (including
+ * WS2805's 40-bit RGBW1W2 frame) and prefixed frames are instead written as one
+ * MSB-aligned FIFO word per payload byte and therefore must pull after 8 bits.
+ */
+static constexpr uint pioSerialFifoPullBits(uint8_t bytesPerLed, uint8_t prefixBytes)
+{
+    return (bytesPerLed >= 5 || prefixBytes > 0) ? 8u : (bytesPerLed == 4 ? 32u : 24u);
+}
+
+static_assert(pioSerialFifoPullBits(3, 0) == 24, "RGB uses one 24-bit FIFO word per pixel");
+static_assert(pioSerialFifoPullBits(4, 0) == 32, "RGBW uses one 32-bit FIFO word per pixel");
+static_assert(pioSerialFifoPullBits(5, 0) == 8, "WS2805 must pull after every payload byte");
+static_assert(pioSerialFifoPullBits(4, 8) == 8, "prefixed frames must pull after every payload byte");
+
 static void writeSm16825Settings(pio_neopixel_serial_inst_t* inst)
 {
     if (!inst || !inst->buffer || inst->protocol != LedProtocol::SM16825) return;
@@ -262,6 +279,10 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
         writeSm16825Settings(_inst);
     }
 
+    // The PIO shift threshold describes the FIFO representation, independent
+    // of whether DMA or the blocking fallback feeds that FIFO.
+    _inst->fifoWordBits = pioSerialFifoPullBits(_inst->bytesPerLed, _inst->prefixBytes);
+
     // DMA buffer (if needed)
     // For DMA: Buffer handling depends on LED type
     //
@@ -283,7 +304,6 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
         {
             // A wide or prefixed frame must be emitted byte-by-byte. 8-bit autopull
             // prevents alignment padding from becoming LED data (notably SM16825's trailer).
-            _inst->fifoWordBits = 8;
             _inst->dmaBufferSize = _inst->bufferSize;
             _inst->dmaBuffer = new uint32_t[_inst->dmaBufferSize];
             if (_inst->dmaBuffer)
@@ -295,7 +315,6 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
         else
         {
             // RGB/RGBW: 24/32-bit autopull, packed efficiently into uint32_t words
-            _inst->fifoWordBits = _inst->bytesPerLed == 4 ? 32 : 24; // RGBW=32, RGB=24
             _inst->dmaBufferSize = (size_t)ledCount * (((_inst->bytesPerLed + 3) / 4));
             _inst->dmaBuffer = new uint32_t[_inst->dmaBufferSize];
             if (_inst->dmaBuffer)
@@ -309,7 +328,6 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     {
         _inst->dmaBuffer = nullptr;
         _inst->dmaBufferSize = 0;
-        _inst->fifoWordBits = 0;
         _inst->bufferSending = nullptr;
     }
 }
