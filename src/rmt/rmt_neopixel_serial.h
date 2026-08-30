@@ -61,6 +61,8 @@ struct rmt_neopixel_serial_inst
     uint32_t          resetTimeUs;
     volatile uint32_t lastTxEndUs;
     volatile bool     waitingForReset;
+    uint32_t          bitPeriodNs;
+    volatile uint32_t transferStartedUs;
 
     // Realized signal, for diagnostics: what the encoder actually emits.
     uint16_t realizedT0hNs;
@@ -108,6 +110,7 @@ class RMT_NeoPixel_Serial : public IHardwareDriver
     bool setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw) override;
     bool show() override;
     bool isBusy() override;
+    uint32_t getTransferTimeoutUs() const override;
     void clear() override;
     uint16_t getLedCount() const override { return _inst ? _inst->ledCount : 0; }
     LedProtocol getProtocol() const override { return _inst ? _inst->protocol : LedProtocol::WS2812; }

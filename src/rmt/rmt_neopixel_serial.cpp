@@ -196,6 +196,10 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
     _inst->initialized = false;
     _inst->busy = false;
 
+    const SerialTiming::Profile profile = SerialTiming::profileFor(protocol);
+    _inst->resetTimeUs = profile.resetUs;
+    _inst->bitPeriodNs = ((uint32_t)profile.t0h + profile.t0l + profile.t1h + profile.t1l + 1U) / 2U;
+
     // TM1814 expects C1 C2 D1..Dn: two 4-byte constant-current commands, the second the
     // bit complement of the first.
     _inst->prefixBytes = (protocol == LedProtocol::TM1814) ? 8 : 0;
@@ -336,6 +340,12 @@ bool RMT_NeoPixel_Serial::init()
     _inst->resetTimeUs = prof.resetUs;
 
     const SerialTiming::Ticks tk = SerialTiming::toTicks(prof, kRmtTickNs);
+    _inst->realizedT0hNs = (uint16_t)(tk.t0h * kRmtTickNs);
+    _inst->realizedT0lNs = (uint16_t)(tk.t0l * kRmtTickNs);
+    _inst->realizedT1hNs = (uint16_t)(tk.t1h * kRmtTickNs);
+    _inst->realizedT1lNs = (uint16_t)(tk.t1l * kRmtTickNs);
+    _inst->bitPeriodNs = ((uint32_t)_inst->realizedT0hNs + _inst->realizedT0lNs +
+                          _inst->realizedT1hNs + _inst->realizedT1lNs + 1U) / 2U;
     rmt_bytes_encoder_config_t encoder_config = {
         .bit0 = { .duration0 = tk.t0h, .level0 = 1, .duration1 = tk.t0l, .level1 = 0 },
         .bit1 = { .duration0 = tk.t1h, .level0 = 1, .duration1 = tk.t1l, .level1 = 0 },
@@ -442,9 +452,10 @@ void RMT_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
 bool RMT_NeoPixel_Serial::show()
 {
     if (!_inst || !_inst->initialized || !_inst->buffer) return false;
-    if (_inst->busy) return false; // Already transmitting
+    if (_inst->busy || _inst->waitingForReset) return false; // Still transmitting or latching
 
     _inst->busy = true;
+    _inst->transferStartedUs = micros();
 
     // TX configuration
     rmt_transmit_config_t tx_config = {
@@ -475,7 +486,26 @@ bool RMT_NeoPixel_Serial::isBusy()
         // Bounded, unlike the portMAX_DELAY this used to sit on: a stalled channel must
         // not hold loop() past the watchdog. 0 polls without blocking.
         esp_err_t err = rmt_tx_wait_all_done(_inst->channel, 0);
-        if (err == ESP_ERR_TIMEOUT) return true;
+        if (err == ESP_ERR_TIMEOUT &&
+            (uint32_t)(micros() - _inst->transferStartedUs) < getTransferTimeoutUs()) return true;
+
+        if (err != ESP_OK)
+        {
+            // Recover a stalled peripheral without changing the asynchronous
+            // model. The active transaction is terminated, the data line is
+            // held LOW for a real reset interval, then the channel is made
+            // available for the next frame.
+            const esp_err_t disableErr = rmt_disable(_inst->channel);
+            gpio_set_level((gpio_num_t)_inst->pin, 0);
+            delayMicroseconds(_inst->resetTimeUs);
+            const esp_err_t enableErr = rmt_enable(_inst->channel);
+            _inst->busy = false;
+            _inst->waitingForReset = false;
+            if (enableErr != ESP_OK) _inst->initialized = false;
+            ESP_LOGE("RMT_NeoPixel", "RMT transfer timed out/failed (%d, disable=%d, enable=%d)",
+                     err, disableErr, enableErr);
+            return false;
+        }
 
         _inst->busy = false;
         _inst->lastTxEndUs = micros();
@@ -489,6 +519,16 @@ bool RMT_NeoPixel_Serial::isBusy()
     }
 
     return false;
+}
+
+uint32_t RMT_NeoPixel_Serial::getTransferTimeoutUs() const
+{
+    if (!_inst || _inst->bufferSize == 0) return 1000000U;
+
+    const uint32_t bitPeriodNs = _inst->bitPeriodNs ? _inst->bitPeriodNs : 1250U;
+    const uint64_t payloadUs = ((uint64_t)_inst->bufferSize * 8ULL * bitPeriodNs + 999ULL) / 1000ULL;
+    const uint64_t deadlineUs = payloadUs + _inst->resetTimeUs + 2000ULL;
+    return deadlineUs > UINT32_MAX ? UINT32_MAX : (uint32_t)deadlineUs;
 }
 
 void RMT_NeoPixel_Serial::clear()
@@ -607,6 +647,8 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
         _inst->realizedT0lNs = (uint16_t)(tk.t0l * kRmtTickNs);
         _inst->realizedT1hNs = (uint16_t)(tk.t1h * kRmtTickNs);
         _inst->realizedT1lNs = (uint16_t)(tk.t1l * kRmtTickNs);
+        _inst->bitPeriodNs = ((uint32_t)_inst->realizedT0hNs + _inst->realizedT0lNs +
+                              _inst->realizedT1hNs + _inst->realizedT1lNs + 1U) / 2U;
     }
 
     return true;
