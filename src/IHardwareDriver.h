@@ -29,7 +29,8 @@ enum class LedProtocol
     WS2812B, // Same as WS2812 (common variant)
     WS2813,  // 5V RGB, 800kHz, GRB, data backup
     WS2815,  // 12V RGB, 800kHz, GRB, data backup
-    WS2811,  // 12V RGB, 400kHz, RGB order
+    WS2811,  // 12V RGB, 800kHz, RGB order
+    WS2811_400KHZ, // Legacy WS2811/WS2812 RGB, 400kHz, GRB order
     SK6812,  // 5V/12V RGBW, 800kHz, GRBW order
     SK6805,  // 5V RGBW, 800kHz, GRBW order
     WS2814,  // 12V RGBW, 800kHz, GRBW order
@@ -267,6 +268,9 @@ namespace ProtocolHelper
             case LedProtocol::UCS8903:
                 return ColorOrder::RGB;
 
+            case LedProtocol::WS2811_400KHZ:
+                return ColorOrder::GRB;
+
             case LedProtocol::TM1829:
                 return ColorOrder::BRG;
 
@@ -274,6 +278,8 @@ namespace ProtocolHelper
                 return ColorOrder::RGBW;
 
             case LedProtocol::SM16825:
+                return ColorOrder::RGBCTW;
+
             case LedProtocol::FW1906:
                 return ColorOrder::GRBCCT;
 
@@ -360,6 +366,12 @@ namespace ProtocolHelper
         return (mA10 <= 65) ? (uint8_t)0
              : (mA10 >= 380) ? (uint8_t)63
              : (uint8_t)((((uint32_t)mA10 - 65) * 63 + 157) / 315);
+    }
+
+    /** SM16825 four-byte frame-settings trailer (normal action, default gains). */
+    constexpr uint8_t sm16825FrameSettingsByte(uint8_t index)
+    {
+        return index == 3 ? 0x1F : 0x00;
     }
 
     /**
@@ -510,9 +522,9 @@ namespace ProtocolHelper
      */
     inline uint32_t getDefaultFrequency(LedProtocol protocol)
     {
-        if (protocol == LedProtocol::WS2811)
+        if (protocol == LedProtocol::WS2811_400KHZ)
         {
-            return 400000; // 400kHz (WS2811 slow mode)
+            return 400000; // Legacy 400kHz mode
         }
         if (isSPI(protocol))
         {

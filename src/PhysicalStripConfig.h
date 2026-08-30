@@ -18,6 +18,7 @@
 #pragma once
 
 #include "IHardwareDriver.h"
+#include "SerialTimingProfile.h"
 #include "TimingMode.h"
 #include <cmath>
 #include <stdint.h>
@@ -847,22 +848,15 @@ struct SerialStripConfig : public PhysicalStripConfig
             return { _t0h, _t0l, _t1h, _t1l, _resetTime, true };
         }
 
-        // Protocol defaults
-        switch (protocol)
+        const SerialTiming::Profile timing = SerialTiming::profileFor(protocol);
+        if (timing.t1h > 0)
         {
-            case LedProtocol::SK6812:
-            case LedProtocol::SK6812_RGBCCT:
-                return { 300, 900, 600, 600, _resetTime > 0 ? _resetTime : 80, false };
-
-            case LedProtocol::WS2811:
-                return { 500, 2000, 1200, 1300, _resetTime > 0 ? _resetTime : 50, false };
-
-            case LedProtocol::WS2812:
-            case LedProtocol::WS2812B:
-            case LedProtocol::WS2805_RGBCCT:
-            default:
-                return { 300, 900, 750, 600, _resetTime > 0 ? _resetTime : 50, false };
+            return { timing.t0h, timing.t0l, timing.t1h, timing.t1l,
+                     _resetTime > 0 ? _resetTime : timing.resetUs, false };
         }
+
+        // SPI and unknown protocols have no serial timing profile.
+        return { 0, 0, 0, 0, _resetTime, false };
     }
 
     // ===== Test Routines =====

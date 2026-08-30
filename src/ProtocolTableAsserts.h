@@ -21,6 +21,7 @@ namespace ProtocolTableAsserts
     // ---- frame width per protocol ----
     static_assert(getBytesPerLed(LedProtocol::WS2812B) == 3, "WS2812B is 3 bytes");
     static_assert(getBytesPerLed(LedProtocol::WS2811) == 3, "WS2811 is 3 bytes");
+    static_assert(getBytesPerLed(LedProtocol::WS2811_400KHZ) == 3, "WS2811 400kHz is 3 bytes");
     static_assert(getBytesPerLed(LedProtocol::SK6812) == 4, "SK6812 is 4 bytes");
     static_assert(getBytesPerLed(LedProtocol::TM1814) == 4, "TM1814 is 4 bytes");
     static_assert(getBytesPerLed(LedProtocol::WS2805_RGBCCT) == 5, "WS2805 is 5 bytes");
@@ -41,6 +42,11 @@ namespace ProtocolTableAsserts
     static_assert(getBitsPerChannel(LedProtocol::WS2812B) == 8, "WS2812B is 8 bit per channel");
     static_assert(getBitsPerChannel(LedProtocol::UCS8903) == 16, "UCS8903 is 16 bit per channel");
     static_assert(getBitsPerChannel(LedProtocol::SM16825) == 16, "SM16825 is 16 bit per channel");
+    static_assert(getColorOrder(LedProtocol::SM16825) == ColorOrder::RGBCTW,
+                  "SM16825 frame order is RGB + cool white + warm white");
+    static_assert(sm16825FrameSettingsByte(0) == 0x00 && sm16825FrameSettingsByte(1) == 0x00 &&
+                      sm16825FrameSettingsByte(2) == 0x00 && sm16825FrameSettingsByte(3) == 0x1F,
+                  "SM16825 frame settings trailer");
 
     // ---- every protocol is either 1-wire or SPI, never both, never neither ----
 #define NEO_ASSERT_ONEWIRE(p) \
@@ -53,6 +59,7 @@ namespace ProtocolTableAsserts
     NEO_ASSERT_ONEWIRE(WS2813)
     NEO_ASSERT_ONEWIRE(WS2815)
     NEO_ASSERT_ONEWIRE(WS2811)
+    NEO_ASSERT_ONEWIRE(WS2811_400KHZ)
     NEO_ASSERT_ONEWIRE(SK6812)
     NEO_ASSERT_ONEWIRE(SK6805)
     NEO_ASSERT_ONEWIRE(WS2814)

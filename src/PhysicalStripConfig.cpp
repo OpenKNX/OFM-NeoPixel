@@ -7,6 +7,7 @@
 
 #include "PhysicalStripConfig.h"
 #include "PhysicalStrip.h"
+#include "SerialTimingProfile.h"
 #include <Arduino.h>
 
 // =============================================================================
@@ -277,7 +278,7 @@ uint8_t SpiStripConfig::analyzeFirstLedIssue(PhysicalStrip* strip)
  * Protocol characteristics:
  * - WS2812B: 800kHz, GRB order, very common
  * - SK6812: 800kHz, GRB/GRBW, supports white channel
- * - WS2811: 400kHz, RGB order, older
+ * - WS2811: 800kHz, RGB order; WS2811_400KHZ selects the legacy 400kHz waveform
  *
  * Without hardware timing measurement, we rely on:
  * - Known protocol from constructor
@@ -383,21 +384,21 @@ bool SerialStripConfig::measureTiming(PhysicalStrip* strip, uint16_t& t0h, uint1
 
     LedProtocol proto = strip->getProtocol();
 
-    if (proto == LedProtocol::WS2811)
+    const SerialTiming::Profile timing = SerialTiming::profileFor(proto);
+    if (timing.t1h > 0)
     {
-        // WS2811: 400kHz, slower timing
-        t0h = 500;  // 500ns
-        t0l = 2000; // 2000ns
-        t1h = 1200; // 1200ns
-        t1l = 1300; // 1300ns
+        t0h = timing.t0h;
+        t0l = timing.t0l;
+        t1h = timing.t1h;
+        t1l = timing.t1l;
     }
     else
     {
-        // WS2812B/SK6812: 800kHz, standard timing
-        t0h = 350; // 350ns (0.35µs)
-        t0l = 800; // 800ns (0.8µs)
-        t1h = 700; // 700ns (0.7µs)
-        t1l = 600; // 600ns (0.6µs)
+        // No serial profile (for example SPI): use the generic WS2812B reference.
+        t0h = 400;
+        t0l = 850;
+        t1h = 800;
+        t1l = 450;
     }
 
     return true; // Return true = timing values are valid (standard values)

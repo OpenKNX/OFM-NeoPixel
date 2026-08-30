@@ -11,7 +11,7 @@
  * - Supports both RGB (24-bit) and RGBW (32-bit) modes
  * - Automatic resource management (PIO/SM/DMA)
  * - Multiple LED strips on any GPIO pins
- * - Support for WS2812 (800kHz), WS2811 (400kHz), etc.
+ * - Support for WS2812/WS2811 (800kHz) and the explicit WS2811_400KHZ profile.
  *
  * Technical Details:
  * - Uses PIO state machines for timing-critical protocols

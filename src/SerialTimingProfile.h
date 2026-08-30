@@ -255,10 +255,6 @@ namespace SerialTiming
      * large scale. Where a datasheet is stricter the WLED value is kept: it is the
      * one with proven tolerance against clone chips.
      *
-     * WS2811 resolves to its 800 kHz variant. The 400 kHz variant is NOT offered as
-     * a protocol; reach it through the console (neo phys timing <id> 400) or custom
-     * timing. WLED exposes it as a separate LED type and we can do the same later.
-     *
      * @param protocol LED protocol
      * @return profile; SPI protocols return a zeroed profile (no NRZ bit timing)
      */
@@ -289,14 +285,17 @@ namespace SerialTiming
             case LedProtocol::WS2811:
                 return { 300, 950, 900, 350, 300, false };
 
+            // Legacy WS2811/WS2812 timing, 400 kHz.
+            case LedProtocol::WS2811_400KHZ:
+                return { 500, 2000, 1200, 1300, 50, false };
+
             // WS2805 datasheet: T0H 220..380, T0L 580..1000, T1H 580..1000, T1L 580..1000,
             // data cycle >=1250, RES >280. The NeoPixelBus values (1090 ns bit, T1L 300) are
             // below both the cycle minimum and the T1L minimum.
             case LedProtocol::WS2805_RGBCCT:
                 return { 300, 950, 670, 580, 300, false };
 
-            // NeoPixelBus Tm1814: inverted line. Needs a current-setting frame we
-            // do not send yet, so the chip is not driveable on this build.
+            // TM1814: inverted line and C1/C2 constant-current prefix.
             case LedProtocol::TM1814:
                 return { 360, 890, 720, 530, 200, true };
 
