@@ -99,10 +99,9 @@ static inline void pio_spi_program_init(PIO pio, uint sm, uint offset, uint clk_
     // Configure out pins for MOSI
     sm_config_set_out_pins(&c, data_pin, 1);
 
-    // Out shift: shift_right=FALSE for MSB-first
-    // false = shift left = output from MSB (bit 31 first)
-    // Autopull enabled, 32 bits per pull
-    sm_config_set_out_shift(&c, false, true, 32);
+    // One FIFO word carries one MSB-aligned wire byte. This avoids padding
+    // bytes becoming LED data on 3-byte SPI protocols.
+    sm_config_set_out_shift(&c, false, true, 8);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
     // Calculate clock divider
@@ -179,6 +178,8 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     _inst->protocol = protocol;
     _inst->spiFrequency = frequency;
     _inst->dirty = true;
+    _inst->dmaFinished = false;
+    _inst->fifoDrainedAtUs = 0;
 
     // Set ColorOrder: Use provided value, or protocol-dependent default
     if (colorOrder == ColorOrder::NONE)
@@ -194,7 +195,7 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     }
 
     // DMA configuration (claimed later in init() if available)
-    _inst->useDMA = true;   // Enable DMA by default (falls back to PIO if unavailable)
+    _inst->useDMA = useDMA;
     _inst->dmaChannel = -1; // Not yet claimed
     _inst->dmaIrqNum = -1;  // Not yet assigned
     // ===== Extended SPI Configuration Defaults =====
@@ -283,14 +284,17 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
     // CRITICAL: Allocate as uint32_t aligned (DMA and atomic writes require this)
     // Buffer must be 32-bit aligned for direct word writes (no byte-by-byte access)
     // Round UP to nearest word boundary to prevent buffer underallocation
-    _inst->bufferWordCount = (_inst->bufferSize + 3) / 4; // Round up: (size + 3) / 4
-    uint32_t* wordBuffer = (uint32_t*)malloc(_inst->bufferWordCount * sizeof(uint32_t));
+    const size_t bufferAllocationWords = (_inst->bufferSize + 3) / 4;
+    _inst->bufferWordCount = _inst->bufferSize;
+    uint32_t* wordBuffer = (uint32_t*)malloc(bufferAllocationWords * sizeof(uint32_t));
     _inst->buffer = (uint8_t*)wordBuffer; // Keep uint8_t* for compatibility
+    _inst->transferBuffer = (uint32_t*)malloc(_inst->bufferWordCount * sizeof(uint32_t));
 
-    if (_inst->buffer)
+    if (_inst->buffer && _inst->transferBuffer)
     {
         // Clear the ENTIRE allocated buffer (use word count, not logical byte size)
-        memset(_inst->buffer, 0, _inst->bufferWordCount * 4);
+        memset(_inst->buffer, 0, bufferAllocationWords * 4);
+        memset(_inst->transferBuffer, 0, _inst->bufferWordCount * sizeof(uint32_t));
 
         // Re-cast for word-based initialization
         uint32_t* words = (uint32_t*)_inst->buffer;
@@ -346,6 +350,13 @@ PIO_NeoPixel_SPI::PIO_NeoPixel_SPI(uint clkPin,
             memset(_inst->buffer + dataOffset, 0x80, (size_t)_inst->ledCount * 3);
         }
     }
+    else
+    {
+        free(_inst->buffer);
+        free(_inst->transferBuffer);
+        _inst->buffer = nullptr;
+        _inst->transferBuffer = nullptr;
+    }
 }
 
 /**
@@ -391,6 +402,11 @@ PIO_NeoPixel_SPI::~PIO_NeoPixel_SPI()
         {
             free(_inst->buffer);
             _inst->buffer = nullptr;
+        }
+        if (_inst->transferBuffer)
+        {
+            free(_inst->transferBuffer);
+            _inst->transferBuffer = nullptr;
         }
 
         free(_inst);
@@ -601,8 +617,8 @@ bool PIO_NeoPixel_SPI::initDMA()
     _inst->dmaIrqNum = 1; // ALL SPI strips use DMA_IRQ_1
 
     // Configure DMA channel
-    // CRITICAL: We use autopull=32 in PIO, so DMA MUST transfer 32-bit words!
-    // Buffer size must be multiple of 4 bytes (e.g., 408 bytes = 102 words)
+    // The PIO auto-pulls every eight bits. Each DMA word is MSB-aligned and
+    // represents exactly one wire byte.
     dma_channel_config c = dma_channel_get_default_config(channel);
     channel_config_set_transfer_data_size(&c, DMA_SIZE_32);                 // 32-bit word transfers (4 bytes per transfer)
     channel_config_set_read_increment(&c, true);                            // Increment read pointer by 4 bytes after each word
@@ -613,8 +629,8 @@ bool PIO_NeoPixel_SPI::initDMA()
         channel,
         &c,
         &_inst->pio->txf[_inst->sm], // Destination: PIO TX FIFO (32-bit register)
-        _inst->buffer,               // Source: Main buffer (direct transfer, no intermediate copy)
-        _inst->bufferWordCount,      // Transfer count in 32-bit words (stored during allocation)
+        _inst->transferBuffer,       // Source: PIO-ready byte words
+        _inst->bufferWordCount,      // One 32-bit FIFO word per wire byte
         false                        // Don't start yet (triggered by show() → sendDataDMA())
     );
 
@@ -907,7 +923,7 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
  */
 bool PIO_NeoPixel_SPI::show()
 {
-    if (!_inst || !_inst->initialized || !_inst->buffer) return false;
+    if (!_inst || !_inst->initialized || !_inst->buffer || !_inst->transferBuffer) return false;
 
     // Skip frame if previous transfer still in progress (busy flag)
     if (_inst->busy) return false;
@@ -916,20 +932,61 @@ bool PIO_NeoPixel_SPI::show()
     // This prevents redundant sends which can cause visible flicker on SPI strips
     if (!_inst->dirty) return true;
 
+    prepareTransferBuffer();
     _inst->busy = true;
-    _inst->dirty = false;
+    _inst->dmaFinished = false;
+    _inst->fifoDrainedAtUs = 0;
+    if (_inst->csPin >= 0) digitalWrite(_inst->csPin, LOW);
 
+    bool started = false;
     if (_inst->useDMA && _inst->dmaChannel >= 0)
     {
-        sendDataDMA();
+        started = sendDataDMA();
     }
     else
     {
-        sendDataPIO();
-        _inst->busy = false;
+        started = sendDataPIO();
     }
 
+    if (!started)
+    {
+        _inst->busy = false;
+        _inst->dirty = true;
+        if (_inst->csPin >= 0) digitalWrite(_inst->csPin, HIGH);
+        return false;
+    }
+
+    _inst->dirty = false;
+
     return true;
+}
+
+void PIO_NeoPixel_SPI::prepareTransferBuffer()
+{
+    if (!_inst || !_inst->buffer || !_inst->transferBuffer) return;
+
+    if (_inst->hasGlobalBrightness)
+    {
+        // APA102/SK9822 entries are deliberately maintained as big-endian
+        // words so writes are atomic while DMA may be armed. Convert those
+        // words to an exact byte stream before handing them to the PIO.
+        const uint32_t* words = (const uint32_t*)_inst->buffer;
+        for (size_t word = 0, out = 0; out < _inst->bufferSize; ++word)
+        {
+            const uint32_t value = words[word];
+            _inst->transferBuffer[out++] = value & 0xFF000000U;
+            _inst->transferBuffer[out++] = (value & 0x00FF0000U) << 8;
+            _inst->transferBuffer[out++] = (value & 0x0000FF00U) << 16;
+            _inst->transferBuffer[out++] = (value & 0x000000FFU) << 24;
+        }
+    }
+    else
+    {
+        for (size_t i = 0; i < _inst->bufferSize; ++i)
+            _inst->transferBuffer[i] = (uint32_t)_inst->buffer[i] << 24;
+    }
+
+    __dmb();
 }
 
 /**
@@ -946,16 +1003,14 @@ bool PIO_NeoPixel_SPI::show()
  * Note: BLOCKING - function returns only after ALL data sent.
  * Use DMA for non-blocking transfers in production.
  */
-void PIO_NeoPixel_SPI::sendDataPIO()
+bool PIO_NeoPixel_SPI::sendDataPIO()
 {
-    if (!_inst) return;
+    if (!_inst) return false;
 
     // CRITICAL: Memory barrier to ensure all buffer writes are visible to PIO!
     __dmb(); // Data Memory Barrier
 
-    // Use stored word count (already calculated during allocation)
-    // CRITICAL: Must use bufferWordCount, NOT bufferSize/4 (can cause rounding errors)
-    uint32_t* wordBuffer = (uint32_t*)_inst->buffer;
+    const uint32_t* wordBuffer = _inst->transferBuffer;
 
     // Send data as 32-bit words to PIO TX FIFO. Use a bounded wait for FIFO space
     // instead of pio_sm_put_blocking(): if the SM ever wedges (FIFO never drains) an
@@ -969,19 +1024,23 @@ void PIO_NeoPixel_SPI::sendDataPIO()
             if ((uint32_t)(micros() - startUs) > 20000) // 20 ms >> any real FIFO wait
             {
                 if (_inst->csPin >= 0) digitalWrite(_inst->csPin, HIGH);
-                _inst->busy = false;
-                return; // abandon the frame; next show() re-arms
+                return false; // abandon the frame; next show() re-arms
             }
         }
         pio_sm_put(_inst->pio, _inst->sm, wordBuffer[i]);
     }
 
-    if (_inst->csPin >= 0)
+    const uint32_t drainStart = micros();
+    while (!pio_sm_is_tx_fifo_empty(_inst->pio, _inst->sm))
     {
-        digitalWrite(_inst->csPin, HIGH); // CS inactive
+        if ((uint32_t)(micros() - drainStart) > 20000) return false;
     }
+    // FIFO empty means the final byte is in the output shifter; wait for it.
+    delayMicroseconds((8000000U + _inst->spiFrequency - 1U) / _inst->spiFrequency + 1U);
 
+    if (_inst->csPin >= 0) digitalWrite(_inst->csPin, HIGH);
     _inst->busy = false;
+    return true;
 }
 
 /**
@@ -996,13 +1055,12 @@ void PIO_NeoPixel_SPI::sendDataPIO()
  * 3. DREQ pacing from PIO prevents FIFO overflow
  * 4. IRQ fires on completion → onDmaComplete() clears busy flag
  */
-void PIO_NeoPixel_SPI::sendDataDMA()
+bool PIO_NeoPixel_SPI::sendDataDMA()
 {
-    if (!_inst) return; // can't clear busy on a null instance — must check first
+    if (!_inst) return false;
     if (_inst->dmaChannel < 0)
     {
-        _inst->busy = false;
-        return;
+        return false;
     }
 
     // CRITICAL: Memory barrier to ensure all buffer writes are visible to DMA!
@@ -1013,21 +1071,24 @@ void PIO_NeoPixel_SPI::sendDataDMA()
     // trans_count register is 0 (NORMAL mode, no auto-reload), so re-triggering with only
     // set_read_addr would transfer 0 words -> strip frozen on frame 1. Mirror the Serial driver,
     // which documents+fixes the same hazard: set count, then start.
-    dma_channel_set_read_addr(_inst->dmaChannel, _inst->buffer, false);
+    dma_channel_set_read_addr(_inst->dmaChannel, _inst->transferBuffer, false);
     dma_channel_set_trans_count(_inst->dmaChannel, _inst->bufferWordCount, false);
     dma_channel_start(_inst->dmaChannel);
+    return true;
 }
 
 /**
  * DMA completion callback
  *
  * Called by unified DMA IRQ handler (pio_dma_shared.h) when transfer completes.
- * Clears busy flag to allow next show() call.
+ * DMA completion only says that the FIFO is full. isBusy() waits for the
+ * FIFO and output shifter to drain before allowing the next frame.
  */
 void PIO_NeoPixel_SPI::onDmaComplete()
 {
     if (!_inst) return;
-    _inst->busy = false; // Transfer complete, ready for next frame
+    _inst->dmaFinished = true;
+    _inst->fifoDrainedAtUs = 0;
 }
 
 /**
@@ -1035,7 +1096,31 @@ void PIO_NeoPixel_SPI::onDmaComplete()
  */
 bool PIO_NeoPixel_SPI::isBusy()
 {
-    return _inst ? _inst->busy : false;
+    if (!_inst || !_inst->busy) return false;
+    if (!_inst->dmaFinished) return true;
+    if (!pio_sm_is_tx_fifo_empty(_inst->pio, _inst->sm)) return true;
+
+    const uint32_t now = micros();
+    if (_inst->fifoDrainedAtUs == 0)
+    {
+        _inst->fifoDrainedAtUs = now;
+        return true;
+    }
+
+    const uint32_t finalByteUs = (8000000U + _inst->spiFrequency - 1U) / _inst->spiFrequency + 1U;
+    if ((uint32_t)(now - _inst->fifoDrainedAtUs) < finalByteUs) return true;
+
+    _inst->busy = false;
+    if (_inst->csPin >= 0) digitalWrite(_inst->csPin, HIGH);
+    return false;
+}
+
+uint32_t PIO_NeoPixel_SPI::getTransferTimeoutUs() const
+{
+    if (!_inst || _inst->spiFrequency == 0) return 1000000U;
+    const uint64_t wireTimeUs = ((uint64_t)_inst->bufferSize * 8000000ULL + _inst->spiFrequency - 1U) /
+                                _inst->spiFrequency;
+    return (uint32_t)((wireTimeUs + 2000U > 1000000U) ? 1000000U : wireTimeUs + 2000U);
 }
 
 /**

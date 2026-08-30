@@ -66,9 +66,10 @@ struct pio_neopixel_spi_inst
     // Example: brightness=31 -> 0xFF(11111111) (full brightness), brightness=0 -> 0xE0(11100000) (off)
     bool hasGlobalBrightness; // APA102/SK9822 have global brightness
 
-    uint8_t* buffer;        // LED data buffer
-    size_t bufferSize;      // Buffer size in bytes (logical)
-    size_t bufferWordCount; // Buffer size in 32-bit words (actual allocation)
+    uint8_t* buffer;          // Canonical on-wire byte stream
+    uint32_t* transferBuffer; // One PIO FIFO word per byte, MSB aligned
+    size_t bufferSize;        // Buffer size in bytes (logical/on-wire)
+    size_t bufferWordCount;   // Number of FIFO words (one per wire byte)
 
     uint32_t spiFrequency; // SPI frequency (Hz)
     float clkdiv;          // Actual clock divider (set during init)
@@ -93,6 +94,8 @@ struct pio_neopixel_spi_inst
     bool initialized;    // Initialization state
     volatile bool busy;  // Transfer in progress
     volatile bool dirty; // Buffer has changed since last show() (prevents flicker from redundant sends)
+    volatile bool dmaFinished; // DMA filled the FIFO; the output shifter may still be active
+    uint32_t fifoDrainedAtUs;
 };
 typedef struct pio_neopixel_spi_inst pio_neopixel_spi_inst_t;
 
@@ -133,6 +136,7 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
     }
     bool show() override;
     inline bool isBusy() override;
+    uint32_t getTransferTimeoutUs() const override;
     void clear() override;
     uint16_t getLedCount() const override { return _inst ? _inst->ledCount : 0; }
     LedProtocol getProtocol() const override { return _inst ? _inst->protocol : LedProtocol::WS2801; }
@@ -242,8 +246,9 @@ class PIO_NeoPixel_SPI : public IHardwareDriver
 
     bool initPIO();
     bool initDMA();
-    void sendDataPIO();
-    void sendDataDMA();
+    bool sendDataPIO();
+    bool sendDataDMA();
+    void prepareTransferBuffer();
     void sendStartFrame();
     void sendEndFrame();
     static void dmaIRQHandler();
