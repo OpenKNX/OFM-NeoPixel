@@ -13,7 +13,21 @@
 
     #define RMT_LED_STRIP_RESOLUTION_HZ 40000000 // 40 MHz = 25 ns per tick (matches NeoPixelBus)
     /// Duration of one RMT tick in ns, derived from the resolution above.
-    static constexpr uint32_t kRmtTickNs = 1000000000UL / RMT_LED_STRIP_RESOLUTION_HZ;
+static constexpr uint32_t kRmtTickNs = 1000000000UL / RMT_LED_STRIP_RESOLUTION_HZ;
+
+static constexpr uint8_t sm16825SettingsBytes(LedProtocol protocol)
+{
+    return protocol == LedProtocol::SM16825 ? 4 : 0;
+}
+
+static void writeSm16825Settings(rmt_neopixel_serial_inst_t* inst)
+{
+    if (!inst || !inst->buffer || inst->protocol != LedProtocol::SM16825) return;
+    const size_t offset = (size_t)inst->prefixBytes + (size_t)inst->ledCount * inst->bytesPerLed;
+    if (offset + 4 > inst->bufferSize) return;
+    for (uint8_t i = 0; i < 4; ++i)
+        inst->buffer[offset + i] = ProtocolHelper::sm16825FrameSettingsByte(i);
+}
 
 // Static instance mapping
 RMT_NeoPixel_Serial* RMT_NeoPixel_Serial::_instances[8] = {nullptr};
@@ -55,9 +69,9 @@ static const rmt_symbol_word_t ws2812_reset = {
 };
 
 /**
- * WS2811 Timing for RMT (10MHz Resolution)
+ * WS2811_400KHZ Timing for RMT (10MHz Resolution)
  *
- * WS2811 operates at 400kHz (much slower than WS2812):
+ * The explicit legacy WS2811_400KHZ profile operates at 400kHz (much slower than WS2812):
  * - 0-Bit: 0.5µs HIGH, 2.0µs LOW
  * - 1-Bit: 1.2µs HIGH, 1.3µs LOW
  * - Reset: >50µs LOW
@@ -186,7 +200,8 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
     // bit complement of the first.
     _inst->prefixBytes = (protocol == LedProtocol::TM1814) ? 8 : 0;
 
-    _inst->bufferSize = (size_t)_inst->prefixBytes + (size_t)ledCount * _inst->bytesPerLed;
+    _inst->bufferSize = (size_t)_inst->prefixBytes + (size_t)ledCount * _inst->bytesPerLed +
+                        sm16825SettingsBytes(protocol);
     _inst->buffer = (uint8_t*)malloc(_inst->bufferSize);
     if (_inst->buffer)
     {
@@ -202,6 +217,7 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
                 _inst->buffer[4 + i] = (uint8_t)~level;
             }
         }
+        writeSm16825Settings(_inst);
     }
 }
 
@@ -479,14 +495,16 @@ void RMT_NeoPixel_Serial::clear()
 {
     if (!_inst || !_inst->buffer) return;
     memset(_inst->buffer, 0, _inst->bufferSize);
+    writeSm16825Settings(_inst);
 }
 
 DriverCapabilities RMT_NeoPixel_Serial::getCapabilities() const
 {
     DriverCapabilities caps;
-    caps.supportsRGBW = (_inst && _inst->bytesPerLed == 4);
+    caps.supportsRGBW = (_inst && _inst->bytesPerLed >= 4);
+    caps.supportsRGBCCT = (_inst && ProtocolHelper::isRGBCCT(_inst->protocol));
     caps.supportsDMA = true;
-    caps.supportsAsync = false; // show() is blocking (rmt_tx_wait_all_done)
+    caps.supportsAsync = true; // show() queues; isBusy() polls completion and latch time
     caps.maxFrequency = 400;    // ~400Hz update rate
     caps.maxLeds = 2000;
     return caps;

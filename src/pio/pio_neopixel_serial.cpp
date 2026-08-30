@@ -56,6 +56,21 @@ static const uint16_t ws2812b_program_instructions[] = {
 /// TM1814 default constant current in 0.1 mA steps (18.0 mA, mid of the 6.5-38 mA range).
 static constexpr uint16_t kTm1814DefaultCurrent10 = 180;
 
+static constexpr uint8_t sm16825SettingsBytes(LedProtocol protocol)
+{
+    return protocol == LedProtocol::SM16825 ? 4 : 0;
+}
+
+static void writeSm16825Settings(pio_neopixel_serial_inst_t* inst)
+{
+    if (!inst || !inst->buffer || inst->protocol != LedProtocol::SM16825) return;
+    const size_t offset = (size_t)inst->prefixBytes + (size_t)inst->ledCount * inst->bytesPerLed;
+    if (offset + 4 > inst->bufferSize) return;
+    // SM16825 frame settings: normal action, all five current gains at their default.
+    for (uint8_t i = 0; i < 4; ++i)
+        inst->buffer[offset + i] = ProtocolHelper::sm16825FrameSettingsByte(i);
+}
+
 static const pio_program_t neopixel_serial_program = {
     .instructions = ws2812b_program_instructions,
     .length = 4,
@@ -65,7 +80,7 @@ static const pio_program_t neopixel_serial_program = {
 /**
  * Initialize NeoPixel PIO program
  *
- * Works for all protocols (WS2812B @ 800kHz, WS2811 @ 400kHz, etc.)
+ * Works for all protocols (WS2812B/WS2811 @ 800kHz, WS2811_400KHZ @ 400kHz, etc.)
  * Timing is controlled via clock divider parameter
  *
  * @param fifoWordBits For RGBCCT: autopull threshold (8/16/32) matching DMA transfer size
@@ -225,7 +240,8 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     // bit complement of the first (datasheet section "One frame of complete data structure").
     _inst->prefixBytes = (protocol == LedProtocol::TM1814) ? 8 : 0;
 
-    _inst->bufferSize = (size_t)_inst->prefixBytes + (size_t)ledCount * _inst->bytesPerLed;
+    _inst->bufferSize = (size_t)_inst->prefixBytes + (size_t)ledCount * _inst->bytesPerLed +
+                        sm16825SettingsBytes(protocol);
     _inst->buffer = new uint8_t[_inst->bufferSize];
 
     if (_inst->buffer)
@@ -243,6 +259,7 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
                 _inst->buffer[4 + i] = (uint8_t)~level;
             }
         }
+        writeSm16825Settings(_inst);
     }
 
     // DMA buffer (if needed)
@@ -264,36 +281,16 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
         // path below indexes by LED and would drop the last LEDs of a prefixed frame.
         if (_inst->bytesPerLed >= 5 || _inst->prefixBytes > 0)
         {
-            // RGBCCT: direct buffer DMA with bswap
-            //
-            // Send byte buffer directly via DMA - no separate packed buffer needed!
-            // bswap=true handles byte reordering on-the-fly
-            //
-            // CRITICAL: Always use 32-bit transfers!
-            // With 8-bit or 16-bit DMA transfers, the PIO OSR loads 32 bits but only
-            // the transferred bits are valid. Since we shift MSB-first, the undefined
-            // upper bits would be output as garbage (could be all 1s = white flash!)
-            //
-            // Solution: Pad buffer to 32-bit alignment and always use 32-bit transfers
-
-            size_t bufSize = _inst->bufferSize;
-            // Round up to next multiple of 4
-            size_t paddedSize = (bufSize + 3) & ~3;
-            _inst->fifoWordBits = 32;
-            _inst->dmaBufferSize = paddedSize / 4; // Transfer count in 32-bit words
-
-            // NO separate DMA buffer for RGBCCT - we use bufferSending instead
-            _inst->dmaBuffer = nullptr;
-
-            // RGBCCT: Allocate PADDED buffer for double-buffering
-            // CRITICAL: Must be 4-byte aligned for DMA with bswap!
-            // Extra bytes are zero-padded (ignored by LEDs)
-            // Use aligned_alloc for guaranteed 4-byte alignment
-            _inst->bufferSending = static_cast<uint8_t*>(aligned_alloc(4, paddedSize));
-            if (_inst->bufferSending)
+            // A wide or prefixed frame must be emitted byte-by-byte. 8-bit autopull
+            // prevents alignment padding from becoming LED data (notably SM16825's trailer).
+            _inst->fifoWordBits = 8;
+            _inst->dmaBufferSize = _inst->bufferSize;
+            _inst->dmaBuffer = new uint32_t[_inst->dmaBufferSize];
+            if (_inst->dmaBuffer)
             {
-                memset(_inst->bufferSending, 0, paddedSize); // Zero-pad including extra bytes
+                memset(_inst->dmaBuffer, 0, _inst->dmaBufferSize * sizeof(uint32_t));
             }
+            _inst->bufferSending = nullptr;
         }
         else
         {
@@ -585,7 +582,7 @@ bool PIO_NeoPixel_Serial::init()
  *
  * Examples:
  * - WS2812B @ 800kHz → 125MHz / (800kHz * 10) = 15.625
- * - WS2811 @ 400kHz → 125MHz / (400kHz * 10) = 31.25
+ * - WS2811_400KHZ @ 400kHz → 125MHz / (400kHz * 10) = 31.25
  * - WS2805 @ 800kHz → 125MHz / (800kHz * 10) = 15.625 (uses WS2812B timing)
  *
  * @return true if PIO configured, false on error
@@ -595,7 +592,7 @@ bool PIO_NeoPixel_Serial::initPIO()
     if (!_inst) return false;
 
     bool rgbw = (_inst->bytesPerLed == 4);
-    bool rgbcct = (_inst->bytesPerLed >= 5 || _inst->prefixBytes > 0); // wide or prefixed frame -> 32-bit autopull
+    bool rgbcct = (_inst->bytesPerLed >= 5 || _inst->prefixBytes > 0); // byte stream -> 8-bit autopull
 
     // Resolve the protocol timing profile. The bit ratio comes from the chip, not
     // from a bitrate: two chips can share a bitrate and need different pulse widths.
@@ -787,13 +784,11 @@ bool PIO_NeoPixel_Serial::initPIO()
  */
 bool PIO_NeoPixel_Serial::initDMA()
 {
-    // For RGBCCT: use byte buffer directly with bswap
-    // For RGB/RGBW: Use packed DMA buffer (bswap=false)
+    // Wide and prefixed frames use one MSB-aligned DMA word per byte.
     bool isRGBCCT = (_inst->bytesPerLed >= 5 || _inst->prefixBytes > 0);
 
     if (!_inst) return false;
-    if (!isRGBCCT && !_inst->dmaBuffer) return false; // RGB/RGBW needs DMA buffer
-    if (isRGBCCT && !_inst->buffer) return false;     // RGBCCT needs byte buffer (sent directly)
+    if (!_inst->dmaBuffer) return false;
 
     // Claim DMA channel
     int channel = dma_claim_unused_channel(false);
@@ -815,30 +810,14 @@ bool PIO_NeoPixel_Serial::initDMA()
 
     if (isRGBCCT)
     {
-        // RGBCCT: direct buffer DMA with bswap
-        // Send byte buffer directly - no separate packed buffer!
-        //
-        // bswap=true for MSB-first transmission:
-        // - Memory: [A,B,C,D] at addresses 0,1,2,3
-        // - Normal 32-bit read (little-endian): 0xDDCCBBAA
-        // - With bswap: 0xAABBCCDD (byte A at MSB position)
-        // - PIO shifts MSB first: outputs bytes in order A,B,C,D
-        //
-        // Always use 32-bit transfers to avoid OSR undefined bit issues
-
-        if (!_inst->buffer) return false;
-
-        // Always 32-bit transfers for RGBCCT (buffer is padded to 32-bit alignment)
+        // Each DMA word contains exactly one serial byte in bits 31..24.
         channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
-
-        // bswap=true: DMA reorders bytes for MSB-first transmission
-        channel_config_set_bswap(&c, true);
-
-        srcBuffer = _inst->buffer;            // Will be replaced with bufferSending in sendDataDMA
-        transferCount = _inst->dmaBufferSize; // Transfer count in 32-bit words (padded)
+        channel_config_set_bswap(&c, false);
+        srcBuffer = _inst->dmaBuffer;
+        transferCount = _inst->dmaBufferSize;
 
     #ifdef OPENKNX_DEBUG
-        openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "RGBCCT DMA: 32-bit bswap=true, count=%u (padded from %u bytes)",
+        openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "RGBCCT DMA: exact byte stream, count=%u bytes",
                                               (uint32_t)transferCount, (uint32_t)_inst->bufferSize);
     #endif
     }
@@ -1154,7 +1133,7 @@ void PIO_NeoPixel_Serial::sendDataPIO()
     uint32_t numTransfers = _inst->bufferSize / bytesPerTransfer;
     uint8_t* buf = _inst->buffer;
 
-    if (bytesPerTransfer == 3)
+    if (bytesPerTransfer == 3 && _inst->prefixBytes == 0)
     {
         // 3-byte buffer: Pack REVERSED as Byte2<<24 | Byte1<<16 | Byte0<<8
         // This is different from packDataToDMABuffer because direct PIO writes
@@ -1168,7 +1147,7 @@ void PIO_NeoPixel_Serial::sendDataPIO()
             if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
         }
     }
-    else if (bytesPerTransfer == 4)
+    else if (bytesPerTransfer == 4 && _inst->prefixBytes == 0)
     {
         // 4-byte buffer (RGBW): Pack REVERSED
         for (uint32_t i = 0; i < numTransfers; i++)
@@ -1181,36 +1160,12 @@ void PIO_NeoPixel_Serial::sendDataPIO()
             if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
         }
     }
-    else if (bytesPerTransfer == 5)
+    else
     {
-        // 5-byte buffer (RGBCCT): streaming approach
-        // Use 32-bit autopull, pack bytes in MSB-first order (same as bswap does for DMA)
-        // Data flows as continuous bit stream across LED boundaries
-        // Pack 4 bytes per word, handle all bytes as continuous stream
-        size_t totalBytes = _inst->bufferSize;
-        size_t fullWords = totalBytes / 4;
-        size_t remainingBytes = totalBytes % 4;
-
-        // Send full 32-bit words
-        for (size_t w = 0; w < fullWords; w++)
+        // Wide frames use 8-bit autopull; one FIFO word is one exact serial byte.
+        for (size_t i = 0; i < _inst->bufferSize; ++i)
         {
-            size_t idx = w * 4;
-            uint32_t value = ((uint32_t)buf[idx] << 24) | // Byte at MSB
-                             ((uint32_t)buf[idx + 1] << 16) |
-                             ((uint32_t)buf[idx + 2] << 8) |
-                             (uint32_t)buf[idx + 3];
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
-        }
-
-        // Send remaining bytes (1-3 bytes) padded to 32-bit
-        if (remainingBytes > 0)
-        {
-            size_t idx = fullWords * 4;
-            uint32_t value = 0;
-            if (remainingBytes >= 1) value |= ((uint32_t)buf[idx] << 24);
-            if (remainingBytes >= 2) value |= ((uint32_t)buf[idx + 1] << 16);
-            if (remainingBytes >= 3) value |= ((uint32_t)buf[idx + 2] << 8);
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, (uint32_t)buf[i] << 24, kPutTimeoutUs)) return;
         }
     }
 }
@@ -1233,14 +1188,9 @@ void PIO_NeoPixel_Serial::sendDataDMA()
 
     if (isRGBCCT)
     {
-        // RGBCCT: Use double-buffering to prevent DMA reading corrupted data
-        // Copy current buffer to sending buffer, then DMA from sending buffer
-        // user can safely modify buffer while DMA is sending the copy
-        if (!_inst->buffer || !_inst->bufferSending) return;
-
-        // Copy editing buffer to sending buffer
-        memcpy(_inst->bufferSending, _inst->buffer, _inst->bufferSize);
-        srcBuffer = _inst->bufferSending;
+        if (!_inst->buffer || !_inst->dmaBuffer) return;
+        packDataToDMABuffer();
+        srcBuffer = _inst->dmaBuffer;
     }
     else
     {
@@ -1292,7 +1242,7 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
     uint32_t* dst = _inst->dmaBuffer;
     uint32_t bytesPerLed = _inst->bytesPerLed;
 
-    if (bytesPerLed == 3)
+    if (bytesPerLed == 3 && _inst->prefixBytes == 0)
     {
         // 3-byte buffer: Pack for MSB-first transmission (PIO shifts left, sends bit 31 first!)
         // Buffer layout: [Byte0, Byte1, Byte2] → Pack as Byte0<<24 | Byte1<<16 | Byte2<<8
@@ -1304,7 +1254,7 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
                      ((uint32_t)src[idx + 2] << 8);   // Byte2 → bits 15-8
         }
     }
-    else if (bytesPerLed == 4)
+    else if (bytesPerLed == 4 && _inst->prefixBytes == 0)
     {
         // 4-byte buffer (RGBW): Pack for MSB-first transmission (PIO shifts left, sends bit 31 first!)
         // Buffer layout: [Byte0, Byte1, Byte2, Byte3] → Pack as Byte0<<24 | Byte1<<16 | Byte2<<8 | Byte3<<0
@@ -1317,8 +1267,12 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
                      (uint32_t)src[idx + 3];          // Byte3 → bits 7-0 (sent last!)
         }
     }
-    // 5 bytes and wider are not packed here: they stream from the byte buffer.
-    // Uses raw buffer sent directly with bswap=true
+    else
+    {
+        // One exact byte per FIFO word for RGBCCT, SM16825 and TM1814's prefix.
+        for (size_t i = 0; i < _inst->bufferSize; ++i)
+            dst[i] = (uint32_t)src[i] << 24;
+    }
 }
 
 /**
@@ -1397,6 +1351,7 @@ void PIO_NeoPixel_Serial::clear()
     if (_inst->busy) return;
 
     memset(_inst->buffer, 0, _inst->bufferSize);
+    writeSm16825Settings(_inst);
 }
 
 /**
