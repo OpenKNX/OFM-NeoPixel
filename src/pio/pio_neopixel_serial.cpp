@@ -564,6 +564,9 @@ bool PIO_NeoPixel_Serial::init()
     }
 
     _inst->initialized = true;
+    _inst->framePending = false;
+    _inst->busy = false;
+    _inst->waitingForReset = false;
     return true;
 }
 
@@ -853,7 +856,8 @@ bool PIO_NeoPixel_Serial::initDMA()
     static bool irq0_initialized = false;
     if (!irq0_initialized)
     {
-        irq_set_exclusive_handler(DMA_IRQ_0, unifiedDmaIRQHandler);
+        irq_add_shared_handler(DMA_IRQ_0, unifiedDmaIRQHandler,
+                               PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
         irq_set_enabled(DMA_IRQ_0, true);
         irq0_initialized = true;
     #ifdef OPENKNX_DEBUG
@@ -1021,18 +1025,18 @@ bool PIO_NeoPixel_Serial::show()
 
     // Wait for previous transfer to complete including latch time.
     // busy-wait ensures proper reset pulse; isBusy() checks DMA in progress +
-    // FIFO drain time + reset time. A normal frame finishes in well under 1 ms.
+    // FIFO drain, final OSR word, and reset time.
     //
     // SAFETY: bound the wait with a timeout. If a DMA/PIO transfer ever wedges
     // (channel stuck busy / SM stalled), an unbounded spin here would block the
     // main loop, starve openknx.watchdog.loop() and trigger a 16 s watchdog
     // reboot. Instead we force-recover and log, so the device keeps running and
     // the wedge becomes diagnosable (USB stays connected because we don't reboot).
-    static constexpr uint32_t kShowWaitTimeoutUs = 50000; // 50 ms (>> any real frame)
+    const uint32_t showWaitTimeoutUs = getTransferTimeoutUs();
     const uint32_t waitStartUs = micros();
     while (isBusy())
     {
-        if ((uint32_t)(micros() - waitStartUs) > kShowWaitTimeoutUs)
+        if ((uint32_t)(micros() - waitStartUs) > showWaitTimeoutUs)
         {
             // Re-arm the SM after a wedge: aborting DMA alone leaves stale words in the
             // TX FIFO, which bit-shifts every later frame until a reboot re-runs initPIO().
@@ -1050,6 +1054,7 @@ bool PIO_NeoPixel_Serial::show()
             }
             _inst->busy = false;
             _inst->waitingForReset = false;
+            _inst->framePending = false;
 
             // Throttle the log (shared across strips) to ~1/s so a persistent
             // wedge doesn't flood the console/bus.
@@ -1061,7 +1066,7 @@ bool PIO_NeoPixel_Serial::show()
                 openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial",
                     "show() WEDGE recovered: GPIO%u SM%u DMA%d stuck >%lums (no reboot)",
                     _inst->pin, _inst->sm, _inst->dmaChannel,
-                    (unsigned long)(kShowWaitTimeoutUs / 1000));
+                    (unsigned long)((showWaitTimeoutUs + 999U) / 1000U));
             }
             break;
         }
@@ -1070,6 +1075,7 @@ bool PIO_NeoPixel_Serial::show()
     // Reset state for new transfer
     _inst->busy = true;
     _inst->waitingForReset = false;
+    _inst->framePending = true;
 
     if (_inst->useDMA && _inst->dmaChannel >= 0)
     {
@@ -1077,8 +1083,30 @@ bool PIO_NeoPixel_Serial::show()
     }
     else
     {
-        sendDataPIO();
-        _inst->busy = false; // PIO mode is blocking
+        if (!sendDataPIO())
+        {
+            _inst->busy = false;
+            _inst->waitingForReset = false;
+            _inst->framePending = false;
+            return false;
+        }
+
+        // FIFO writes only block while the FIFO is full. Keep the frame busy
+        // until FIFO, final OSR word and latch have all completed.
+        const uint32_t completionStartUs = micros();
+        const uint32_t completionTimeoutUs = getTransferTimeoutUs();
+        while (isBusy())
+        {
+            if ((uint32_t)(micros() - completionStartUs) > completionTimeoutUs)
+            {
+                pio_sm_clear_fifos(_inst->pio, _inst->sm);
+                _inst->busy = false;
+                _inst->waitingForReset = false;
+                _inst->framePending = false;
+                return false;
+            }
+        }
+        _inst->busy = false;
     }
 
     return true;
@@ -1088,15 +1116,8 @@ bool PIO_NeoPixel_Serial::show()
  * @brief Sends data directly via PIO
  *
  * Transfers color data blocking via PIO FIFO.
- * Data is packed into 32-bit words:
- *
- * RGB format (3 bytes per LED):
- * - Pack as: Byte2<<24 | Byte1<<16 | Byte0<<8
- * - LSB (Byte0) sent first
- *
- * RGBW format (4 bytes per LED):
- * - Pack as: Byte3<<24 | Byte2<<16 | Byte1<<8 | Byte0
- * - LSB (Byte0) sent first
+ * Data is packed identically to the DMA path. PIO uses shift-left/MSB-first
+ * output, therefore Byte0 belongs in bits 31..24.
  *
  * NOTE: Buffer order is determined by ColorOrder setting (via rgbToBuffer).
  *       This function is ColorOrder-agnostic and just sends bytes in buffer order.
@@ -1116,15 +1137,14 @@ static inline bool neoSerialPutGuarded(PIO pio, uint sm, uint32_t value, uint32_
     return true;
 }
 
-void PIO_NeoPixel_Serial::sendDataPIO()
+bool PIO_NeoPixel_Serial::sendDataPIO()
 {
-    if (!_inst) return;
+    if (!_inst) return false;
 
-    static constexpr uint32_t kPutTimeoutUs = 20000; // 20 ms >> any real FIFO wait
+    const uint32_t putTimeoutUs = getTransferTimeoutUs();
 
     // Send data to PIO FIFO in 32-bit chunks
-    // PIO autopull LSB-first (shift_right=false means shift LEFT, output from LSB!)
-    // Pack REVERSED: Byte2<<24 | Byte1<<16 | Byte0<<8 so LSB (Byte0) is sent first!
+    // The PIO shift register emits MSB first (shift_right=false).
 
     // CRITICAL: Memory barrier to ensure all buffer writes are visible to PIO!
     __dmb(); // Data Memory Barrier
@@ -1135,29 +1155,27 @@ void PIO_NeoPixel_Serial::sendDataPIO()
 
     if (bytesPerTransfer == 3 && _inst->prefixBytes == 0)
     {
-        // 3-byte buffer: Pack REVERSED as Byte2<<24 | Byte1<<16 | Byte0<<8
-        // This is different from packDataToDMABuffer because direct PIO writes
-        // go through a different hardware path than DMA transfers
+        // RGB uses a 24-bit autopull threshold, therefore the low byte is not shifted.
         for (uint32_t i = 0; i < numTransfers; i++)
         {
             uint32_t idx = i * 3;
-            uint32_t value = ((uint32_t)buf[idx + 2] << 24) | // Byte2 → bits 31-24
+            uint32_t value = ((uint32_t)buf[idx] << 24) |     // Byte0 → bits 31-24
                              ((uint32_t)buf[idx + 1] << 16) | // Byte1 → bits 23-16
-                             ((uint32_t)buf[idx] << 8);       // Byte0 → bits 15-8 (sent 1st!)
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
+                             ((uint32_t)buf[idx + 2] << 8);   // Byte2 → bits 15-8
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, putTimeoutUs)) return false;
         }
     }
     else if (bytesPerTransfer == 4 && _inst->prefixBytes == 0)
     {
-        // 4-byte buffer (RGBW): Pack REVERSED
+        // 4-byte buffer (RGBW): identical to packDataToDMABuffer().
         for (uint32_t i = 0; i < numTransfers; i++)
         {
             uint32_t idx = i * 4;
-            uint32_t value = ((uint32_t)buf[idx + 3] << 24) | // Byte3 → bits 31-24
-                             ((uint32_t)buf[idx + 2] << 16) | // Byte2 → bits 23-16
-                             ((uint32_t)buf[idx + 1] << 8) |  // Byte1 → bits 15-8
-                             (uint32_t)buf[idx];              // Byte0 → bits 7-0 (sent 1st!)
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, kPutTimeoutUs)) return;
+            uint32_t value = ((uint32_t)buf[idx] << 24) |     // Byte0 → bits 31-24
+                             ((uint32_t)buf[idx + 1] << 16) | // Byte1 → bits 23-16
+                             ((uint32_t)buf[idx + 2] << 8) |  // Byte2 → bits 15-8
+                             (uint32_t)buf[idx + 3];          // Byte3 → bits 7-0
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, value, putTimeoutUs)) return false;
         }
     }
     else
@@ -1165,9 +1183,11 @@ void PIO_NeoPixel_Serial::sendDataPIO()
         // Wide frames use 8-bit autopull; one FIFO word is one exact serial byte.
         for (size_t i = 0; i < _inst->bufferSize; ++i)
         {
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, (uint32_t)buf[i] << 24, kPutTimeoutUs)) return;
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, (uint32_t)buf[i] << 24, putTimeoutUs)) return false;
         }
     }
+
+    return true;
 }
 
 /**
@@ -1292,8 +1312,12 @@ bool PIO_NeoPixel_Serial::isBusy()
 {
     if (!_inst) return false;
 
-    // No DMA = not busy (non-DMA mode is blocking)
-    if (!_inst->useDMA) return false;
+    // FIFO drain/latch timing belongs to a real started frame. Without this
+    // gate an idle strip re-armed the latch window after init/flash restore.
+    if (!_inst->framePending) return false;
+
+    // Direct PIO stays busy until the same drain/latch logic below completes.
+    if (!_inst->useDMA && !_inst->busy) return false;
 
     // Check hardware directly: Is DMA channel still active?
     // This is more reliable than relying on IRQ callback
@@ -1308,33 +1332,33 @@ bool PIO_NeoPixel_Serial::isBusy()
         return true; // FIFO still has data
     }
 
-    // FIFO just became empty - record the time if we haven't already
-    // Note: FIFO empty does NOT mean all bits sent! OSR might still have up to 32 bits
-    // being shifted out. We account for this in the timing calculation below.
+    // FIFO empty is not the end of the frame: the SM can still emit one final
+    // OSR word. Start the reset interval only after that word has drained.
     if (!_inst->waitingForReset)
     {
         _inst->fifoEmptyTime = micros();
         _inst->waitingForReset = true;
     }
 
-    // Calculate required wait time after FIFO empty:
-    // 1. OSR flush time: up to 32 bits at bit rate (worst case ~40µs at 800kHz)
-    // 2. Reset time: protocol-specific latch pulse (300µs for WS2805/WS2812B)
-    //
-    // OSR flush time = 32 / bitrate = 32 / 800000 = ~40µs
-    // We add a generous margin and include it in the reset time (already 300µs)
-    // so we don't need separate calculation.
-    //
-    // Total wait = resetTimeUs (which is already longer than spec for safety)
+    uint32_t finalWordBits = _inst->fifoWordBits;
+    if (_inst->bytesPerLed == 3) finalWordBits = 24;
+    else if (_inst->bytesPerLed == 4) finalWordBits = 32;
+    if (finalWordBits == 0) finalWordBits = 32;
 
-    uint32_t elapsed = micros() - _inst->fifoEmptyTime;
-    if (elapsed < _inst->resetTimeUs)
+    const float bitrate = _inst->actual_bitrate;
+    const uint32_t drainUs = bitrate > 0.0f
+                                 ? (uint32_t)(((float)finalWordBits * 1000000.0f) / bitrate + 0.999f) + 1U
+                                 : 0U;
+    const uint32_t requiredLowUs = drainUs + _inst->resetTimeUs;
+    const uint32_t elapsed = micros() - _inst->fifoEmptyTime;
+    if (elapsed < requiredLowUs)
     {
-        return true; // Still waiting for OSR flush + reset pulse
+        return true;
     }
 
     // Ready for next transfer
     _inst->waitingForReset = false;
+    _inst->framePending = false;
     return false;
 }
 
@@ -1352,6 +1376,24 @@ void PIO_NeoPixel_Serial::clear()
 
     memset(_inst->buffer, 0, _inst->bufferSize);
     writeSm16825Settings(_inst);
+}
+
+uint32_t PIO_NeoPixel_Serial::getTransferTimeoutUs() const
+{
+    if (!_inst || _inst->bufferSize == 0) return 1000000U;
+
+    const uint32_t bitrate = _inst->actual_bitrate > 1.0f
+                                 ? (uint32_t)_inst->actual_bitrate
+                                 : (1000000000UL / SerialTiming::bitPeriodNs(SerialTiming::profileFor(_inst->protocol)));
+    uint32_t finalWordBits = _inst->fifoWordBits;
+    if (_inst->bytesPerLed == 3) finalWordBits = 24;
+    else if (_inst->bytesPerLed == 4) finalWordBits = 32;
+    if (finalWordBits == 0) finalWordBits = 32;
+
+    const uint64_t payloadUs = ((uint64_t)_inst->bufferSize * 8000000ULL + bitrate - 1ULL) / bitrate;
+    const uint64_t finalWordUs = ((uint64_t)finalWordBits * 1000000ULL + bitrate - 1ULL) / bitrate;
+    const uint64_t deadlineUs = payloadUs + finalWordUs + _inst->resetTimeUs + 2000ULL;
+    return deadlineUs > 0xFFFFFFFFULL ? 0xFFFFFFFFU : (uint32_t)deadlineUs;
 }
 
 /**

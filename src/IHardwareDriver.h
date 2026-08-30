@@ -150,6 +150,11 @@ class IHardwareDriver
     virtual size_t getBufferSize() const = 0;
     virtual bool isInitialized() const = 0;
 
+    // Conservative deadline for one complete frame. Clockless drivers override
+    // this from their real payload length and realised bit rate so long, healthy
+    // strips are not mistaken for stalled transfers.
+    virtual uint32_t getTransferTimeoutUs() const { return 1000000U; }
+
     // Get driver implementation type (for runtime detection)
     virtual DriverImplementation getDriverType() const = 0;
 

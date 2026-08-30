@@ -510,15 +510,16 @@ bool PhysicalStrip::show()
 
 /**
  * @brief Wait until transfer is complete
- * @param timeoutMs Timeout in milliseconds (0 = unlimited)
+ * @param timeoutMs Timeout in milliseconds (0 = driver-derived deadline)
  * @return true when finished, false on timeout
  */
 bool PhysicalStrip::waitForTransfer(uint32_t timeoutMs)
 {
     if (!_driver || !isInitialized()) return false;
 
-    // 0 ("unlimited") → absolute ceiling, so a wedged transfer can't spin forever.
-    if (timeoutMs == 0) timeoutMs = 1000;
+    // Still bounded for a wedged peripheral, but long valid frames use their
+    // actual transfer time instead of an arbitrary global cap.
+    if (timeoutMs == 0) timeoutMs = getTransferTimeoutMs();
     uint32_t startTime = millis();
 
     while (_driver->isBusy())
@@ -531,6 +532,13 @@ bool PhysicalStrip::waitForTransfer(uint32_t timeoutMs)
     }
 
     return true;
+}
+
+uint32_t PhysicalStrip::getTransferTimeoutMs() const
+{
+    if (!_driver) return 1000U;
+    const uint32_t timeoutUs = _driver->getTransferTimeoutUs();
+    return (timeoutUs + 999U) / 1000U;
 }
 
 /**

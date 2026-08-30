@@ -72,6 +72,7 @@ struct pio_neopixel_serial_inst
     bool useDMA;        // Use DMA for transfers
     bool initialized;   // Initialization state
     volatile bool busy; // DMA transfer in progress
+    volatile bool framePending; // A frame is queued or still inside drain/latch time
 
     // Latch timing - prevents starting new transfer too early
     volatile uint32_t fifoEmptyTime; // micros() when FIFO became empty (for reset timing)
@@ -130,6 +131,7 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
     uint8_t* getBuffer() override { return _inst ? _inst->buffer : nullptr; }
     size_t getBufferSize() const override { return _inst ? _inst->bufferSize : 0; }
     bool isInitialized() const override { return _inst ? _inst->initialized : false; }
+    uint32_t getTransferTimeoutUs() const override;
     DriverImplementation getDriverType() const override { return DriverImplementation::PIO_SERIAL; }
 
     /**
@@ -233,7 +235,7 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
 
     bool initPIO();
     bool initDMA();
-    void sendDataPIO();
+    bool sendDataPIO();
     void sendDataDMA();
     void packDataToDMABuffer();
     static void dmaIRQHandler();

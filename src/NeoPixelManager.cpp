@@ -1268,11 +1268,12 @@ bool NeoPixelManager::showAll()
             _errorCount++;
         }
     }
-    // Phase 2: wait for every in-flight transfer to finish (100 ms cap per strip).
+    // Phase 2: wait for every in-flight transfer using its frame-derived
+    // deadline. A fixed cap rejects valid long strips.
     for (auto strip : _strips)
     {
         if (!strip || !strip->isInitialized()) continue;
-        if (!strip->waitForTransfer(100))
+        if (!strip->waitForTransfer(strip->getTransferTimeoutMs()))
         {
             allSuccess = false;
             _errorCount++;

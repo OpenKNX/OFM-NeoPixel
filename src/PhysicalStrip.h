@@ -60,6 +60,7 @@ class PhysicalStrip
      */
     uint32_t getLastShowMs() const { return _lastShowMs; }
     bool waitForTransfer(uint32_t timeoutMs = 0);
+    uint32_t getTransferTimeoutMs() const;
     bool isBusy() const;
 
     // ====================================================================

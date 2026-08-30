@@ -508,11 +508,21 @@ bool VirtualStrip::syncToPhysical()
         return true; // Nothing to synchronize
     }
 
+    bool allSuccess = true;
+
     // Send RGB data to each attached PhysicalStrip
     for (const auto& mapping : _physicalStrips)
     {
         PhysicalStrip* pstrip = mapping.physicalStrip;
         if (!pstrip) continue;
+
+        // Drivers reject buffer updates during an asynchronous frame. Finish
+        // that frame before modifying its physical buffer.
+        if (pstrip->isBusy() && !pstrip->waitForTransfer())
+        {
+            allSuccess = false;
+            continue;
+        }
 
         // Hardware brightness is now managed via PhysicalStripConfig
         // VirtualStrip's hardwareBrightness is ignored for SPI strips
@@ -588,8 +598,8 @@ bool VirtualStrip::syncToPhysical()
         }
     }
 
-    _dirty = false;
-    return true;
+    if (allSuccess) _dirty = false;
+    return allSuccess;
 }
 
 /**
