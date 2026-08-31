@@ -1255,16 +1255,15 @@ bool NeoPixelManager::showAll()
     std::vector<PhysicalStrip*> startedStrips;
     startedStrips.reserve(_strips.size());
 
-    // Push normal strips concurrently, but keep WS2805 transfers on an otherwise idle
-    // output path. WS2805 uses a 40-bit byte stream and proved stable when sent on its
-    // own, while overlapping it with the other PIO/SPI DMAs through a TXS0108E produced
-    // random colour/white flashes. Retain the parallel fast path for all other protocols.
+    // Start outputs without a shared-transport restriction concurrently. A strip's
+    // PhysicalTransportArbitration derives from its protocol and configured level
+    // shifter, so the manager does not contain a board-agnostic WS2805 workaround.
     for (auto strip : _strips)
     {
         // Skip strips that never came up: init() now keeps the device running on a partial
         // set, so an uninitialized strip here is expected, not an error to count.
         if (!strip || !strip->isInitialized()) continue;
-        if (strip->getProtocol() == LedProtocol::WS2805_RGBCCT) continue;
+        if (strip->getTransportArbitration() == PhysicalTransportArbitration::TXS0108E_EXCLUSIVE) continue;
         if (!strip->isDirty()) continue;
         if (!strip->show())
         {
@@ -1291,12 +1290,13 @@ bool NeoPixelManager::showAll()
         }
     }
 
-    // Send WS2805 strips sequentially after every other transfer has completed. This
-    // also prevents two WS2805 byte streams from competing with each other.
+    // A TXS0108E-exclusive frame owns the external translator/output path from its
+    // reset interval through its final latch. Run these frames sequentially only after
+    // all parallel transfers have completed, avoiding cross-channel edge interaction.
     for (auto strip : _strips)
     {
         if (!strip || !strip->isInitialized()) continue;
-        if (strip->getProtocol() != LedProtocol::WS2805_RGBCCT) continue;
+        if (strip->getTransportArbitration() != PhysicalTransportArbitration::TXS0108E_EXCLUSIVE) continue;
         if (!strip->isDirty()) continue;
 
         if (!strip->show())

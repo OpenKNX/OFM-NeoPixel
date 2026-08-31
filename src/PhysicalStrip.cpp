@@ -798,6 +798,21 @@ bool PhysicalStrip::isSerialStrip() const
     return _config && _config->isSerialConfig();
 }
 
+PhysicalTransportArbitration PhysicalStrip::getTransportArbitration() const
+{
+    // The WS2805 40-bit stream was verified stable on KNeoPiX only when its
+    // reset and data interval did not overlap other outputs passing through the
+    // board's TXS0108E. Keep this decision with the physical transport config,
+    // rather than hard-coding a protocol exception in NeoPixelManager.
+    if (_protocol != LedProtocol::WS2805_RGBCCT || !_config || !_config->isSerialConfig())
+        return PhysicalTransportArbitration::PARALLEL;
+
+    const auto* serialCfg = static_cast<const SerialStripConfig*>(_config);
+    return serialCfg->getLevelShifter() == LevelShifterType::TXS0108E
+               ? PhysicalTransportArbitration::TXS0108E_EXCLUSIVE
+               : PhysicalTransportArbitration::PARALLEL;
+}
+
 bool PhysicalStrip::applyConfig()
 {
     if (!_driver || !_config) return false;

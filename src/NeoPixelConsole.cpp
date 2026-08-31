@@ -5981,6 +5981,10 @@ bool NeoPixel::processPhysConfigInfoCommand(uint32_t stripId)
             default:                            lsName = "none";                                    break;
         }
         openknx.logger.logWithValues("Level Shifter:     %s", lsName);
+        const bool txsExclusive = strip->getTransportArbitration() ==
+                                  PhysicalTransportArbitration::TXS0108E_EXCLUSIVE;
+        openknx.logger.logWithValues("Transport:         %s",
+                                     txsExclusive ? "TXS0108E exclusive" : "parallel");
 
         openknx.logger.log("");
         if (eff.isCustom)

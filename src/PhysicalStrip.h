@@ -26,6 +26,17 @@
 #include <stdint.h>
 #include <vector>
 
+/**
+ * Scheduling policy for physical outputs that share board-level transport
+ * hardware. Additional policies can be added without teaching the manager
+ * about individual LED protocols.
+ */
+enum class PhysicalTransportArbitration : uint8_t
+{
+    PARALLEL,
+    TXS0108E_EXCLUSIVE
+};
+
 class PhysicalStrip
 {
   public:
@@ -186,6 +197,12 @@ class PhysicalStrip
      * @return true if Serial strip, false otherwise
      */
     bool isSerialStrip() const;
+
+    /**
+     * @brief Return the scheduling policy required by this strip and its
+     *        configured level shifter.
+     */
+    PhysicalTransportArbitration getTransportArbitration() const;
 
     /**
      * @brief Apply current config to driver
