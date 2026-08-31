@@ -687,7 +687,6 @@ bool PIO_NeoPixel_SPI::setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b)
     // Uses global hardware brightness (adjustable via setHardwareBrightness())
     // Brightness range: 16-30 (below 16 flickers, 31/0xFF breaks sync)
     rgbToBuffer(index, r, g, b);
-    _inst->dirty = true; // Mark buffer as changed
     return true;
 }
 
@@ -815,24 +814,21 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
                 break;
         }
 
-        // Write complete 32-bit word (atomic operation, DMA-safe)
-        // Result: [Brightness << 24 | Byte2 << 16 | Byte1 << 8 | Byte0]
+        // Write complete 32-bit word (atomic operation, DMA-safe), but only if
+        // the mapped hardware value changed. A dirty virtual strip can span
+        // multiple physical protocols; rewriting an unchanged APA102 mapping
+        // must not force another high-speed SPI transfer.
+        const uint32_t newWord = ((uint32_t)brightByte << 24) | (rgbValue & 0x00FFFFFF);
+        if (wordBuffer[wordIndex] == newWord) return;
 
         // CRITICAL: Memory barrier BEFORE write to ensure previous operations complete
         __dmb();
 
-        wordBuffer[wordIndex] = ((uint32_t)brightByte << 24) | (rgbValue & 0x00FFFFFF);
+        wordBuffer[wordIndex] = newWord;
 
-        // CRITICAL: Memory barrier AFTER write to ensure write is visible before busy check
+        // CRITICAL: Memory barrier AFTER write to make the updated frame visible to DMA
         __dmb();
-
-        // CRITICAL: Double-check busy flag AFTER write to detect race with show()
-        // If DMA started between our initial check and write, invalidate this write
-        if (_inst->busy)
-        {
-            // DMA started during our write - mark buffer dirty so next show() will resend
-            _inst->dirty = true;
-        }
+        _inst->dirty = true;
 
     #ifdef OPENKNX_NEOPIXEL_TRACE1
         if (index < 1)
@@ -855,15 +851,17 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
         const size_t off = dataOffset + (size_t)index * _inst->bytesPerLed;
         if (off + _inst->bytesPerLed > _inst->bufferSize) return;
 
-        __dmb();
+        uint8_t encoded[4] = {0};
+        uint8_t encodedBytes = 0;
 
         switch (_inst->protocol)
         {
             case LedProtocol::LPD8806:
                 // 7-bit channels, bit 7 marks a data byte.
-                _inst->buffer[off]     = (uint8_t)(0x80 | (ch[0] >> 1));
-                _inst->buffer[off + 1] = (uint8_t)(0x80 | (ch[1] >> 1));
-                _inst->buffer[off + 2] = (uint8_t)(0x80 | (ch[2] >> 1));
+                encoded[0] = (uint8_t)(0x80 | (ch[0] >> 1));
+                encoded[1] = (uint8_t)(0x80 | (ch[1] >> 1));
+                encoded[2] = (uint8_t)(0x80 | (ch[2] >> 1));
+                encodedBytes = 3;
                 break;
 
             case LedProtocol::LPD6803:
@@ -873,8 +871,9 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
                                               ((uint16_t)(ch[0] >> 3) << 10) |
                                               ((uint16_t)(ch[1] >> 3) << 5) |
                                               (uint16_t)(ch[2] >> 3));
-                _inst->buffer[off]     = (uint8_t)(w >> 8);
-                _inst->buffer[off + 1] = (uint8_t)(w & 0xFF);
+                encoded[0] = (uint8_t)(w >> 8);
+                encoded[1] = (uint8_t)(w & 0xFF);
+                encodedBytes = 2;
                 break;
             }
 
@@ -885,27 +884,32 @@ void PIO_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t
                                                ((uint8_t)(~ch[2] >> 6) & 0x03) << 4 |
                                                ((uint8_t)(~ch[1] >> 6) & 0x03) << 2 |
                                                ((uint8_t)(~ch[0] >> 6) & 0x03));
-                _inst->buffer[off]     = flag;
-                _inst->buffer[off + 1] = ch[2];
-                _inst->buffer[off + 2] = ch[1];
-                _inst->buffer[off + 3] = ch[0];
+                encoded[0] = flag;
+                encoded[1] = ch[2];
+                encoded[2] = ch[1];
+                encoded[3] = ch[0];
+                encodedBytes = 4;
                 break;
             }
 
             default: // WS2801 and anything else: raw bytes in colour order
-                _inst->buffer[off]     = ch[0];
-                _inst->buffer[off + 1] = ch[1];
-                _inst->buffer[off + 2] = ch[2];
+                encoded[0] = ch[0];
+                encoded[1] = ch[1];
+                encoded[2] = ch[2];
+                encodedBytes = 3;
                 break;
         }
 
-        __dmb();
+        bool changed = false;
+        for (uint8_t i = 0; i < encodedBytes; ++i)
+            changed = changed || (_inst->buffer[off + i] != encoded[i]);
+        if (!changed) return;
 
-        // Double-check busy flag to detect race with show()
-        if (_inst->busy)
-        {
-            _inst->dirty = true; // Mark for resend
-        }
+        __dmb();
+        for (uint8_t i = 0; i < encodedBytes; ++i)
+            _inst->buffer[off + i] = encoded[i];
+        __dmb();
+        _inst->dirty = true;
     }
 }
 
