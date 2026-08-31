@@ -16,7 +16,7 @@ FILEPATH: scripts/Tests/Test-SerialTiming.ps1
 
     Checks per protocol and system clock:
       - a solution exists and every segment fits the PIO delay field (1..16 cycles)
-      - the clock divider is an integer, so the state machine cannot dither
+      - the clock divider is an integer, except for WS2805's exact pinned fractional divider
       - realized T0H / T1H / bit period stay within tolerance of the profile
       - the RMT tick split gives the 0-bit and the 1-bit the same period
 
@@ -218,6 +218,40 @@ function Get-ProfilesFromHeader {
     return $profiles
 }
 
+function Get-Ws2805PioCadenceFromSource {
+    <#
+        .SYNOPSIS
+            Read the pinned WS2805 AUTO cadence from the RP2040/RP2350 backend.
+        .DESCRIPTION
+            WS2805 deliberately bypasses the generic integer solver so it can use an exact
+            fractional divider. Parsing the implementation keeps this regression check tied
+            to the values that are actually loaded into PIO instruction memory.
+    #>
+    param([string] $SourcePath)
+
+    if (-not (Test-Path $SourcePath)) {
+        throw "PIO source not found: $SourcePath - run this from the OFM-NeoPixel root."
+    }
+
+    $source = Get-Content $SourcePath -Raw -Encoding UTF8
+    $patterns = @{
+        CyclesPerBit = 'kWs2805PioCyclesPerBit\s*=\s*(\d+)'
+        Bitrate      = 'kWs2805PioBitrate\s*=\s*(\d+)'
+        A            = 'sol\.a\s*=\s*(\d+)'
+        B            = 'sol\.b\s*=\s*(\d+)'
+        C            = 'sol\.c\s*=\s*(\d+)'
+    }
+
+    $cadence = @{}
+    foreach ($name in $patterns.Keys) {
+        if ($source -notmatch $patterns[$name]) {
+            throw "Could not parse WS2805 $name from $SourcePath."
+        }
+        $cadence[$name] = [int]$Matches[1]
+    }
+    return $cadence
+}
+
 # Datasheet windows, one entry per protocol that we hold a datasheet for (doc/Datasheets).
 # These are NOT the profile - they are the independent limits the profile has to sit inside.
 # A protocol without an entry is only checked for solver feasibility, not against a datasheet.
@@ -226,7 +260,7 @@ $DatasheetLimits = @{
     'SK6812'         = @{ T0H = @(200, 400);  T0L = @(800, 9999); T1H = @(580, 1000); T1L = @(200, 9999); Cycle = @(1200, 9999); Res = 80; Sheet = 'SK6812.pdf' }
     'SK6805'         = @{ T0H = @(150, 450);  T0L = @(750, 1050); T1H = @(450, 750);  T1L = @(450, 750);  Cycle = @(650, 1850); Res = 80;  Sheet = 'SK6805.pdf' }
     'WS2814'         = @{ T0H = @(220, 380);  T0L = @(580, 1000); T1H = @(580, 1000); T1L = @(580, 1000); Cycle = @(1250, 9999); Res = 280; Sheet = 'WS2814B.pdf' }
-    'WS2805_RGBCCT'  = @{ T0H = @(220, 380);  T0L = @(580, 1600); T1H = @(580, 1600); T1L = @(220, 420);  Cycle = @(1250, 9999); Res = 280; Sheet = 'WS2805.pdf' }
+    'WS2805_RGBCCT'  = @{ T0H = @(220, 380);  T0L = @(580, 1000); T1H = @(580, 1000); T1L = @(220, 420);  Cycle = @(800, 1250);  Res = 280; Sheet = 'WS2805.pdf' }
     'TM1914'         = @{ T0H = @(310, 410);  T0L = @(0, 9999);   T1H = @(650, 1000); T1L = @(0, 9999);   Cycle = @(1250, 9999); Res = 0;   Sheet = 'TM1914.pdf' }
 }
 
@@ -259,7 +293,9 @@ function Test-AgainstDatasheet {
 }
 
 $HeaderPath = Join-Path $PSScriptRoot "..\..\src\SerialTimingProfile.h"
+$PioSourcePath = Join-Path $PSScriptRoot "..\..\src\pio\pio_neopixel_serial.cpp"
 $Profiles = Get-ProfilesFromHeader -HeaderPath $HeaderPath
+$Ws2805Pio = Get-Ws2805PioCadenceFromSource -SourcePath $PioSourcePath
 
 OpenKNX_ShowLogo "Serial timing solver test"
 
@@ -272,6 +308,11 @@ foreach ($sys in $SysClockHz) {
         'protocol', 'div', 'cyc', 'a', 'b', 'c', 'T0H want/got', 'T1H want/got', 'bit want/got', 'result')
 
     foreach ($p in $Profiles) {
+        if (($p.Name -split '/') -contains 'WS2805_RGBCCT') {
+            Write-Host ("  {0,-20} {1}" -f $p.Name, 'pinned AUTO cadence checked below') -ForegroundColor DarkGray
+            continue
+        }
+
         $checks++
         $sol = Resolve-PioTiming -Profile $p -SysClock $sys
         $wantBit = Get-BitPeriodNs -Profile $p
@@ -303,6 +344,39 @@ foreach ($sys in $SysClockHz) {
     }
     Write-Host ""
 }
+
+Write-Host "WS2805 pinned PIO AUTO cadence" -ForegroundColor Yellow
+foreach ($sys in $SysClockHz) {
+    $checks++
+    $a = $Ws2805Pio.A
+    $b = $Ws2805Pio.B
+    $c = $Ws2805Pio.C
+    $cycles = $Ws2805Pio.CyclesPerBit
+    $bitrate = $Ws2805Pio.Bitrate
+    $cycleNs = 1000000000.0 / ([double]$bitrate * $cycles)
+    $clkdiv = [double]$sys / ([double]$bitrate * $cycles)
+    $actual = @{
+        T0H = [int]([Math]::Round($a * $cycleNs))
+        T0L = [int]([Math]::Round(($b + $c) * $cycleNs))
+        T1H = [int]([Math]::Round(($a + $b) * $cycleNs))
+        T1L = [int]([Math]::Round($c * $cycleNs))
+        Cycle = [int]([Math]::Round($cycles * $cycleNs))
+    }
+    $segmentsOk = ($a -eq 1 -and $b -eq 2 -and $c -eq 1 -and ($a + $b + $c) -eq $cycles)
+    # RP AUTO retains the exact four-step waveform used by the working TI build.
+    $timingOk = ($actual.T0H -eq 312) -and
+                ($actual.T0L -eq 938) -and
+                ($actual.T1H -eq 938) -and
+                ($actual.T1L -eq 312) -and
+                ($actual.Cycle -eq 1250)
+    $ok = $segmentsOk -and $timingOk
+    if (-not $ok) { $failures++ }
+    $verdict = if ($ok) { 'OK' } else { 'FAIL' }
+    $colour = if ($ok) { 'Green' } else { 'Red' }
+    Write-Host ("  {0,9:N0} Hz  div={1,7:N3}  T0={2}/{3} ns  T1={4}/{5} ns  bit={6} ns  {7}" -f `
+        $sys, $clkdiv, $actual.T0H, $actual.T0L, $actual.T1H, $actual.T1L, $actual.Cycle, $verdict) -ForegroundColor $colour
+}
+Write-Host ""
 
 Write-Host ("RMT tick split, {0} ns per tick" -f $RmtTickNs) -ForegroundColor Yellow
 foreach ($p in $Profiles) {

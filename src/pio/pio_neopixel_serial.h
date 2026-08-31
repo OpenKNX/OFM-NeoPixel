@@ -85,7 +85,13 @@ struct pio_neopixel_serial_inst
     // ratio in their delay fields, so one program source serves every chip.
     uint16_t       programWords[4];
     pio_program_t  program;
+    const pio_program_t* loadedProgram; // program whose allocation owns offset
     bool           inverted;      // drive the complemented waveform (TM1814 family)
+
+    // RP PIO instruction memory is write-only. Keep the relocated image that was
+    // last written so diagnostics can report useful values instead of reading zero.
+    uint16_t loadedProgramWords[4];
+    uint32_t frameRearmCount;
 
     // Realized signal, for diagnostics. What the hardware actually produces,
     // not what was requested.
@@ -158,6 +164,9 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
      */
     inline bool isDmaEnabled() const { return _inst ? _inst->useDMA : false; }
 
+    /// Number of serial bits consumed from each FIFO word before autopull.
+    inline uint getFifoWordBits() const { return _inst ? _inst->fifoWordBits : 0; }
+
     /// Realized 0-bit high time in ns, as produced by the hardware.
     inline uint16_t getRealizedT0hNs() const { return _inst ? _inst->realizedT0hNs : 0; }
     /// Realized 0-bit low time in ns.
@@ -180,6 +189,44 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
      * @return Program offset or 0 if not initialized
      */
     inline uint getProgramOffset() const { return _inst ? _inst->offset : 0; }
+
+    /// Shadow of the relocated instruction last written at index 0..3.
+    inline uint16_t getLiveProgramWord(uint index) const
+    {
+        return (_inst && _inst->initialized && index < 4)
+                   ? _inst->loadedProgramWords[index]
+                   : 0;
+    }
+
+    /// Number of WS2805 frames started from a freshly re-armed PIO state.
+    inline uint32_t getFrameRearmCount() const { return _inst ? _inst->frameRearmCount : 0; }
+
+    /// Current state-machine program counter, read from hardware.
+    inline uint getLiveProgramCounter() const
+    {
+        return (_inst && _inst->initialized && _inst->pio)
+                   ? (uint)_inst->pio->sm[_inst->sm].addr
+                   : 0;
+    }
+
+    /// Raw state-machine SHIFTCTRL register, read from hardware.
+    inline uint32_t getLiveShiftCtrl() const
+    {
+        return (_inst && _inst->initialized && _inst->pio)
+                   ? (uint32_t)_inst->pio->sm[_inst->sm].shiftctrl
+                   : 0;
+    }
+
+    /// Hardware pull threshold. The register encodes 32 bits as zero.
+    inline uint getLivePullThreshold() const
+    {
+        const uint threshold = (getLiveShiftCtrl() >> 25) & 0x1Fu;
+        return threshold ? threshold : 32u;
+    }
+
+    inline bool isLiveAutopullEnabled() const { return (getLiveShiftCtrl() & (1u << 17)) != 0; }
+    inline bool isLiveShiftRight() const { return (getLiveShiftCtrl() & (1u << 19)) != 0; }
+    inline bool isLiveTxFifoJoined() const { return (getLiveShiftCtrl() & (1u << 30)) != 0; }
 
     /**
      * @brief Get LED protocol frequency in Hz (target frequency)

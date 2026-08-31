@@ -531,6 +531,10 @@ namespace ProtocolHelper
         {
             return 400000; // Legacy 400kHz mode
         }
+        if (protocol == LedProtocol::WS2805_RGBCCT)
+        {
+            return 800000; // TI-verified WS2805 four-step waveform
+        }
         if (isSPI(protocol))
         {
             switch (protocol)

@@ -118,6 +118,14 @@ namespace ProtocolTableAsserts
         orderChannels(order, 1, 2, 3, 4, 5, out);
         return out[0] == e0 && out[1] == e1 && out[2] == e2 && out[3] == e3;
     }
+    constexpr bool checkOrder5(ColorOrder order, uint8_t e0, uint8_t e1, uint8_t e2,
+                               uint8_t e3, uint8_t e4)
+    {
+        uint8_t out[6] = {0};
+        return orderChannels(order, 1, 2, 3, 4, 5, out) == 5 &&
+               out[0] == e0 && out[1] == e1 && out[2] == e2 &&
+               out[3] == e3 && out[4] == e4;
+    }
 
     static_assert(checkOrder(ColorOrder::RGB, 1, 2, 3), "RGB order");
     static_assert(checkOrder(ColorOrder::GRB, 2, 1, 3), "GRB order");
@@ -126,6 +134,10 @@ namespace ProtocolTableAsserts
     static_assert(checkOrder(ColorOrder::GBR, 2, 3, 1), "GBR order");
     static_assert(checkOrder(ColorOrder::BRG, 3, 1, 2), "BRG order");
     static_assert(checkOrder(ColorOrder::NONE, 2, 1, 3), "NONE falls back to GRB");
+    static_assert(getColorOrder(LedProtocol::WS2805_RGBCCT) == ColorOrder::GRBCCT,
+                  "WS2805 keeps its configured GRBCCT order");
+    static_assert(checkOrder5(ColorOrder::GRBCCT, 2, 1, 3, 4, 5),
+                  "WS2805 frame is G,R,B,WW,CW without inserted padding");
     // ---- TM1814 constant-current level, datasheet 6.5 mA to 38 mA over 64 steps ----
     static_assert(tm1814CurrentLevel(65) == 0, "TM1814 6.5 mA is level 0");
     static_assert(tm1814CurrentLevel(380) == 63, "TM1814 38 mA is level 63");

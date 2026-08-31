@@ -289,9 +289,10 @@ namespace SerialTiming
             case LedProtocol::WS2811_400KHZ:
                 return { 500, 2000, 1200, 1300, 50, false };
 
-            // WS2805 datasheet: T0H 220..380, T0L/T1H 580..1600, T1L 220..420,
-            // RES >280. Keep the TI four-step profile: its long one-pulse was verified
-            // on real WS2805 strips and leaves useful margin for slower level shifters.
+            // WS2805 V0.3: T0H 220..380 ns, T0L/T1H 580..1000 ns and T1L
+            // 220..420 ns. Keep the four-step 800 kbit/s waveform used by the
+            // hardware-verified TI build. RP PIO realizes 312.5/937.5 ns and
+            // 937.5/312.5 ns with an exact fractional divider.
             case LedProtocol::WS2805_RGBCCT:
                 return { 312, 938, 938, 312, 300, false };
 

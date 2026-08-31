@@ -53,6 +53,47 @@ static const uint16_t ws2812b_program_instructions[] = {
     0xa242, //  3: nop                    side 0 [2]  ; 0-bit: LOW 3 (T2)
 };
 
+// Keep WS2805 on the immutable four-step program used by the known-good
+// timing-investigation firmware. Unlike the per-strip generated programs used
+// by the other protocols, this image cannot be changed accidentally by a later
+// timing solve or configuration reapply.
+static const uint16_t ws2805_program_instructions[] = {
+    0x6021, // out x, 1 side 0 [0]  -> one LOW cycle
+    0x1023, // jmp !x, 3 side 1 [0] -> one HIGH cycle
+    0x1100, // jmp 0      side 1 [1] -> one bit: two more HIGH cycles
+    0xa142, // nop        side 0 [1] -> zero bit: two more LOW cycles
+};
+static const pio_program_t ws2805_program = {
+    .instructions = ws2805_program_instructions,
+    .length = 4,
+    .origin = -1,
+};
+
+// The working TI build used an exact 800 kbit/s divider with this four-step
+// program: 312.5/937.5 ns for zero and 937.5/312.5 ns for one on RP2350.
+static constexpr uint8_t kWs2805PioCyclesPerBit = 4;
+static constexpr uint32_t kWs2805PioBitrate = 800000;
+
+static inline bool useVerifiedWs2805PioCadence(LedProtocol protocol, TimingMode mode)
+{
+    return protocol == LedProtocol::WS2805_RGBCCT && mode == TimingMode::AUTO;
+}
+
+static inline SerialTiming::PioSolution verifiedWs2805PioSolution()
+{
+    SerialTiming::PioSolution sol{};
+    sol.a = 1;              // T0H = 1 cycle
+    sol.b = 2;              // T1H = a+b = 3 cycles
+    sol.c = 1;              // T1L = 1, T0L = b+c = 3 cycles
+    sol.clkdiv = 47;        // Integer fallback; AUTO uses exactly 46.875 at 150 MHz.
+    sol.cyclesPerBit = kWs2805PioCyclesPerBit;
+    sol.realizedT0h = 313;
+    sol.realizedT1h = 938;
+    sol.realizedBit = 1250;
+    sol.valid = true;
+    return sol;
+}
+
 /// TM1814 default constant current in 0.1 mA steps (18.0 mA, mid of the 6.5-38 mA range).
 static constexpr uint16_t kTm1814DefaultCurrent10 = 180;
 
@@ -73,10 +114,19 @@ static constexpr uint pioSerialFifoPullBits(uint8_t bytesPerLed, uint8_t prefixB
     return (bytesPerLed >= 5 || prefixBytes > 0) ? 8u : (bytesPerLed == 4 ? 32u : 24u);
 }
 
+static constexpr uint32_t pioSerialByteWord(uint8_t value)
+{
+    return (uint32_t)value << 24;
+}
+
 static_assert(pioSerialFifoPullBits(3, 0) == 24, "RGB uses one 24-bit FIFO word per pixel");
 static_assert(pioSerialFifoPullBits(4, 0) == 32, "RGBW uses one 32-bit FIFO word per pixel");
 static_assert(pioSerialFifoPullBits(5, 0) == 8, "WS2805 must pull after every payload byte");
 static_assert(pioSerialFifoPullBits(4, 8) == 8, "prefixed frames must pull after every payload byte");
+static_assert(ProtocolHelper::getColorOrder(LedProtocol::WS2805_RGBCCT) == ColorOrder::GRBCCT,
+              "WS2805 stays GRBCCT");
+static_assert(pioSerialByteWord(0x12) == 0x12000000u,
+              "wide-frame bytes must occupy the FIFO word's MSB");
 
 static void writeSm16825Settings(pio_neopixel_serial_inst_t* inst)
 {
@@ -94,13 +144,50 @@ static const pio_program_t neopixel_serial_program = {
     .origin = -1,
 };
 
+static void rememberRelocatedProgram(pio_neopixel_serial_inst_t* inst)
+{
+    if (!inst) return;
+    for (uint i = 0; i < 4; ++i)
+        inst->loadedProgramWords[i] = inst->programWords[i];
+    SerialTiming::relocateProgram(inst->loadedProgramWords, (uint8_t)inst->offset);
+}
+
+/**
+ * Start each WS2805 frame from an unambiguous byte and program boundary.
+ *
+ * A zero frame cannot reveal a stale OSR bit count because every shifted bit is
+ * zero. The observed failure starts with the first non-zero byte, so clear the
+ * FIFO and OSR state, restore the known program image and hold a complete reset
+ * interval before handing the next frame to DMA/PIO.
+ */
+static bool rearmWs2805Frame(pio_neopixel_serial_inst_t* inst)
+{
+    if (!inst || !inst->pio || inst->offset + 4 > 32) return false;
+
+    pio_sm_set_enabled(inst->pio, inst->sm, false);
+    pio_sm_clear_fifos(inst->pio, inst->sm);
+    pio_sm_restart(inst->pio, inst->sm);
+    pio_sm_clkdiv_restart(inst->pio, inst->sm);
+
+    rememberRelocatedProgram(inst);
+    for (uint i = 0; i < 4; ++i)
+        inst->pio->instr_mem[inst->offset + i] = inst->loadedProgramWords[i];
+
+    pio_sm_set_pins_with_mask(inst->pio, inst->sm, 0, (1u << inst->pin));
+    pio_sm_exec(inst->pio, inst->sm, pio_encode_jmp(inst->offset));
+    pio_sm_set_enabled(inst->pio, inst->sm, true);
+    delayMicroseconds(inst->resetTimeUs);
+    ++inst->frameRearmCount;
+    return true;
+}
+
 /**
  * Initialize NeoPixel PIO program
  *
  * Works for all protocols (WS2812B/WS2811 @ 800kHz, WS2811_400KHZ @ 400kHz, etc.)
  * Timing is controlled via clock divider parameter
  *
- * @param fifoWordBits For RGBCCT: autopull threshold (8/16/32) matching DMA transfer size
+ * @param fifoWordBits For wide frames: 8-bit autopull, one payload byte per FIFO word
  *                     For RGB/RGBW: ignored (uses 24/32 respectively)
  */
 static inline void neopixel_serial_program_init(PIO pio, uint sm, uint offset, uint pin, float clkdiv, bool rgbw, bool rgbcct, uint fifoWordBits = 32)
@@ -288,18 +375,16 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     //
     // RGB (3 bytes): 24-bit autopull, 1 uint32_t per LED (packed into 32-bit word)
     // RGBW (4 bytes): 32-bit autopull, 1 uint32_t per LED (perfect fit)
-    // RGBCCT (5 bytes): NO separate packed buffer!
-    //                   - Send byte buffer directly with bswap=true
-    //                   - Always 32-bit transfers (buffer padded to 4-byte alignment)
-    //                   - 32-bit autopull matches DMA transfer size
+    // RGBCCT (5 bytes): one MSB-aligned payload byte per uint32_t DMA word
+    //                   - 8-bit autopull consumes exactly that payload byte
+    //                   - no alignment or padding bits enter the serial frame
     if (useDMA)
     {
         // Calculate DMA buffer size based on LED type
         // CRITICAL: Cast to size_t to prevent overflow
-        // Wide frames and frames carrying a prefix stream the byte buffer directly with
-        // 32-bit autopull. That path works on the whole buffer, so it does not care how
-        // many bytes a LED takes or that C1 and C2 sit ahead of the pixel data. The packed
-        // path below indexes by LED and would drop the last LEDs of a prefixed frame.
+        // Wide frames and frames carrying a prefix expand the complete byte buffer into
+        // one MSB-aligned uint32_t per byte. That path does not care how many bytes one
+        // LED takes or that C1 and C2 sit ahead of the pixel data.
         if (_inst->bytesPerLed >= 5 || _inst->prefixBytes > 0)
         {
             // A wide or prefixed frame must be emitted byte-by-byte. 8-bit autopull
@@ -364,7 +449,7 @@ PIO_NeoPixel_Serial::~PIO_NeoPixel_Serial()
             if (_inst->pio && _inst->sm < 4)
             {
                 pio_remove_program_and_unclaim_sm(
-                    &neopixel_serial_program,
+                    _inst->loadedProgram ? _inst->loadedProgram : &neopixel_serial_program,
                     _inst->pio,
                     _inst->sm,
                     _inst->offset);
@@ -501,15 +586,46 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
         if (cfgResetUs > 0) custom.resetUs = cfgResetUs;
         _inst->resetTimeUs = custom.resetUs ? custom.resetUs : _inst->resetTimeUs;
 
-        SerialTiming::PioSolution sol = SerialTiming::solvePio(custom, (uint32_t)clock_get_hz(clk_sys));
+        const bool verifiedWs2805 = cT1h == 0 &&
+            useVerifiedWs2805PioCadence(_inst->protocol, serialCfg->getTimingMode());
+        SerialTiming::PioSolution sol = verifiedWs2805
+                                            ? verifiedWs2805PioSolution()
+                                            : SerialTiming::solvePio(custom, (uint32_t)clock_get_hz(clk_sys));
         if (sol.valid)
         {
-            uint16_t words[4];
-            SerialTiming::encodeProgram(sol, words);
+            uint16_t programWords[4];
+            SerialTiming::encodeProgram(sol, programWords);
+
+            float desiredClkdiv = (float)sol.clkdiv;
+            if (verifiedWs2805)
+            {
+                desiredClkdiv = (float)clock_get_hz(clk_sys) /
+                    ((float)kWs2805PioBitrate * kWs2805PioCyclesPerBit);
+            }
+
+            bool programChanged = false;
+            for (uint i = 0; i < 4; ++i)
+                programChanged = programChanged || (_inst->programWords[i] != programWords[i]);
+            const bool dividerChanged = _inst->actual_clkdiv != desiredClkdiv;
+
+            // Avoid stopping a running SM for a no-op configuration apply. This
+            // is the normal path immediately after PhysicalStrip::init().
+            if (!programChanged && !dividerChanged)
+            {
+                _inst->timingMode = (cT1h > 0) ? TimingMode::CUSTOM : TimingMode::AUTO;
+                return true;
+            }
+
+            // Never clear or rewrite a state machine while it still owns a
+            // frame. Doing so truncates the 40-bit WS2805 pixel stream.
+            if (isBusy()) return false;
+
+            uint16_t liveWords[4];
+            for (uint i = 0; i < 4; ++i) liveWords[i] = programWords[i];
 
             // pio_add_program relocates jmp targets when it loads a program; writing
             // instruction memory directly does not, so do it here.
-            SerialTiming::relocateProgram(words, (uint8_t)_inst->offset);
+            SerialTiming::relocateProgram(liveWords, (uint8_t)_inst->offset);
 
             if (_inst->offset + 4 > 32) return false; // would run past instruction memory
 
@@ -519,24 +635,33 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
             pio_sm_clear_fifos(_inst->pio, _inst->sm);
             for (uint i = 0; i < 4; ++i)
             {
-                _inst->programWords[i] = words[i];
-                _inst->pio->instr_mem[_inst->offset + i] = words[i];
+                // Keep the backing pio_program_t unrelocated. The SDK expects
+                // relative jump targets and performs relocation when loading it.
+                _inst->programWords[i] = programWords[i];
+                _inst->pio->instr_mem[_inst->offset + i] = liveWords[i];
+                _inst->loadedProgramWords[i] = liveWords[i];
             }
-            pio_sm_set_clkdiv(_inst->pio, _inst->sm, (float)sol.clkdiv);
+            pio_sm_set_clkdiv(_inst->pio, _inst->sm, desiredClkdiv);
             pio_sm_restart(_inst->pio, _inst->sm);
             pio_sm_clkdiv_restart(_inst->pio, _inst->sm);
             pio_sm_exec(_inst->pio, _inst->sm, pio_encode_jmp(_inst->offset));
             pio_sm_set_enabled(_inst->pio, _inst->sm, true);
 
-            const uint32_t cycleNs1000 = sol.realizedBit * 1000u / (sol.cyclesPerBit ? sol.cyclesPerBit : 1);
-            _inst->actual_clkdiv   = (float)sol.clkdiv;
-            _inst->actual_bitrate  = sol.realizedBit ? (1000000000.0f / (float)sol.realizedBit) : 0.0f;
+            const float actualBitrate = (float)clock_get_hz(clk_sys) / desiredClkdiv /
+                                        (float)(sol.cyclesPerBit ? sol.cyclesPerBit : 1);
+            const uint32_t realizedBitNs = actualBitrate > 0.0f
+                                               ? (uint32_t)(1000000000.0f / actualBitrate + 0.5f)
+                                               : sol.realizedBit;
+            const uint32_t cycleNs1000 = realizedBitNs * 1000u /
+                                         (sol.cyclesPerBit ? sol.cyclesPerBit : 1);
+            _inst->actual_clkdiv   = desiredClkdiv;
+            _inst->actual_bitrate  = actualBitrate;
             _inst->cyclesPerBit    = (uint8_t)sol.cyclesPerBit;
-            _inst->realizedT0hNs   = (uint16_t)sol.realizedT0h;
-            _inst->realizedT1hNs   = (uint16_t)sol.realizedT1h;
-            _inst->realizedT0lNs   = (uint16_t)((sol.b + sol.c) * cycleNs1000 / 1000u);
-            _inst->realizedT1lNs   = (uint16_t)(sol.c * cycleNs1000 / 1000u);
-            _inst->realizedBitNs   = (uint16_t)sol.realizedBit;
+            _inst->realizedT0hNs   = (uint16_t)((sol.a * cycleNs1000 + 500u) / 1000u);
+            _inst->realizedT1hNs   = (uint16_t)(((sol.a + sol.b) * cycleNs1000 + 500u) / 1000u);
+            _inst->realizedT0lNs   = (uint16_t)(((sol.b + sol.c) * cycleNs1000 + 500u) / 1000u);
+            _inst->realizedT1lNs   = (uint16_t)((sol.c * cycleNs1000 + 500u) / 1000u);
+            _inst->realizedBitNs   = (uint16_t)realizedBitNs;
             _inst->timingMode      = (cT1h > 0) ? TimingMode::CUSTOM : TimingMode::AUTO;
         }
         else
@@ -604,7 +729,7 @@ bool PIO_NeoPixel_Serial::init()
  * Examples:
  * - WS2812B @ 800kHz → 125MHz / (800kHz * 10) = 15.625
  * - WS2811_400KHZ @ 400kHz → 125MHz / (400kHz * 10) = 31.25
- * - WS2805 @ 800kHz → 125MHz / (800kHz * 10) = 15.625 (uses WS2812B timing)
+ * - WS2805 @ 800kHz → 150MHz / (800000Hz * 4) = 46.875 (1:3:3:1 cadence)
  *
  * @return true if PIO configured, false on error
  */
@@ -653,9 +778,12 @@ bool PIO_NeoPixel_Serial::initPIO()
         profile = SerialTiming::scaledTo(profile, (uint32_t)((float)nominalHz * bitrate_multiplier));
     }
 
-    // Solve for segment cycles plus an INTEGER divider. A fractional divider makes the
-    // state machine dither, which jitters every bit edge and eats clone decode margin.
-    SerialTiming::PioSolution sol = SerialTiming::solvePio(profile, (uint32_t)actual_sys_clk);
+    // Solve for segment cycles plus an integer divider. WS2805 AUTO is the one deliberate
+    // exception below: it keeps the exact NeoPixelBus/WLED fractional divider.
+    const bool verifiedWs2805 = useVerifiedWs2805PioCadence(_inst->protocol, _inst->timingMode);
+    SerialTiming::PioSolution sol = verifiedWs2805
+                                        ? verifiedWs2805PioSolution()
+                                        : SerialTiming::solvePio(profile, (uint32_t)actual_sys_clk);
     if (!sol.valid)
     {
         openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "GPIO%u: no divider fits this profile, using WS2812B", _inst->pin);
@@ -680,19 +808,31 @@ bool PIO_NeoPixel_Serial::initPIO()
     float clkdiv = (float)sol.clkdiv;
     float actual_bitrate = sol.realizedBit ? (1000000000.0f / (float)sol.realizedBit) : 0.0f;
 
-    // Record what the hardware really produces, so diagnostics never report a request.
-    const uint32_t cycleNs1000 = sol.realizedBit * 1000u / (sol.cyclesPerBit ? sol.cyclesPerBit : 1);
-    _inst->realizedT0hNs = (uint16_t)sol.realizedT0h;
-    _inst->realizedT1hNs = (uint16_t)sol.realizedT1h;
-    _inst->realizedT0lNs = (uint16_t)((sol.b + sol.c) * cycleNs1000 / 1000u);
-    _inst->realizedT1lNs = (uint16_t)(sol.c * cycleNs1000 / 1000u);
-    _inst->realizedBitNs = (uint16_t)sol.realizedBit;
+    if (verifiedWs2805)
+    {
+        // Exact TI/RP2350 setting: 150 MHz / (800 kHz * 4) = 46.875.
+        clkdiv = actual_sys_clk / ((float)kWs2805PioBitrate * kWs2805PioCyclesPerBit);
+        actual_bitrate = actual_sys_clk / clkdiv / kWs2805PioCyclesPerBit;
+    }
+
+    // Record what the selected divider really produces, including the verified
+    // fractional WS2805 divider rather than the integer solver candidate.
+    const uint32_t realizedBitNs = actual_bitrate > 0.0f
+                                       ? (uint32_t)(1000000000.0f / actual_bitrate + 0.5f)
+                                       : sol.realizedBit;
+    const uint32_t cycleNs1000 = realizedBitNs * 1000u / (sol.cyclesPerBit ? sol.cyclesPerBit : 1);
+    _inst->realizedT0hNs = (uint16_t)((sol.a * cycleNs1000 + 500u) / 1000u);
+    _inst->realizedT1hNs = (uint16_t)(((sol.a + sol.b) * cycleNs1000 + 500u) / 1000u);
+    _inst->realizedT0lNs = (uint16_t)(((sol.b + sol.c) * cycleNs1000 + 500u) / 1000u);
+    _inst->realizedT1lNs = (uint16_t)((sol.c * cycleNs1000 + 500u) / 1000u);
+    _inst->realizedBitNs = (uint16_t)realizedBitNs;
     _inst->cyclesPerBit = cycles_per_bit;
     _inst->resetTimeUs = profile.resetUs ? profile.resetUs : 300;
     _inst->actual_bitrate = actual_bitrate;
     _inst->actual_clkdiv = clkdiv;
 
-    const pio_program_t* selected_program = &_inst->program;
+    const pio_program_t* selected_program = verifiedWs2805 ? &ws2805_program : &_inst->program;
+    _inst->loadedProgram = selected_program;
 
     #ifdef OPENKNX_DEBUG
     openknx.logger.logWithPrefixAndValues("PIO NeoPixel Serial", "GPIO%u: sys_clk=%.0f MHz, clkdiv=%.3f, bitrate=%.0f kHz [%s], cycles=%d",
@@ -755,6 +895,8 @@ bool PIO_NeoPixel_Serial::initPIO()
 
     #endif
 
+    rememberRelocatedProgram(_inst);
+
     // CRITICAL: Clear and reset state machine before init (prevents garbage after reboot!)
     pio_sm_set_enabled(_inst->pio, _inst->sm, false); // Disable first
     pio_sm_restart(_inst->pio, _inst->sm);            // Reset PC to start
@@ -791,11 +933,10 @@ bool PIO_NeoPixel_Serial::initPIO()
  *
  * DMA configuration:
  * - RGB/RGBW: 32-bit word transfers, manual packing, no bswap
- * - RGBCCT (5-byte): direct buffer transfer
- *   - Send byte buffer directly (no separate packed buffer)
- *   - bswap=true for on-the-fly byte reordering
- *   - Dynamic transfer size (8/16/32-bit) based on buffer alignment
- *   - Autopull threshold matches DMA transfer size
+ * - RGBCCT (5-byte): one MSB-aligned payload byte per 32-bit DMA transfer
+ *   - bswap remains disabled
+ *   - PIO autopulls after eight output bits
+ *   - no padding bits are transmitted between LEDs
  * - Source pointer increments (buffer)
  * - Destination pointer fixed (PIO FIFO)
  * - DREQ from PIO controls transfer timing
@@ -1090,6 +1231,11 @@ bool PIO_NeoPixel_Serial::show()
         }
     }
 
+    // WS2805 is deliberately isolated from any residual OSR/autopull state and
+    // from accidental instruction-memory changes before every physical frame.
+    if (_inst->protocol == LedProtocol::WS2805_RGBCCT && !rearmWs2805Frame(_inst))
+        return false;
+
     // Reset state for new transfer
     _inst->busy = true;
     _inst->waitingForReset = false;
@@ -1201,7 +1347,7 @@ bool PIO_NeoPixel_Serial::sendDataPIO()
         // Wide frames use 8-bit autopull; one FIFO word is one exact serial byte.
         for (size_t i = 0; i < _inst->bufferSize; ++i)
         {
-            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, (uint32_t)buf[i] << 24, putTimeoutUs)) return false;
+            if (!neoSerialPutGuarded(_inst->pio, _inst->sm, pioSerialByteWord(buf[i]), putTimeoutUs)) return false;
         }
     }
 
@@ -1213,7 +1359,7 @@ bool PIO_NeoPixel_Serial::sendDataPIO()
  *
  * Prepares data for DMA and starts the transfer:
  * 1. For RGB/RGBW: Packs color data into DMA buffer, then starts DMA
- * 2. For RGBCCT: Copies byte buffer to dmaBuffer (with padding), bswap handles byte order
+ * 2. For wide frames: expands every byte into the MSB of one 32-bit DMA word
  *
  * The busy flag is cleared by the DMA IRQ handler.
  */
@@ -1267,7 +1413,8 @@ void PIO_NeoPixel_Serial::sendDataDMA()
  * - Input: [Byte0, Byte1, Byte2, Byte3] as bytes
  * - Output: Byte0<<24 | Byte1<<16 | Byte2<<8 | Byte3 (MSB first)
  *
- * RGBCCT: NOT packed here! Uses raw buffer with bswap.
+ * Wide frames: one MSB-aligned DMA word per payload byte. With 8-bit autopull,
+ * [G,R,B,WW,CW] is therefore emitted as exactly five consecutive bytes.
  *
  * NOTE: Buffer order is determined by ColorOrder setting (set via rgbToBuffer).
  *       This function is ColorOrder-agnostic and just packs bytes in buffer order.
@@ -1309,7 +1456,7 @@ void PIO_NeoPixel_Serial::packDataToDMABuffer()
     {
         // One exact byte per FIFO word for RGBCCT, SM16825 and TM1814's prefix.
         for (size_t i = 0; i < _inst->bufferSize; ++i)
-            dst[i] = (uint32_t)src[i] << 24;
+            dst[i] = pioSerialByteWord(src[i]);
     }
 }
 
