@@ -2,6 +2,7 @@
 #include "hal/DriverFactory.h"
 #include "hal/HW_NeoPixel_SPI.h"
 #include <Arduino.h>
+#include <cstring>
 
 // Compile-time checks for the protocol and colour-order tables (no code emitted).
 #include "ProtocolTableAsserts.h"
@@ -145,6 +146,11 @@ PhysicalStrip::~PhysicalStrip()
  */
 bool PhysicalStrip::createDriver(DriverType driverType)
 {
+    // A replacement driver represents new hardware state even if its freshly
+    // allocated buffer happens to contain the same bytes as the previous one.
+    _lastSentFrame.clear();
+    _hasLastSentFrame = false;
+
     if (_driver)
     {
         delete _driver;
@@ -549,6 +555,30 @@ bool PhysicalStrip::isBusy() const
 {
     if (!_driver) return false;
     return _driver->isBusy();
+}
+
+bool PhysicalStrip::isDirty() const
+{
+    if (!_driver || !isInitialized()) return false;
+
+    const uint8_t* buffer = _driver->getBuffer();
+    const size_t bufferSize = _driver->getBufferSize();
+    if (!buffer || bufferSize == 0) return false;
+    if (!_hasLastSentFrame || _lastSentFrame.size() != bufferSize) return true;
+
+    return std::memcmp(buffer, _lastSentFrame.data(), bufferSize) != 0;
+}
+
+void PhysicalStrip::markFrameSent()
+{
+    if (!_driver || !isInitialized()) return;
+
+    const uint8_t* buffer = _driver->getBuffer();
+    const size_t bufferSize = _driver->getBufferSize();
+    if (!buffer || bufferSize == 0) return;
+
+    _lastSentFrame.assign(buffer, buffer + bufferSize);
+    _hasLastSentFrame = true;
 }
 
 /**

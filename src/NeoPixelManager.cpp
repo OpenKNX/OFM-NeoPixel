@@ -1221,11 +1221,13 @@ bool NeoPixelManager::syncAll()
 
     bool allSuccess = true;
 
-    // Synchronize all Virtual→Physical buffers with Hardware-Brightness
-    // (BEFORE power limiting is applied to PhysicalStrip buffers)
+    // Rebuild every physical buffer from its logical virtual source before
+    // power limiting. ABL scales physical bytes in place, so synchronizing only
+    // dirty virtual strips would compound the previous frame's scale. The
+    // physical-frame snapshot in showAll() filters unchanged wire transfers.
     for (auto vstrip : _virtualStrips)
     {
-        if (vstrip && vstrip->isDirty())
+        if (vstrip)
         {
             // Hardware brightness is now managed via PhysicalStripConfig
             // Use 'neo phys config <id> brightness <16-30>' to change it for SPI strips
@@ -1250,6 +1252,8 @@ bool NeoPixelManager::showAll()
 
     uint32_t startTime = millis();
     bool allSuccess = true;
+    std::vector<PhysicalStrip*> startedStrips;
+    startedStrips.reserve(_strips.size());
 
     // Push normal strips concurrently, but keep WS2805 transfers on an otherwise idle
     // output path. WS2805 uses a 40-bit byte stream and proved stable when sent on its
@@ -1261,22 +1265,29 @@ bool NeoPixelManager::showAll()
         // set, so an uninitialized strip here is expected, not an error to count.
         if (!strip || !strip->isInitialized()) continue;
         if (strip->getProtocol() == LedProtocol::WS2805_RGBCCT) continue;
+        if (!strip->isDirty()) continue;
         if (!strip->show())
         {
             allSuccess = false;
             _errorCount++;
         }
+        else
+        {
+            startedStrips.push_back(strip);
+        }
     }
     // Phase 2: wait for every in-flight transfer using its frame-derived
     // deadline. A fixed cap rejects valid long strips.
-    for (auto strip : _strips)
+    for (auto strip : startedStrips)
     {
-        if (!strip || !strip->isInitialized()) continue;
-        if (strip->getProtocol() == LedProtocol::WS2805_RGBCCT) continue;
         if (!strip->waitForTransfer(strip->getTransferTimeoutMs()))
         {
             allSuccess = false;
             _errorCount++;
+        }
+        else
+        {
+            strip->markFrameSent();
         }
     }
 
@@ -1286,6 +1297,7 @@ bool NeoPixelManager::showAll()
     {
         if (!strip || !strip->isInitialized()) continue;
         if (strip->getProtocol() != LedProtocol::WS2805_RGBCCT) continue;
+        if (!strip->isDirty()) continue;
 
         if (!strip->show())
         {
@@ -1297,6 +1309,10 @@ bool NeoPixelManager::showAll()
         {
             allSuccess = false;
             _errorCount++;
+        }
+        else
+        {
+            strip->markFrameSent();
         }
     }
 

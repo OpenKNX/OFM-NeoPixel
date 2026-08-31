@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <stddef.h>
 #include <stdint.h>
+#include <vector>
 
 class PhysicalStrip
 {
@@ -62,6 +63,18 @@ class PhysicalStrip
     bool waitForTransfer(uint32_t timeoutMs = 0);
     uint32_t getTransferTimeoutMs() const;
     bool isBusy() const;
+
+    /**
+     * @brief Whether the encoded physical buffer differs from the last frame
+     *        that completed successfully.
+     *
+     * Comparing the physical bytes keeps this correct across mixed virtual
+     * strips, colour-order conversion, white channels and power limiting.
+     */
+    bool isDirty() const;
+
+    /** Record the current encoded buffer after a successful transfer. */
+    void markFrameSent();
 
     // ====================================================================
     // Buffer Access
@@ -223,6 +236,8 @@ class PhysicalStrip
     PhysicalStripConfig* _config; // Hardware configuration (SpiStripConfig or SerialStripConfig)
     TimingMode _timingMode;       // Timing mode for clock divider calculation
     uint8_t _voltage;             // Operating voltage (5V, 12V, 24V) - default: 5V
+    std::vector<uint8_t> _lastSentFrame; // Exact physical bytes last confirmed on the wire
+    bool _hasLastSentFrame = false;
 
     bool createDriver(DriverType driverType); // Create appropriate driver
 };
