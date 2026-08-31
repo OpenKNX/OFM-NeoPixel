@@ -157,8 +157,9 @@ static void rememberRelocatedProgram(pio_neopixel_serial_inst_t* inst)
  *
  * A zero frame cannot reveal a stale OSR bit count because every shifted bit is
  * zero. The observed failure starts with the first non-zero byte, so clear the
- * FIFO and OSR state, restore the known program image and hold a complete reset
- * interval before handing the next frame to DMA/PIO.
+ * FIFO and OSR state and hold a complete reset interval before handing the next
+ * frame to DMA/PIO. The program itself is immutable between configuration
+ * changes and must not be rewritten while other state machines are active.
  */
 static bool rearmWs2805Frame(pio_neopixel_serial_inst_t* inst)
 {
@@ -168,10 +169,6 @@ static bool rearmWs2805Frame(pio_neopixel_serial_inst_t* inst)
     pio_sm_clear_fifos(inst->pio, inst->sm);
     pio_sm_restart(inst->pio, inst->sm);
     pio_sm_clkdiv_restart(inst->pio, inst->sm);
-
-    rememberRelocatedProgram(inst);
-    for (uint i = 0; i < 4; ++i)
-        inst->pio->instr_mem[inst->offset + i] = inst->loadedProgramWords[i];
 
     pio_sm_set_pins_with_mask(inst->pio, inst->sm, 0, (1u << inst->pin));
     pio_sm_exec(inst->pio, inst->sm, pio_encode_jmp(inst->offset));
@@ -1231,8 +1228,8 @@ bool PIO_NeoPixel_Serial::show()
         }
     }
 
-    // WS2805 is deliberately isolated from any residual OSR/autopull state and
-    // from accidental instruction-memory changes before every physical frame.
+    // WS2805 is deliberately isolated from residual FIFO/OSR/autopull state
+    // before every physical frame. Its PIO program remains untouched here.
     if (_inst->protocol == LedProtocol::WS2805_RGBCCT && !rearmWs2805Frame(_inst))
         return false;
 
