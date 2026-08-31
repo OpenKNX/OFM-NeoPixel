@@ -172,6 +172,11 @@ void EffektManagerController::applyCue(const EffektCue& cue, Segment* segment)
 {
     if (!segment) return;
 
+    // Every cue application is a fresh effect start. Runtime state belongs to the
+    // segment, so explicitly discard the previous cue's animation position/timers.
+    // pause()/resume() never calls applyCue() and therefore preserves this state.
+    segment->resetEffectState();
+
     // Set colour
     segment->setPrimaryColor(cue.r, cue.g, cue.b, cue.w);
 

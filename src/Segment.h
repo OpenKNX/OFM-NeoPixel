@@ -430,6 +430,7 @@ class Segment
     const EffectConfig& getConfig() const { return _config; } // Get effect configuration (read-only)
     EffectState& getState() { return _state; }                // Get effect state (read/write)
     const EffectState& getState() const { return _state; }    // Get effect state (read-only)
+    void resetEffectState() { _state = EffectState{}; }       // Fresh effect/cue start only; pause/resume preserves state
 
     /**
      * @brief Set software brightness (0-255, default 255 = no dimming)
