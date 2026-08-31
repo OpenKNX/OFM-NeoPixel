@@ -1215,25 +1215,25 @@ void NeoPixelManager::rebuildPhysToVirtualMapping()
  * Handles hardware brightness and dirty flag checking
  * Call this BEFORE applyPowerLimit() and before showAll()
  */
-void NeoPixelManager::syncAll()
+bool NeoPixelManager::syncAll()
 {
-    if (!_initialized) return;
+    if (!_initialized) return false;
+
+    bool allSuccess = true;
 
     // Synchronize all Virtual→Physical buffers with Hardware-Brightness
     // (BEFORE power limiting is applied to PhysicalStrip buffers)
-    for (auto segment : _segments)
+    for (auto vstrip : _virtualStrips)
     {
-        if (segment && segment->getVirtualStrip())
+        if (vstrip && vstrip->isDirty())
         {
-            VirtualStrip* vstrip = segment->getVirtualStrip();
-            if (vstrip->isDirty())
-            {
-                // Hardware brightness is now managed via PhysicalStripConfig
-                // Use 'neo phys config <id> brightness <16-30>' to change it for SPI strips
-                vstrip->syncToPhysical();
-            }
+            // Hardware brightness is now managed via PhysicalStripConfig
+            // Use 'neo phys config <id> brightness <16-30>' to change it for SPI strips
+            if (!vstrip->syncToPhysical()) allSuccess = false;
         }
     }
+
+    return allSuccess;
 }
 
 /**
@@ -1317,7 +1317,13 @@ bool NeoPixelManager::showAll()
  */
 bool NeoPixelManager::updateAll()
 {
-    syncAll();         // Phase 2: VirtualStrip → PhysicalStrip (with brightness)
+    // Never transmit a partially synchronized physical frame. A failed virtual
+    // write remains dirty and will be retried in full on the next update.
+    if (!syncAll())
+    {
+        _errorCount++;
+        return false;
+    }
     applyPowerLimit(); // Phase 3: ABL on PhysicalStrip buffers
     return showAll();  // Phase 4: PhysicalStrip → Hardware
 }

@@ -503,6 +503,8 @@ bool VirtualStrip::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, 
  */
 bool VirtualStrip::syncToPhysical()
 {
+    if (!_buffer) return false;
+
     if (_physicalStrips.empty())
     {
         return true; // Nothing to synchronize
@@ -514,7 +516,11 @@ bool VirtualStrip::syncToPhysical()
     for (const auto& mapping : _physicalStrips)
     {
         PhysicalStrip* pstrip = mapping.physicalStrip;
-        if (!pstrip) continue;
+        if (!pstrip)
+        {
+            allSuccess = false;
+            continue;
+        }
 
         // Drivers reject buffer updates during an asynchronous frame. Finish
         // that frame before modifying its physical buffer.
@@ -543,7 +549,11 @@ bool VirtualStrip::syncToPhysical()
 
             // Normal operation: read from virtual buffer
             uint16_t virtualIdx = offset + i;
-            if (virtualIdx >= _totalLeds) break;
+            if (virtualIdx >= _totalLeds)
+            {
+                allSuccess = false;
+                break;
+            }
 
             size_t bufferOffset = (size_t)virtualIdx * _bytesPerLed;
             r = _buffer[bufferOffset];     // Red
@@ -578,7 +588,7 @@ bool VirtualStrip::syncToPhysical()
             if (physicalIsRGBCCT && _bytesPerLed >= 5)
             {
                 // Physical strip supports RGBCCT and virtual buffer has WW+CW channels
-                pstrip->setPixel(i, r, g, b, ww, cw);
+                if (!pstrip->setPixel(i, r, g, b, ww, cw)) allSuccess = false;
             }
             else if (physicalIsRGBW && _bytesPerLed >= 4)
             {
@@ -588,16 +598,19 @@ bool VirtualStrip::syncToPhysical()
                 auto* wcfg = pstrip->getConfig();
                 if (wcfg && wcfg->getWhiteMode() != 0)
                     ProtocolHelper::applyWhiteMode(wcfg->getWhiteMode(), r, g, b, ww);
-                pstrip->setPixel(i, r, g, b, ww);
+                if (!pstrip->setPixel(i, r, g, b, ww)) allSuccess = false;
             }
             else
             {
                 // Physical strip is RGB only, send RGB (ignore W channels if present)
-                pstrip->setPixel(i, r, g, b);
+                if (!pstrip->setPixel(i, r, g, b)) allSuccess = false;
             }
         }
     }
 
+    // A rejected write leaves the physical buffer incomplete. Keep the virtual
+    // frame dirty so the next update retries every pixel instead of accepting and
+    // transmitting a mixture of old and new channel data.
     if (allSuccess) _dirty = false;
     return allSuccess;
 }
