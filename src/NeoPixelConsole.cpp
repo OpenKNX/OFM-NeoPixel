@@ -1716,6 +1716,30 @@ bool NeoPixel::processClearCommand()
 /**
  * @brief Process 'neo test' command
  */
+static void logWs2805TestFrame(PhysicalStrip* strip, const char* phase, bool showResult)
+{
+    if (!strip || strip->getProtocol() != LedProtocol::WS2805_RGBCCT) return;
+
+    const uint8_t* frame = strip->getBuffer();
+    const size_t size = strip->getBufferSize();
+    if (!frame || size < 5) return;
+
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < size; ++i)
+    {
+        hash ^= frame[i];
+        hash *= 16777619u;
+    }
+
+    const uint8_t* last = frame + size - 5;
+    openknx.logger.logWithValues(
+        "WS2805 %s frame: first=%02X %02X %02X %02X %02X, last=%02X %02X %02X %02X %02X, bytes=%u, hash=%08lX, show=%s",
+        phase,
+        frame[0], frame[1], frame[2], frame[3], frame[4],
+        last[0], last[1], last[2], last[3], last[4],
+        (unsigned)size, (unsigned long)hash, showResult ? "OK" : "FAILED");
+}
+
 bool NeoPixel::processTestCommand(const std::string& args)
 {
     if (!_initialized || !_manager)
@@ -1739,22 +1763,26 @@ bool NeoPixel::processTestCommand(const std::string& args)
     // Simple test pattern: RGB cycle
     openknx.logger.log("Setting Red and waiting 2 seconds...");
     strip->setAll(255, 0, 0);
-    strip->show();
+    const bool redShown = strip->show();
+    logWs2805TestFrame(strip, "red", redShown);
     delay(2000);
 
     openknx.logger.log("Setting Green and waiting 2 seconds...");
     strip->setAll(0, 255, 0);
-    strip->show();
+    const bool greenShown = strip->show();
+    logWs2805TestFrame(strip, "green", greenShown);
     delay(2000);
 
     openknx.logger.log("Setting Blue and waiting 2 seconds...");
     strip->setAll(0, 0, 255);
-    strip->show();
+    const bool blueShown = strip->show();
+    logWs2805TestFrame(strip, "blue", blueShown);
     delay(2000);
 
     openknx.logger.log("Turning off all LEDs...");
     strip->setAll(0, 0, 0);
-    strip->show();
+    const bool offShown = strip->show();
+    logWs2805TestFrame(strip, "off", offShown);
 
     openknx.logger.log("Test pattern complete");
 
@@ -4862,19 +4890,7 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
         openknx.logger.logWithValues("  LED Count:       %d", strip->getLedCount());
 
         LedProtocol protocol = strip->getProtocol();
-        const char* protocolName = "Unknown";
-        switch (protocol)
-        {
-            case LedProtocol::WS2812B: protocolName = "WS2812B"; break;
-            case LedProtocol::SK6812: protocolName = "SK6812"; break;
-            case LedProtocol::WS2812: protocolName = "WS2812"; break;
-            case LedProtocol::APA102: protocolName = "APA102"; break;
-            case LedProtocol::SK9822: protocolName = "SK9822"; break;
-            case LedProtocol::WS2801: protocolName = "WS2801"; break;
-            case LedProtocol::LPD8806: protocolName = "LPD8806"; break;
-            default: break;
-        }
-        openknx.logger.logWithValues("  Protocol:        %s", protocolName);
+        openknx.logger.logWithValues("  Protocol:        %s", getProtocolName(protocol));
 
         // Color order (helps spot an RGBW/GRBW mixup that swaps R/G on clones)
         const char* colorOrderName = "???";
@@ -4893,6 +4909,7 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
             case ColorOrder::GRBCCT: colorOrderName = "GRBCCT"; break;
             case ColorOrder::RGBCTW: colorOrderName = "RGBCTW"; break;
             case ColorOrder::GRBCTW: colorOrderName = "GRBCTW"; break;
+            case ColorOrder::WRGB: colorOrderName = "WRGB"; break;
         }
         openknx.logger.logWithValues("  Color Order:     %s", colorOrderName);
 
@@ -4917,11 +4934,19 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
             openknx.logger.color(0);
             openknx.logger.logWithValues("  PIO Instance:    %s", pioName);
             openknx.logger.logWithValues("  State Machine:   SM%d", pioSerialDriver->getStateMachine());
+            openknx.logger.logWithValues("  Program offset:  %u (PC=%u)",
+                                         pioSerialDriver->getProgramOffset(),
+                                         pioSerialDriver->getLiveProgramCounter());
+            openknx.logger.logWithValues("  Program image:   %04X %04X %04X %04X (write shadow)",
+                                         pioSerialDriver->getLiveProgramWord(0),
+                                         pioSerialDriver->getLiveProgramWord(1),
+                                         pioSerialDriver->getLiveProgramWord(2),
+                                         pioSerialDriver->getLiveProgramWord(3));
 
             // Everything below is what the hardware actually produces, not what was asked for.
             const uint16_t bitNs = pioSerialDriver->getRealizedBitNs();
 
-            openknx.logger.logWithValues("  ClkDiv:          %.0f (integer, no dither)", pioSerialDriver->getActualClkdiv());
+            openknx.logger.logWithValues("  ClkDiv:          %.3f", pioSerialDriver->getActualClkdiv());
             openknx.logger.logWithValues("  Cycles per bit:  %u", pioSerialDriver->getCyclesPerBit());
             openknx.logger.logWithValues("  Realized T0H:    %u ns", pioSerialDriver->getRealizedT0hNs());
             openknx.logger.logWithValues("  Realized T0L:    %u ns", pioSerialDriver->getRealizedT0lNs());
@@ -4931,6 +4956,22 @@ bool NeoPixel::processPhysTimingCommand(const std::string& args)
                                          bitNs ? (1000000.0f / (float)bitNs) : 0.0f);
             openknx.logger.logWithValues("  Latch:           %u us", pioSerialDriver->getResetTimeUs());
             openknx.logger.logWithValues("  Polarity:        %s", pioSerialDriver->isInverted() ? "inverted" : "normal");
+            openknx.logger.logWithValues("  Bytes per LED:   %u", ProtocolHelper::getBytesPerLed(protocol));
+            openknx.logger.logWithValues("  Buffer size:     %u bytes", (unsigned)pioSerialDriver->getBufferSize());
+            openknx.logger.logWithValues("  FIFO autopull:   %u bits (HW=%u, %s, %s, %s)",
+                                         pioSerialDriver->getFifoWordBits(),
+                                         pioSerialDriver->getLivePullThreshold(),
+                                         pioSerialDriver->isLiveAutopullEnabled() ? "enabled" : "DISABLED",
+                                         pioSerialDriver->isLiveShiftRight() ? "LSB-first" : "MSB-first",
+                                         pioSerialDriver->isLiveTxFifoJoined() ? "TX joined" : "TX unjoined");
+            openknx.logger.logWithValues("  SHIFTCTRL:       0x%08lX",
+                                         (unsigned long)pioSerialDriver->getLiveShiftCtrl());
+            if (protocol == LedProtocol::WS2805_RGBCCT)
+                openknx.logger.logWithValues("  Frame rearms:    %lu", (unsigned long)pioSerialDriver->getFrameRearmCount());
+            if (pioSerialDriver->isDmaEnabled())
+                openknx.logger.logWithValues("  DMA Channel:     %d", pioSerialDriver->getDmaChannel());
+            else
+                openknx.logger.log("  DMA:             Disabled");
         }
         else if (pioSpiDriver)
         {
@@ -5919,7 +5960,7 @@ bool NeoPixel::processPhysConfigInfoCommand(uint32_t stripId)
         auto eff = serialCfg->getEffectiveTimings(protocol);
         const char* autoLabel = eff.isCustom ? "" : " (auto)";
 
-        openknx.logger.log("Type: Serial Strip (WS2812B/SK6812)");
+        openknx.logger.logWithValues("Type: Serial Strip (%s)", getProtocolName(protocol));
         openknx.logger.log("");
 
         openknx.logger.logWithValues("Timing Mode:       %s (%d)", modeName, (int)timingMode);
