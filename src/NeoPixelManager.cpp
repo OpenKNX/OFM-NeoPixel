@@ -1251,17 +1251,16 @@ bool NeoPixelManager::showAll()
     uint32_t startTime = millis();
     bool allSuccess = true;
 
-    // Push all strips CONCURRENTLY. Every PhysicalStrip owns its own PIO state machine,
-    // DMA channel and buffer, and the unified DMA IRQ dispatches per channel — so the
-    // transfers run in parallel with no shared state to corrupt. Phase 1 kicks off every
-    // DMA; phase 2 waits for them all. Frame push time then ≈ the single LONGEST strip
-    // instead of the SUM of all strips (≈13 ms vs ≈22 ms for this 6-strip config).
-    // (A PIO-fallback strip without DMA blocks inside show() and is simply done by phase 2.)
+    // Push normal strips concurrently, but keep WS2805 transfers on an otherwise idle
+    // output path. WS2805 uses a 40-bit byte stream and proved stable when sent on its
+    // own, while overlapping it with the other PIO/SPI DMAs through a TXS0108E produced
+    // random colour/white flashes. Retain the parallel fast path for all other protocols.
     for (auto strip : _strips)
     {
         // Skip strips that never came up: init() now keeps the device running on a partial
         // set, so an uninitialized strip here is expected, not an error to count.
         if (!strip || !strip->isInitialized()) continue;
+        if (strip->getProtocol() == LedProtocol::WS2805_RGBCCT) continue;
         if (!strip->show())
         {
             allSuccess = false;
@@ -1273,6 +1272,27 @@ bool NeoPixelManager::showAll()
     for (auto strip : _strips)
     {
         if (!strip || !strip->isInitialized()) continue;
+        if (strip->getProtocol() == LedProtocol::WS2805_RGBCCT) continue;
+        if (!strip->waitForTransfer(strip->getTransferTimeoutMs()))
+        {
+            allSuccess = false;
+            _errorCount++;
+        }
+    }
+
+    // Send WS2805 strips sequentially after every other transfer has completed. This
+    // also prevents two WS2805 byte streams from competing with each other.
+    for (auto strip : _strips)
+    {
+        if (!strip || !strip->isInitialized()) continue;
+        if (strip->getProtocol() != LedProtocol::WS2805_RGBCCT) continue;
+
+        if (!strip->show())
+        {
+            allSuccess = false;
+            _errorCount++;
+            continue;
+        }
         if (!strip->waitForTransfer(strip->getTransferTimeoutMs()))
         {
             allSuccess = false;
