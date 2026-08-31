@@ -13,6 +13,11 @@
 
 void EffektManagerController::start(uint8_t emId, Segment* segment, const EffektManagerData* emData)
 {
+    restart(emId, segment, emData);
+}
+
+void EffektManagerController::restart(uint8_t emId, Segment* segment, const EffektManagerData* emData)
+{
     if (!segment) return;
 
     if (emId == EM_NONE)
@@ -43,7 +48,11 @@ void EffektManagerController::start(uint8_t emId, Segment* segment, const Effekt
     _rt.fading       = false;
     _rt.fadeIn       = false;
     _rt.fadeStartMs  = 0;
+    _rt.fadeMs       = 0;
+    _rt.fadeFromBri  = 255;
+    _rt.cueBri       = 255;
     _rt.paused       = false;
+    _rt.pauseElapsed = 0;
     segment->resume();   // clear any prior pause/stop freeze before rendering cue 0
 
     // Pause Effektkette (virtual band) — EM takes priority

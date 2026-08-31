@@ -141,6 +141,12 @@ class EffektManagerController
     void start(uint8_t emId, Segment* segment, const EffektManagerData* emData);
 
     /**
+     * @brief Discard any running/paused sequence and start at Cue 1 with fresh
+     * fade, timing and effect state. Unlike resume(), no runtime position survives.
+     */
+    void restart(uint8_t emId, Segment* segment, const EffektManagerData* emData);
+
+    /**
      * @brief Stop the running EM.
      * @param mode  EmStopMode — what the segment does afterwards:
      *              EM_STOP_LAST   → restore the DIRECT snapshot (keeps live dim) / blank if none
