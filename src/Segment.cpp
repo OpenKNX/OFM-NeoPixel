@@ -97,6 +97,7 @@ Segment::Segment(VirtualStrip* virtualStrip, uint16_t startLed, uint16_t endLed)
  */
 Segment::~Segment()
 {
+    if (_effect) _effect->onExit(this);
     // Effect is NOT deleted - user is responsible for cleanup!
     _effect = nullptr;
 }
@@ -107,14 +108,31 @@ Segment::~Segment()
  */
 void Segment::setEffect(Effect* effect, bool initializeDefaults)
 {
+    if (_effect) _effect->onExit(this);
     _effect = effect;
 
-    // Initialize parameters with defaults and reset state
+    // Initialize parameters and state only for callers explicitly requesting a
+    // brand-new default configuration. Cue starts reset state before setEffect().
     if (_effect && initializeDefaults)
     {
         _effect->initializeDefaults(this);
-        _effect->reset();
+        resetEffectState();
     }
+
+    if (_effect) _effect->onEnter(this);
+}
+
+void Segment::clearEffect()
+{
+    if (_effect) _effect->onExit(this);
+    _effect = nullptr;
+}
+
+void Segment::resume()
+{
+    const bool wasPaused = _paused;
+    _paused = false;
+    if (wasPaused && _effect) _effect->onResume(this);
 }
 
 /**
@@ -844,4 +862,3 @@ bool Segment::setPixelXYZ(uint8_t x, uint8_t y, uint8_t z, uint8_t r, uint8_t g,
     if (idx == 0xFFFF) return false;
     return setPixel(idx, r, g, b);
 }
-

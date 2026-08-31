@@ -31,6 +31,7 @@ static constexpr uint8_t  EM_PARAM_COUNT = 10;  ///< Max effect parameters per c
 
 // EM ID 0 = "no EM / stop"
 static constexpr uint8_t  EM_NONE       = 0;
+static constexpr uint16_t EM_DURATION_UNTIL_EFFECT_DONE = UINT16_MAX;
 
 // P6 — what the segment does after an EM stops / a chain finishes.
 // Values 0..2 map 1:1 to the ETS "EM-Stop-Rückkehr" enum; LEAVE is internal (interrupt).
@@ -51,7 +52,7 @@ struct EffektCue
     uint8_t  params[EM_PARAM_COUNT];    ///< Effect parameters 0-9
     uint8_t  r, g, b, w;               ///< Primary colour
     uint8_t  brightness;               ///< Brightness 0-255
-    uint16_t durationSec;              ///< Duration in seconds (0 = hold until next trigger)
+    uint16_t durationSec;              ///< Seconds; 0=hold, UINT16_MAX=until effect reports done
     uint16_t fadeMs;                   ///< Fade-out duration before next cue (ms, 0 = hard cut)
     char     cueName[EM_TEXT_LEN];     ///< Cue name (null-terminated)
     char     effectText[EM_TEXT_LEN];  ///< Effect-specific text (null-terminated)

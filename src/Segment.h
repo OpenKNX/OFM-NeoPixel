@@ -341,7 +341,7 @@ class Segment
     Effect* getEffect() { return _effect; }                          // Get current effect
     const Effect* getEffect() const { return _effect; }              // Get current effect (const)
     bool hasEffect() const { return _effect != nullptr; }            // Check if effect is set
-    void clearEffect() { _effect = nullptr; }                        // Remove effect
+    void clearEffect();                                              // Remove effect and run its exit lifecycle
 
     // ====================================================================
     // Pixel Control
@@ -390,7 +390,7 @@ class Segment
     // ====================================================================
     void update(uint32_t deltaTime);   // Update Segment (calls effect) - STATELESS
     void pause() { _paused = true; }   // Pause effect
-    void resume() { _paused = false; } // Resume effect
+    void resume();                    // Resume effect without resetting runtime state
     void stop();
 
     // DIRECT-state snapshot around an EM run: saveDirectState() captures the manual

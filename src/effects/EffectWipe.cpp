@@ -1,6 +1,18 @@
 #include "EffectWipe.h"
 #include "../Segment.h"
 
+void EffectWipe::onEnter(Segment* segment)
+{
+    if (!segment) return;
+    const EffectConfig& config = segment->getConfig();
+    segment->setAll(config.r2(), config.g2(), config.b2(), config.ww2(), config.cw2());
+}
+
+bool EffectWipe::isDone(const Segment* segment) const
+{
+    return segment && segment->getState().phase == WIPE_DONE;
+}
+
 /**
  * @brief Update the Wipe Effect
  * @param segment Pointer to segment containing config & state
@@ -13,6 +25,7 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
     const EffectConfig& config = segment->getConfig(); // Get config (read-only)
 
     EffectState& state = segment->getState(); // Get state (read/write)
+    if (state.phase == WIPE_DONE) return;
 
     // Use config getter methods for primary color (wipe color) - 5-channel support
     uint8_t r = config.r();
@@ -20,13 +33,6 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
     uint8_t b = config.b();
     uint8_t ww = config.ww();
     uint8_t cw = config.cw();
-
-    // Use config getter methods for secondary color (background color) - 5-channel support
-    uint8_t bgR = config.r2();
-    uint8_t bgG = config.g2();
-    uint8_t bgB = config.b2();
-    uint8_t bgWW = config.ww2();
-    uint8_t bgCW = config.cw2();
 
     const uint8_t speedVal = config.speed; // 0 means "fastest"
 
@@ -37,6 +43,7 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
         state.lastUpdate = 0;
 
         uint16_t length = segment->getLength();
+        if (length == 0) return;
 
         // Set pixel at current position based on direction (stored in mode field)
         // Direction is stored in config.option1 (0..5)
@@ -104,14 +111,14 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
                 if (state.position % 2 == 0)
                 {
                     // Even: from left edge
-                    if (offset < length / 2)
+                    if (offset < length)
                     {
                         segment->setPixel(offset, r, g, b, ww, cw);
                     }
                 }
                 else
                 {
-                    if (offset < length / 2) // From the right edge, towards center
+                    if (offset < length) // From the right edge, towards center
                     {
                         segment->setPixel(length - 1 - offset, r, g, b, ww, cw);
                     }
@@ -120,13 +127,20 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
             break;
         }
         state.position++;             // Advance position
-        if (state.position >= length) // Reset when complete
+        if (state.position >= length)
         {
-            for (uint16_t i = 0; i < length; i++) // Clear all pixels to background color
+            if (config.feature1)
             {
-                segment->setPixel(i, bgR, bgG, bgB, bgWW, bgCW);
+                onEnter(segment);
+                state.position = 0;
+                state.lastUpdate = 0;
+                state.phase = WIPE_RUNNING;
             }
-            state.position = 0;
+            else
+            {
+                state.position = length;
+                state.phase = WIPE_DONE;
+            }
         }
     }
 }

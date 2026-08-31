@@ -6,7 +6,9 @@
  * Supports 6 directions: L-R, R-L, T-B, B-T, Center-Out, Edges-In
  *
  * Parameters:
- *   [0] Direction (0-5) - Wipe direction (see WipeDirection enum)
+ *   [0] Speed
+ *   [1] Direction (0-5) - Wipe direction (see WipeDirection enum)
+ *   [2] Loop
  *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
@@ -19,6 +21,7 @@
  *
  * Config from Segment's EffectConfig:
  *   - speed: ms per step
+ *   - feature1: repeat after a completed wipe
  *   - r(), g(), b(), w(): Wipe color components
  *   - r2(), g2(), b2(), w2(): Background color components
  */
@@ -42,6 +45,12 @@ enum WipeDirection : uint8_t
     WIPE_EDGES_IN = 5       // From edges towards center (both directions)
 };
 
+enum WipePhase : uint8_t
+{
+    WIPE_RUNNING = 0,
+    WIPE_DONE = 1
+};
+
 /**
  * EffectWipe - STATELESS Color Wipe Effect
  *
@@ -52,6 +61,7 @@ enum WipeDirection : uint8_t
  * Config usage:
  *   - config.speed     : wipe step delay / animation speed
  *   - config.option1   : direction (0..5) (WipeDirection)
+ *   - config.feature1  : loop after completion (default true)
  *   - config.r1/g1/b1/w1 : wipe color (primary)
  *   - config.r2/g2/b2/w2 : background color (secondary)
  * Notes:
@@ -65,6 +75,8 @@ class EffectWipe : public Effect
     virtual ~EffectWipe() = default;
 
     void update(Segment* segment, uint32_t deltaTime) override;
+    void onEnter(Segment* segment) override;
+    bool isDone(const Segment* segment) const override;
     const char* getName(const char* lang = nullptr) override { return "Wipe"; }
     const char* getDescription(const char* lang = nullptr) override { return EFFECT_DESC_DE_EN(
                 "Farbe läuft vom Anfang bis zum Ende über den Streifen",
@@ -73,7 +85,7 @@ class EffectWipe : public Effect
     // ====================================================================
     // Parameter API
     // ====================================================================
-    uint8_t getParameterCount() const override { return 2; }
+    uint8_t getParameterCount() const override { return 3; }
 
     const char* getParameterName(uint8_t index) const override
     {
@@ -81,6 +93,7 @@ class EffectWipe : public Effect
         {
             case 0: return "Speed";
             case 1: return "Direction";
+            case 2: return "Loop";
             default: return nullptr;
         }
     }
@@ -92,6 +105,8 @@ class EffectWipe : public Effect
             case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Wischgeschwindigkeit", "Speed: Wipe animation speed");
             case 1: return PARAM_DESC_DE_EN("Richtung (0-5): 0=Links→Rechts, 1=Rechts→Links, 2=Oben→Unten, 3=Unten→Oben, 4=Mitte→Außen, 5=Außen→Mitte",
                                             "Direction (0-5): 0=Left→Right, 1=Right→Left, 2=Top→Bottom, 3=Bottom→Top, 4=Center→Out, 5=Edges→In");
+            case 2: return PARAM_DESC_DE_EN("Wiederholen: Nach einem vollständigen Wipe den Hintergrund wiederherstellen und erneut starten",
+                                            "Loop: Restore the background after a completed wipe and start again");
             default: return "";
         }
     }
@@ -102,6 +117,7 @@ class EffectWipe : public Effect
         {
             case 0: return ParameterType::PARAM_UINT8; // Speed
             case 1: return ParameterType::PARAM_ENUM;  // Direction
+            case 2: return ParameterType::PARAM_BOOL;  // Loop
             default: return ParameterType::PARAM_UINT8;
         }
     }
@@ -112,6 +128,7 @@ class EffectWipe : public Effect
         {
             case 0: return 25; // default speed
             case 1: return 0;  // default direction: WIPE_LEFT_TO_RIGHT
+            case 2: return 1;  // preserve the historic repeating behavior
             default: return 0;
         }
     }
@@ -124,6 +141,7 @@ class EffectWipe : public Effect
         {
             case 0: return cfg.speed;
             case 1: return cfg.option1; // direction
+            case 2: return cfg.feature1 ? 1 : 0;
             default: return 0;
         }
     }
@@ -136,6 +154,7 @@ class EffectWipe : public Effect
         {
             case 0: cfg.speed = static_cast<uint8_t>(value); break;
             case 1: cfg.option1 = static_cast<uint8_t>(value); break; // direction
+            case 2: cfg.feature1 = (value != 0); break;
             default: break;
         }
     }

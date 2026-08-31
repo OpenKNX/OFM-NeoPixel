@@ -148,7 +148,18 @@ void EffektManagerController::tick(Segment* segment, const EffektManagerData* em
         return;
     }
 
-    // ── Duration check ────────────────────────────────────────────────────
+    // ── Duration / finite-effect completion check ─────────────────────────
+    if (cue.durationSec == EM_DURATION_UNTIL_EFFECT_DONE)
+    {
+        Effect* effect = segment->getEffect();
+        if (!effect || !effect->isDone(segment)) return;
+
+        if (cue.fadeMs > 0)
+            startFade(segment, cue.fadeMs);
+        else
+            advanceToNextCue(segment, emData);
+        return;
+    }
     if (cue.durationSec == 0) return; // hold indefinitely
 
     uint32_t elapsed = now - _rt.cueStartMs;

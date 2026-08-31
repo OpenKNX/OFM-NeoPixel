@@ -130,6 +130,15 @@ class Effect
      */
     virtual void reset() {}
 
+    /** Called when this effect is freshly assigned to a segment. */
+    virtual void onEnter(Segment* segment) {}
+
+    /** Called before this effect is replaced or removed from a segment. */
+    virtual void onExit(Segment* segment) {}
+
+    /** Called when a paused effect resumes without resetting its runtime state. */
+    virtual void onResume(Segment* segment) {}
+
     /**
      * @brief Check if effect is done
      *
