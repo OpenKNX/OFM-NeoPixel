@@ -75,6 +75,7 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint16_t ledCount, LedProtocol protocol, uint32
 
     _inst->buffer = new uint8_t[_inst->bufferSize];
     memset(_inst->buffer, 0, _inst->bufferSize);
+    initBufferFraming();
 
     _inst->spi = selectSPI(); // Select best available SPI instance
 
@@ -162,6 +163,7 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint32_t mosiPin, uint32_t sckPin, uint16_t led
 
     _inst->buffer = new uint8_t[_inst->bufferSize];
     memset(_inst->buffer, 0, _inst->bufferSize); // This will be set to black on init()
+    initBufferFraming();
 
     _inst->spi = selectSPI(); // Select best available SPI instance
 }
@@ -247,6 +249,8 @@ bool HW_NeoPixel_SPI::applyConfig(const PhysicalStripConfig* config)
         _inst->startFrameCount = spiCfg->getStartFrameCount();
         _inst->endFrameCount = spiCfg->getEndFrameCount();
     }
+
+    initBufferFraming(); // Framing depends on the values applied above.
 
     return true;
 }
@@ -605,6 +609,50 @@ void HW_NeoPixel_SPI::sendStartFrame()
 }
 
 /**
+ * Initialize the static APA102/SK9822 buffer framing.
+ *
+ * Every LED frame needs the mandatory 111xxxxx prefix. In particular, a
+ * sacrificial dummy LED must be a valid, dark LED frame instead of another
+ * all-zero start frame, otherwise the chain can remain desynchronized.
+ */
+void HW_NeoPixel_SPI::initBufferFraming()
+{
+    if (!_inst || !_inst->buffer || !_inst->hasGlobalBrightness) return;
+
+    uint32_t offset = 0;
+
+    for (uint16_t i = 0; i < _inst->startFrameCount && offset + 4 <= _inst->bufferSize; i++)
+    {
+        memset(&_inst->buffer[offset], 0x00, 4);
+        offset += 4;
+    }
+
+    if (_inst->dummyLedMode == 1 && offset + 4 <= _inst->bufferSize)
+    {
+        _inst->buffer[offset] = 0xE0; // Valid LED frame at brightness zero.
+        _inst->buffer[offset + 1] = 0x00;
+        _inst->buffer[offset + 2] = 0x00;
+        _inst->buffer[offset + 3] = 0x00;
+        offset += 4;
+    }
+
+    for (uint16_t i = 0; i < _inst->ledCount && offset + 4 <= _inst->bufferSize; i++)
+    {
+        _inst->buffer[offset] = 0xE0 | (_inst->hwBrightness & 0x1F);
+        _inst->buffer[offset + 1] = 0x00;
+        _inst->buffer[offset + 2] = 0x00;
+        _inst->buffer[offset + 3] = 0x00;
+        offset += 4;
+    }
+
+    for (uint16_t i = 0; i < _inst->endFrameCount && offset + 4 <= _inst->bufferSize; i++)
+    {
+        memset(&_inst->buffer[offset], _inst->endFramePattern, 4);
+        offset += 4;
+    }
+}
+
+/**
  * Send end frame
  */
 void HW_NeoPixel_SPI::sendEndFrame()
@@ -618,7 +666,7 @@ void HW_NeoPixel_SPI::sendEndFrame()
 
     for (uint16_t i = 0; i < endFrameBytes; i++)
     {
-        _inst->spi->transfer(0x00); // Protocol requires at least 4 bytes of 0xFF
+        _inst->spi->transfer(_inst->endFramePattern); // 0x00 = APA102, 0xFF = SK9822
     }
 }
 
@@ -673,12 +721,19 @@ void HW_NeoPixel_SPI::clear()
 
     if (_inst->hasGlobalBrightness)
     {
-        // Set start and end frames, but all LED frames to 0
-        memset(_inst->buffer, 0x00, _inst->bufferSize);
-        _inst->buffer[0] = 0x00; // Set start frame
-        _inst->buffer[1] = 0x00;
-        _inst->buffer[2] = 0x00;
-        _inst->buffer[3] = 0x00;
+        // Blank only RGB. Clearing the complete buffer also erases the mandatory
+        // 111xxxxx prefix and turns each LED frame into an extra start frame.
+        const uint32_t dataOffset = _inst->startFrameCount * 4 +
+                                    ((_inst->dummyLedMode == 1) ? 4 : 0);
+        for (uint16_t i = 0; i < _inst->ledCount; i++)
+        {
+            const uint32_t offset = dataOffset + (uint32_t)i * 4;
+            if (offset + 4 > _inst->bufferSize) break;
+            _inst->buffer[offset] = 0xE0 | (_inst->hwBrightness & 0x1F);
+            _inst->buffer[offset + 1] = 0x00;
+            _inst->buffer[offset + 2] = 0x00;
+            _inst->buffer[offset + 3] = 0x00;
+        }
     }
     else
     {
