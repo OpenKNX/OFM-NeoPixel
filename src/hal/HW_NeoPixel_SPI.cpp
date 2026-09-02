@@ -5,6 +5,7 @@
 #if defined(ARDUINO_ARCH_RP2040)
     #include <hardware/gpio.h>
 #elif defined(ARDUINO_ARCH_ESP32)
+    #include <driver/gpio.h>
     #include <esp_log.h>
 #endif
 
@@ -323,8 +324,51 @@ bool HW_NeoPixel_SPI::init()
     //}
     _inst->spi->begin();
 #elif defined(ARDUINO_ARCH_ESP32)
-    // ESP32: Pass pins to begin()
-    _inst->spi->begin(_inst->sckPin, -1, _inst->mosiPin, _inst->csPin);
+    // SPIClass::begin() returns immediately when the bus is already active and does
+    // not remap custom pins. This can leave an SPI strip transmitting on the board
+    // defaults after another module used the global SPI instance.
+    _inst->spi->end();
+
+    // KNeoPiX uses a TXS0108E auto-direction translator. Exercise both outputs as
+    // GPIO before handing them to SPI so the translator sees driven edges, then
+    // leave the bus in the SPI mode-0 idle state.
+    if (kHwDefaultLevelShifter == LevelShifterType::TXS0108E)
+    {
+        pinMode(_inst->mosiPin, OUTPUT);
+        pinMode(_inst->sckPin, OUTPUT);
+        for (uint8_t i = 0; i < 4; i++)
+        {
+            digitalWrite(_inst->mosiPin, LOW);
+            digitalWrite(_inst->sckPin, LOW);
+            delayMicroseconds(50);
+            digitalWrite(_inst->mosiPin, HIGH);
+            digitalWrite(_inst->sckPin, HIGH);
+            delayMicroseconds(50);
+        }
+        digitalWrite(_inst->mosiPin, LOW);
+        digitalWrite(_inst->sckPin, LOW);
+    }
+
+    if (!_inst->spi->begin(_inst->sckPin, -1, _inst->mosiPin, _inst->csPin))
+    {
+        openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
+                                              "ERROR: Failed to attach SCK=GPIO%u, MOSI=GPIO%u, CS=%d",
+                                              (unsigned)_inst->sckPin, (unsigned)_inst->mosiPin, _inst->csPin);
+        return false;
+    }
+
+    // Match the ESP32 serial driver: the TXS0108E needs strong A-side edges and
+    // no internal pull resistor. SPI has two translated signals, so configure both.
+    if (kHwDefaultLevelShifter == LevelShifterType::TXS0108E)
+    {
+        gpio_set_drive_capability((gpio_num_t)_inst->mosiPin, GPIO_DRIVE_CAP_3);
+        gpio_set_pull_mode((gpio_num_t)_inst->mosiPin, GPIO_FLOATING);
+        gpio_set_drive_capability((gpio_num_t)_inst->sckPin, GPIO_DRIVE_CAP_3);
+        gpio_set_pull_mode((gpio_num_t)_inst->sckPin, GPIO_FLOATING);
+        openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
+                                              "TXS0108E: SCK=GPIO%u, MOSI=GPIO%u, drive=40mA, pull=FLOAT",
+                                              (unsigned)_inst->sckPin, (unsigned)_inst->mosiPin);
+    }
 #else
     // Default: Use standard pins
     _inst->spi->begin();
@@ -391,7 +435,7 @@ bool HW_NeoPixel_SPI::init()
     _inst->spi->endTransaction(); // End Transaction
 
     _inst->initialized = true; // Mark as initialized
-    openknx.logger.logWithPrefixAndValues("PIO NeoPixel SPI", "Initialized %u LEDs with protocol %u at %lu Hz",
+    openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI", "Initialized %u LEDs with protocol %u at %lu Hz",
                                           _inst->ledCount, (uint8_t)_inst->protocol, actualFrequency);
     return true;
 }
