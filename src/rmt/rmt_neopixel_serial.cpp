@@ -139,16 +139,16 @@ static uint get_total_rmt_channels()
 /**
  * Check whether RMT DMA should be requested on this target.
  *
- * The classic ESP32 does not support RMT DMA. Other variants/framework
- * combinations may or may not support it, so we still keep a runtime fallback.
+ * Never: `mem_block_symbols` below is a non-DMA block count
+ * (SOC_RMT_MEM_WORDS_PER_CHANNEL, 48). With DMA the IDF reads that same field as
+ * the DMA buffer size instead, where 48 is under the documented minimum, and the
+ * one channel per group that supports DMA then clocks out an unusable waveform --
+ * on an ESP32-S3 with three serial strips that is exactly one dark strip while the
+ * other two fall back to non-DMA and work.
  */
 static bool should_request_rmt_dma()
 {
-    #if defined(CONFIG_IDF_TARGET_ESP32)
     return false;
-    #else
-    return true;
-    #endif
 }
 
 /**
