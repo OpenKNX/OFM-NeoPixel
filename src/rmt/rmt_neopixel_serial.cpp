@@ -32,6 +32,22 @@ static void writeSm16825Settings(rmt_neopixel_serial_inst_t* inst)
 // Static instance mapping
 RMT_NeoPixel_Serial* RMT_NeoPixel_Serial::_instances[8] = {nullptr};
 
+// Completion is reported by the RMT ISR. Polling rmt_tx_wait_all_done(chan, 0) instead made
+// the IDF log "flush timeout" on every poll of a still-running frame, and a loop that was
+// held up elsewhere (effect switch, KNX, flash) came back past the deadline and tore down a
+// channel that was transmitting perfectly well.
+static bool rmtTxDoneCallback(rmt_channel_handle_t, const rmt_tx_done_event_data_t*, void* user_ctx)
+{
+    auto* inst = static_cast<rmt_neopixel_serial_inst_t*>(user_ctx);
+    if (inst)
+    {
+        inst->lastTxEndUs = (uint32_t)micros();
+        inst->waitingForReset = true;
+        inst->busy = false;
+    }
+    return false; // no higher-priority task woken
+}
+
 /**
  * WS2812 Timing for RMT (10MHz Resolution)
  *
@@ -360,6 +376,16 @@ bool RMT_NeoPixel_Serial::init()
         return false;
     }
 
+    // Must be registered while the channel is still in the init state.
+    rmt_tx_event_callbacks_t tx_callbacks = {.on_trans_done = rmtTxDoneCallback};
+    if (rmt_tx_register_event_callbacks(_inst->channel, &tx_callbacks, _inst) != ESP_OK)
+    {
+        ESP_LOGE("RMT_NeoPixel", "Failed to register RMT TX callbacks");
+        rmt_del_encoder(_inst->encoder);
+        rmt_del_channel(_inst->channel);
+        return false;
+    }
+
     // Enable RMT
     if (rmt_enable(_inst->channel) != ESP_OK)
     {
@@ -483,33 +509,24 @@ bool RMT_NeoPixel_Serial::isBusy()
 
     if (_inst->busy)
     {
-        // Bounded, unlike the portMAX_DELAY this used to sit on: a stalled channel must
-        // not hold loop() past the watchdog. 0 polls without blocking.
-        esp_err_t err = rmt_tx_wait_all_done(_inst->channel, 0);
-        if (err == ESP_ERR_TIMEOUT &&
-            (uint32_t)(micros() - _inst->transferStartedUs) < getTransferTimeoutUs()) return true;
+        // rmtTxDoneCallback() clears busy, so still being set past the deadline means the
+        // channel really is stuck rather than merely slow.
+        if ((uint32_t)(micros() - _inst->transferStartedUs) < getTransferTimeoutUs()) return true;
 
-        if (err != ESP_OK)
-        {
-            // Recover a stalled peripheral without changing the asynchronous
-            // model. The active transaction is terminated, the data line is
-            // held LOW for a real reset interval, then the channel is made
-            // available for the next frame.
-            const esp_err_t disableErr = rmt_disable(_inst->channel);
-            gpio_set_level((gpio_num_t)_inst->pin, 0);
-            delayMicroseconds(_inst->resetTimeUs);
-            const esp_err_t enableErr = rmt_enable(_inst->channel);
-            _inst->busy = false;
-            _inst->waitingForReset = false;
-            if (enableErr != ESP_OK) _inst->initialized = false;
-            ESP_LOGE("RMT_NeoPixel", "RMT transfer timed out/failed (%d, disable=%d, enable=%d)",
-                     err, disableErr, enableErr);
-            return false;
-        }
-
+        // Recover a stalled peripheral without changing the asynchronous
+        // model. The active transaction is terminated, the data line is
+        // held LOW for a real reset interval, then the channel is made
+        // available for the next frame.
+        const esp_err_t disableErr = rmt_disable(_inst->channel);
+        gpio_set_level((gpio_num_t)_inst->pin, 0);
+        delayMicroseconds(_inst->resetTimeUs);
+        const esp_err_t enableErr = rmt_enable(_inst->channel);
         _inst->busy = false;
-        _inst->lastTxEndUs = micros();
-        _inst->waitingForReset = true;
+        _inst->waitingForReset = false;
+        if (enableErr != ESP_OK) _inst->initialized = false;
+        ESP_LOGE("RMT_NeoPixel", "RMT transfer stalled (disable=%d, enable=%d)",
+                 disableErr, enableErr);
+        return false;
     }
 
     if (_inst->waitingForReset)
