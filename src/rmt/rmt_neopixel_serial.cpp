@@ -137,18 +137,35 @@ static uint get_total_rmt_channels()
 }
 
 /**
- * Check whether RMT DMA should be requested on this target.
- *
- * Never: `mem_block_symbols` below is a non-DMA block count
- * (SOC_RMT_MEM_WORDS_PER_CHANNEL, 48). With DMA the IDF reads that same field as
- * the DMA buffer size instead, where 48 is under the documented minimum, and the
- * one channel per group that supports DMA then clocks out an unusable waveform --
- * on an ESP32-S3 with three serial strips that is exactly one dark strip while the
- * other two fall back to non-DMA and work.
+ * WS2805 frames are five bytes per pixel and need substantially more RMT refill
+ * bandwidth than the three-byte strips. On DMA-capable targets, reserve DMA for
+ * that long frame only; ordinary strips continue to use one hardware memory block
+ * each, so a multi-strip ESP32-S3 does not exhaust its RMT channels.
  */
-static bool should_request_rmt_dma()
+static bool should_request_rmt_dma(LedProtocol protocol)
 {
+    #if defined(SOC_RMT_SUPPORT_DMA) && SOC_RMT_SUPPORT_DMA
+    return protocol == LedProtocol::WS2805_RGBCCT;
+    #else
+    (void)protocol;
     return false;
+    #endif
+}
+
+/**
+ * In DMA mode mem_block_symbols is a symbol-buffer size, not a hardware block
+ * count. Size it for a complete normal WS2805 frame when practical, with a cap
+ * that bounds internal DMA RAM for unusually long strips.
+ */
+static size_t rmt_dma_buffer_symbols(const rmt_neopixel_serial_inst_t* inst)
+{
+    if (!inst) return 64;
+
+    size_t symbols = inst->bufferSize * 8U;
+    if (symbols < 64U) symbols = 64U;       // ESP-IDF documented minimum
+    if (symbols > 4096U) symbols = 4096U;   // 16 KiB DMA buffer ceiling
+    if (symbols & 1U) ++symbols;            // RMT requires an even size
+    return symbols;
 }
 
 /**
@@ -317,28 +334,33 @@ bool RMT_NeoPixel_Serial::init()
         return false;
     }
 
-    // Configure TX channel
+    const bool requestDma = should_request_rmt_dma(_inst->protocol);
+
+    // Configure TX channel. In normal mode this value represents one hardware
+    // RMT memory block; in DMA mode it is the DMA symbol-buffer size.
     rmt_tx_channel_config_t tx_chan_config = {
         .gpio_num = (gpio_num_t)_inst->pin,
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .resolution_hz = RMT_LED_STRIP_RESOLUTION_HZ,
-        // One hardware block. More than SOC_RMT_MEM_WORDS_PER_CHANNEL makes the IDF take
-        // the neighbour channel too, leaving C3/C6/C5 room for a single strip.
-        .mem_block_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL,
+        // Normal strips use one hardware block. More than SOC_RMT_MEM_WORDS_PER_CHANNEL
+        // in non-DMA mode makes the IDF take the neighbouring channel too.
+        .mem_block_symbols = requestDma ? rmt_dma_buffer_symbols(_inst)
+                                        : SOC_RMT_MEM_WORDS_PER_CHANNEL,
         .trans_queue_depth = 4,  // 4 transaction queue
         .flags = {
             // Fixed when the channel is created, so PhysicalStrip sets the override first.
             .invert_out = (_inst->polarityOverride == 1) ? false
                         : (_inst->polarityOverride == 2) ? true
                                                          : SerialTiming::profileFor(_inst->protocol).inverted,
-            .with_dma = should_request_rmt_dma(),
+            .with_dma = requestDma,
         }};
 
     esp_err_t err = rmt_new_tx_channel(&tx_chan_config, &_inst->channel);
     if (err != ESP_OK && tx_chan_config.flags.with_dma)
     {
-        ESP_LOGW("RMT_NeoPixel", "RMT DMA unsupported on GPIO %lu, retrying without DMA", (unsigned long)_inst->pin);
+        ESP_LOGW("RMT_NeoPixel", "RMT DMA unavailable on GPIO %lu, retrying without DMA", (unsigned long)_inst->pin);
         tx_chan_config.flags.with_dma = false;
+        tx_chan_config.mem_block_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL;
         err = rmt_new_tx_channel(&tx_chan_config, &_inst->channel);
     }
 
