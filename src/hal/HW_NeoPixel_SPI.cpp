@@ -1,6 +1,7 @@
 #include "HW_NeoPixel_SPI.h"
 #include "../PhysicalStripConfig.h"
 #include "OpenKNX.h"
+#include <new>
 
 #if defined(ARDUINO_ARCH_RP2040)
     #include <hardware/gpio.h>
@@ -18,6 +19,15 @@ SPIClass* HW_NeoPixel_SPI::_spi1Instance = nullptr; // Second SPI bus instance (
 #define BRIGHTNESS_MIN 16     // Minimum safe brightness (below = flicker)
 #define BRIGHTNESS_MAX 30     // Maximum safe brightness (31 = 0xFF = sync bug)
 #define BRIGHTNESS_DEFAULT 30 // Default to max safe brightness
+
+namespace
+{
+bool isApa102Family(LedProtocol protocol)
+{
+    return protocol == LedProtocol::APA102 || protocol == LedProtocol::APA102_CLONE ||
+           protocol == LedProtocol::SK9822;
+}
+}
 
 /**
  * Constructor
@@ -42,7 +52,7 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint16_t ledCount, LedProtocol protocol, uint32
 
     // Define Bytes for each LED
     _inst->bytesPerLed = ProtocolHelper::getBytesPerLed(protocol);
-    _inst->hasGlobalBrightness = (protocol == LedProtocol::APA102 || protocol == LedProtocol::SK9822);
+    _inst->hasGlobalBrightness = isApa102Family(protocol);
     _inst->needs7bit = (protocol == LedProtocol::LPD8806);
 
     // ===== Extended SPI Configuration Defaults =====
@@ -131,7 +141,7 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint32_t mosiPin, uint32_t sckPin, uint16_t led
 
     // Define Bytes for each LED
     _inst->bytesPerLed = ProtocolHelper::getBytesPerLed(protocol);
-    _inst->hasGlobalBrightness = (protocol == LedProtocol::APA102 || protocol == LedProtocol::SK9822);
+    _inst->hasGlobalBrightness = isApa102Family(protocol);
     _inst->needs7bit = (protocol == LedProtocol::LPD8806); // LPD8806 needs 7-bit values - Just for Preperation
 
     // ===== Extended SPI Configuration Defaults =====
@@ -233,6 +243,15 @@ bool HW_NeoPixel_SPI::applyConfig(const PhysicalStripConfig* config)
     const SpiStripConfig* spiCfg = config->isSpiConfig() ? static_cast<const SpiStripConfig*>(config) : nullptr;
     if (!spiCfg) return false;
 
+    const bool layoutChanged = _inst->dummyLedMode != spiCfg->getDummyLedMode() ||
+                               _inst->startFrameCount != spiCfg->getStartFrameCount() ||
+                               _inst->endFrameCount != spiCfg->getEndFrameCount() ||
+                               _inst->endFramePattern != spiCfg->getEndFramePattern();
+    // The frame layout is also the allocation contract. Refuse live changes
+    // because moving the pixel payload while it may be in use is unsafe.
+    if (spiCfg->getStartFrameDelayUs() != 0) return false;
+    if (_inst->initialized && layoutChanged) return false;
+
     // Apply SPI-specific settings
     _inst->colorOrder = spiCfg->getColorOrder();
     _inst->hwBrightness = spiCfg->getHwBrightness();
@@ -250,8 +269,34 @@ bool HW_NeoPixel_SPI::applyConfig(const PhysicalStripConfig* config)
         _inst->endFrameCount = spiCfg->getEndFrameCount();
     }
 
-    initBufferFraming(); // Framing depends on the values applied above.
+    if (!_inst->initialized) return rebuildFrameBuffer();
+    return true;
+}
 
+bool HW_NeoPixel_SPI::rebuildFrameBuffer()
+{
+    if (!_inst) return false;
+
+    const bool hasGlobalBrightness = isApa102Family(_inst->protocol);
+    const uint8_t bytesPerLed = hasGlobalBrightness ? 4 : ProtocolHelper::getBytesPerLed(_inst->protocol);
+    if (bytesPerLed == 0) return false;
+
+    const size_t startFrameSize = hasGlobalBrightness ? (size_t)_inst->startFrameCount * 4U : 0U;
+    const size_t dummyLedSize = hasGlobalBrightness && _inst->dummyLedMode == 1 ? 4U : 0U;
+    const size_t endFrameSize = hasGlobalBrightness ? (size_t)_inst->endFrameCount * 4U : 0U;
+    const size_t bufferSize = startFrameSize + dummyLedSize +
+                              (size_t)_inst->ledCount * bytesPerLed + endFrameSize;
+
+    uint8_t* replacement = new (std::nothrow) uint8_t[bufferSize];
+    if (!replacement) return false;
+    memset(replacement, 0, bufferSize);
+
+    delete[] _inst->buffer;
+    _inst->buffer = replacement;
+    _inst->bufferSize = bufferSize;
+    _inst->bytesPerLed = bytesPerLed;
+    _inst->hasGlobalBrightness = hasGlobalBrightness;
+    initBufferFraming();
     return true;
 }
 
@@ -386,6 +431,7 @@ bool HW_NeoPixel_SPI::init()
     switch (_inst->protocol) // Important: Limit frequency based on protocol, else data corruption may occur
     {
         case LedProtocol::APA102:
+        case LedProtocol::APA102_CLONE:
         case LedProtocol::SK9822:
             if (actualFrequency > 20000000) actualFrequency = 20000000; // 20MHz max. for APA102
             break;
@@ -429,7 +475,8 @@ bool HW_NeoPixel_SPI::init()
 #endif
 
     // Begin SPI Transaction, configure the SPI Mode and Frequency
-    SPISettings settings(actualFrequency, MSBFIRST, SPI_MODE0); // APA102/WS2801/LPD8806 are using Mode 0 (CPOL=0, CPHA=0)
+    _inst->spiFrequency = actualFrequency;
+    SPISettings settings(_inst->spiFrequency, MSBFIRST, SPI_MODE0); // APA102/WS2801/LPD8806 are using Mode 0 (CPOL=0, CPHA=0)
 
     _inst->spi->beginTransaction(settings); // Begin Transaction
     if (_inst->hasGlobalBrightness)         // Send initial Start Frame for APA102/SK9822
@@ -551,6 +598,7 @@ void HW_NeoPixel_SPI::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t 
     switch (_inst->protocol)
     {
         case LedProtocol::APA102:
+        case LedProtocol::APA102_CLONE:
         case LedProtocol::SK9822:
         {
             // APA102: [Start Frames][Dummy LED (optional)][LED Data][End Frames]
@@ -692,10 +740,6 @@ bool HW_NeoPixel_SPI::show()
     {
         _inst->spi->transfer(_inst->buffer[i]);
     } // Send complete buffer byte by byte
-    if (_inst->hasGlobalBrightness)
-    {
-        sendEndFrame();
-    } // End Frame for APA102
     _inst->spi->endTransaction(); // End SPI Transaction
 
     _inst->busy = false;
@@ -777,7 +821,9 @@ void HW_NeoPixel_SPI::setDummyLedMode(uint8_t mode)
         return;
     }
 
+    const uint8_t previous = _inst->dummyLedMode;
     _inst->dummyLedMode = mode;
+    if (!rebuildFrameBuffer()) _inst->dummyLedMode = previous;
 }
 
 /**
@@ -798,7 +844,9 @@ void HW_NeoPixel_SPI::setStartFrameCount(uint8_t count)
         return;
     }
 
+    const uint8_t previous = _inst->startFrameCount;
     _inst->startFrameCount = count;
+    if (!rebuildFrameBuffer()) _inst->startFrameCount = previous;
 }
 
 /**
@@ -810,7 +858,10 @@ void HW_NeoPixel_SPI::setEndFrameCount(uint8_t count)
     if (count < 1) count = 1;
     if (count > 80) count = 80;
 
+    if (_inst->initialized) return;
+    const uint8_t previous = _inst->endFrameCount;
     _inst->endFrameCount = count;
+    if (!rebuildFrameBuffer()) _inst->endFrameCount = previous;
 }
 
 /**
@@ -819,9 +870,9 @@ void HW_NeoPixel_SPI::setEndFrameCount(uint8_t count)
 void HW_NeoPixel_SPI::setStartFrameDelayUs(uint32_t delayUs)
 {
     if (!_inst) return;
-    if (delayUs > 1000) delayUs = 1000;
-
-    _inst->startFrameDelayUs = delayUs;
+    // A pause cannot be inserted safely into this synchronous frame transfer.
+    if (delayUs != 0) return;
+    _inst->startFrameDelayUs = 0;
 }
 
 /**
@@ -830,7 +881,10 @@ void HW_NeoPixel_SPI::setStartFrameDelayUs(uint32_t delayUs)
 void HW_NeoPixel_SPI::setEndFramePattern(uint8_t pattern)
 {
     if (!_inst) return;
+    if (_inst->initialized) return;
+    const uint8_t previous = _inst->endFramePattern;
     _inst->endFramePattern = pattern;
+    if (!rebuildFrameBuffer()) _inst->endFramePattern = previous;
 }
 
 /**
