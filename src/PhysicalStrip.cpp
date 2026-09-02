@@ -119,6 +119,42 @@ PhysicalStrip::PhysicalStrip(uint32_t pin, uint16_t ledCount, LedProtocol protoc
     {
         _config = _driver->createDefaultConfig();
     }
+#elif defined(ESP32)
+    // DriverFactory has no frequency parameter, so the SPI driver is built here directly.
+    // Without this branch an ESP32 SPI strip keeps _driver/_config at nullptr and dies with
+    // "Failed to cast config to SpiStripConfig" + "No driver available".
+    if (_colorOrder == ColorOrder::NONE)
+    {
+        switch (protocol)
+        {
+            case LedProtocol::APA102:
+                setColorOrder(ColorOrder::BGR); // APA102: BGR
+                break;
+            case LedProtocol::SK9822:
+                setColorOrder(ColorOrder::RGB); // SK9822 clones: RGB
+                break;
+            case LedProtocol::WS2801:
+                setColorOrder(ColorOrder::RGB); // WS2801: RGB
+                break;
+            default:
+                // Keep NONE - driver uses protocol default
+                break;
+        }
+    }
+
+    _driver = new HW_NeoPixel_SPI(pin, sckPin, ledCount, protocol, frequencyHz, csPin);
+
+    if (_driver)
+    {
+        // Carries the frequency back out of the driver instance.
+        _config = _driver->createDefaultConfig();
+
+        if (_config && _colorOrder != ColorOrder::NONE)
+        {
+            _config->setColorOrder(_colorOrder);
+            _driver->applyConfig(_config);
+        }
+    }
 #endif
 }
 
