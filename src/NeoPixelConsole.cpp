@@ -28,6 +28,7 @@
     #include "pio/pio_neopixel_spi.h"
 #endif
 #ifdef ARDUINO_ARCH_ESP32
+    #include <driver/gpio.h>
     #include "rmt/rmt_neopixel_serial.h"
 #endif
 
@@ -204,6 +205,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("neo update", "Force update all strips");
         openknx.console.printHelpLine("neo clear", "Turn off all LEDs");
         openknx.console.printHelpLine("neo test <strip>", "Run test pattern on strip (0-based index)");
+        openknx.console.printHelpLine("neo bitbang <strip> [swap]", "Direct APA102 GPIO test; optionally swap DATA/CLOCK");
         openknx.console.printHelpLine("neo speed <mode>", "Set update speed: slow|normal|fast|max|extrameludicrous|ftl");
         openknx.console.printHelpLine("neo auto on|off", "Enable/disable auto-update mode");
         openknx.console.printHelpLine("neo perf", "Show performance statistics (requires auto-update)");
@@ -531,6 +533,10 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     else if (command.compare(0, 9, "neo test ") == 0)
     {
         return processTestCommand(command.substr(9));
+    }
+    else if (command.compare(0, 12, "neo bitbang ") == 0)
+    {
+        return processBitbangCommand(command.substr(12));
     }
     else if (command.compare(0, 10, "neo speed ") == 0)
     {
@@ -1786,6 +1792,99 @@ bool NeoPixel::processTestCommand(const std::string& args)
 
     openknx.logger.log("Test pattern complete");
 
+    return true;
+}
+
+/**
+ * @brief Drive an APA102-family strip directly through GPIO.
+ *
+ * This diagnostic bypasses SPI, the driver's frame buffer, virtual strips and
+ * effects. The optional "swap" argument reverses DATA/CLOCK on the configured
+ * pin pair without requiring a new ETS configuration.
+ */
+bool NeoPixel::processBitbangCommand(const std::string& args)
+{
+    if (!_initialized || !_manager)
+    {
+        openknx.logger.log("ERROR: NeoPixel module not initialized!");
+        return true;
+    }
+
+    const int stripIndex = atoi(args.c_str());
+    auto* strip = _manager->getStrip(stripIndex);
+    if (!strip)
+    {
+        openknx.logger.logWithValues("ERROR: Strip %d not found!", stripIndex);
+        return true;
+    }
+    if (!strip->isSpiStrip())
+    {
+        openknx.logger.logWithValues("ERROR: Strip %d is not an SPI strip!", stripIndex);
+        return true;
+    }
+
+    const bool swapPins = args.find("swap") != std::string::npos;
+    const uint32_t dataPin = swapPins ? strip->getClockPin() : strip->getDataPin();
+    const uint32_t clockPin = swapPins ? strip->getDataPin() : strip->getClockPin();
+    const uint16_t ledCount = strip->getLedCount();
+
+    openknx.logger.logWithValues(
+        "Direct GPIO test: %d LEDs, DATA=GPIO%d, CLOCK=GPIO%d (%s pin order)",
+        (int)ledCount, (int)dataPin, (int)clockPin, swapPins ? "swapped" : "configured");
+
+#ifdef ARDUINO_ARCH_ESP32
+    // Explicitly detach both pads from the GPIO matrix. This is the essential
+    // difference from pinMode() when a previous SPI route still owns the pins.
+    gpio_reset_pin((gpio_num_t)dataPin);
+    gpio_reset_pin((gpio_num_t)clockPin);
+#endif
+
+    pinMode(dataPin, OUTPUT);
+    pinMode(clockPin, OUTPUT);
+    digitalWrite(dataPin, LOW);
+    digitalWrite(clockPin, LOW);
+
+    // Conservative ~200 kHz mode-0 waveform for APA102 and compatible clones.
+    auto sendByte = [&](uint8_t value) {
+        for (int8_t bit = 7; bit >= 0; --bit)
+        {
+            digitalWrite(dataPin, (value >> bit) & 0x01U);
+            delayMicroseconds(2);
+            digitalWrite(clockPin, HIGH);
+            delayMicroseconds(2);
+            digitalWrite(clockPin, LOW);
+        }
+    };
+
+    auto sendFrame = [&](uint8_t r, uint8_t g, uint8_t b) {
+        for (uint8_t i = 0; i < 4; ++i)
+            sendByte(0x00);
+
+        for (uint16_t i = 0; i < ledCount; ++i)
+        {
+            sendByte(0xFF);
+            sendByte(b);
+            sendByte(g);
+            sendByte(r);
+        }
+
+        for (uint16_t i = 0; i < ledCount / 16U + 4U; ++i)
+            sendByte(0xFF);
+    };
+
+    openknx.logger.log("Direct GPIO: red for 2 seconds...");
+    sendFrame(255, 0, 0);
+    delay(2000);
+    openknx.logger.log("Direct GPIO: green for 2 seconds...");
+    sendFrame(0, 255, 0);
+    delay(2000);
+    openknx.logger.log("Direct GPIO: blue for 2 seconds...");
+    sendFrame(0, 0, 255);
+    delay(2000);
+    openknx.logger.log("Direct GPIO: off");
+    sendFrame(0, 0, 0);
+
+    openknx.logger.log("Direct GPIO test complete; reboot before returning to normal output.");
     return true;
 }
 
