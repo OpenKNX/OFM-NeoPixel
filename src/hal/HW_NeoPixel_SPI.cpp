@@ -49,7 +49,6 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint16_t ledCount, LedProtocol protocol, uint32
     _inst->csPin = -1;
     _inst->initialized = false;
     _inst->busy = false;
-    _inst->useSoftwareSpi = false;
 
     // Define Bytes for each LED
     _inst->bytesPerLed = ProtocolHelper::getBytesPerLed(protocol);
@@ -139,7 +138,6 @@ HW_NeoPixel_SPI::HW_NeoPixel_SPI(uint32_t mosiPin, uint32_t sckPin, uint16_t led
     _inst->spiFrequency = frequency; // Set the SPI Frequency (Hz)
     _inst->initialized = false;      // Will be set in init()
     _inst->busy = false;             // Will be set in init()
-    _inst->useSoftwareSpi = false;
 
     // Define Bytes for each LED
     _inst->bytesPerLed = ProtocolHelper::getBytesPerLed(protocol);
@@ -378,16 +376,8 @@ bool HW_NeoPixel_SPI::init()
     // SPIClass::begin() returns immediately when the bus is already active and does
     // not remap custom pins. This can leave an SPI strip transmitting on the board
     // defaults after another module used the global SPI instance.
-    //
-    // The ESP32-S3/TXS0108E combination is kept on the slow GPIO transport that
-    // proved reliable in the timing-investigation branch. It avoids both the shared
-    // Arduino SPI bus and fast edges that can make the auto-direction translator
-    // retain the wrong direction. Other ESP32 boards and protocols keep hardware SPI.
-    #if defined(CONFIG_IDF_TARGET_ESP32S3)
-    _inst->useSoftwareSpi = kHwDefaultLevelShifter == LevelShifterType::TXS0108E &&
-                             isApa102Family(_inst->protocol);
-    #endif
-    if (!_inst->useSoftwareSpi) _inst->spi->end();
+    // Match the transport used by the working timing-investigation branch.
+    _inst->spi->end();
 
     // KNeoPiX uses a TXS0108E auto-direction translator. Exercise both outputs as
     // GPIO before handing them to SPI so the translator sees driven edges, then
@@ -409,14 +399,15 @@ bool HW_NeoPixel_SPI::init()
         digitalWrite(_inst->sckPin, LOW);
     }
 
-    if (!_inst->useSoftwareSpi &&
-        !_inst->spi->begin(_inst->sckPin, -1, _inst->mosiPin, _inst->csPin))
+    if (!_inst->spi->begin(_inst->sckPin, -1, _inst->mosiPin, _inst->csPin))
     {
         openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
                                               "ERROR: Failed to attach SCK=GPIO%u, MOSI=GPIO%u, CS=%d",
                                               (unsigned)_inst->sckPin, (unsigned)_inst->mosiPin, _inst->csPin);
         return false;
     }
+    openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI", "Bus attached: SCK=GPIO%u, MOSI=GPIO%u, CS=%d",
+                                          (unsigned)_inst->sckPin, (unsigned)_inst->mosiPin, _inst->csPin);
 
     // Match the ESP32 serial driver: the TXS0108E needs strong A-side edges and
     // no internal pull resistor. SPI has two translated signals, so configure both.
@@ -428,12 +419,6 @@ bool HW_NeoPixel_SPI::init()
         gpio_set_pull_mode((gpio_num_t)_inst->sckPin, GPIO_FLOATING);
         openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
                                               "TXS0108E: SCK=GPIO%u, MOSI=GPIO%u, drive=40mA, pull=FLOAT",
-                                              (unsigned)_inst->sckPin, (unsigned)_inst->mosiPin);
-    }
-    if (_inst->useSoftwareSpi)
-    {
-        openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI",
-                                              "ESP32-S3 TXS0108E fallback: GPIO SPI on SCK=%u, MOSI=%u (max 250 kHz)",
                                               (unsigned)_inst->sckPin, (unsigned)_inst->mosiPin);
     }
 #else
@@ -494,23 +479,18 @@ bool HW_NeoPixel_SPI::init()
 
     // Begin SPI Transaction, configure the SPI Mode and Frequency
     _inst->spiFrequency = actualFrequency;
-    if (!_inst->useSoftwareSpi)
-    {
-        SPISettings settings(_inst->spiFrequency, MSBFIRST, SPI_MODE0); // APA102/WS2801/LPD8806 are using Mode 0 (CPOL=0, CPHA=0)
+    SPISettings settings(_inst->spiFrequency, MSBFIRST, SPI_MODE0); // APA102/WS2801/LPD8806 are using Mode 0 (CPOL=0, CPHA=0)
 
-        _inst->spi->beginTransaction(settings); // Begin Transaction
-        if (_inst->hasGlobalBrightness)         // Send initial Start Frame for APA102/SK9822
-        {
-            sendStartFrame();
-        }
-        _inst->spi->endTransaction(); // End Transaction
+    _inst->spi->beginTransaction(settings); // Begin Transaction
+    if (_inst->hasGlobalBrightness)         // Send initial Start Frame for APA102/SK9822
+    {
+        sendStartFrame();
     }
+    _inst->spi->endTransaction(); // End Transaction
 
     _inst->initialized = true; // Mark as initialized
-    const uint32_t wireFrequency = _inst->useSoftwareSpi ? 250000U : actualFrequency;
-    openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI", "Initialized %u LEDs with protocol %u at %lu Hz%s",
-                                          _inst->ledCount, (uint8_t)_inst->protocol, wireFrequency,
-                                          _inst->useSoftwareSpi ? " (GPIO SPI)" : "");
+    openknx.logger.logWithPrefixAndValues("HW NeoPixel SPI", "Initialized %u LEDs with protocol %u at %lu Hz",
+                                          _inst->ledCount, (uint8_t)_inst->protocol, actualFrequency);
     return true;
 }
 
@@ -742,57 +722,6 @@ void HW_NeoPixel_SPI::sendEndFrame()
 }
 
 /**
- * Send an APA102-family frame through plain GPIO.
- *
- * This is intentionally the same conservative waveform used by the successful
- * timing-investigation diagnostic: one canonical 32-bit zero start frame,
- * stored LED frames, and an all-one latch tail. Interrupts may stretch either
- * clock phase, which APA102 tolerates, and remain enabled for the rest of the
- * firmware while this synchronous transfer is running.
- */
-bool HW_NeoPixel_SPI::showSoftwareApa()
-{
-#if defined(ARDUINO_ARCH_ESP32)
-    if (!_inst || !_inst->buffer || !isApa102Family(_inst->protocol)) return false;
-
-    digitalWrite(_inst->sckPin, LOW);
-    auto sendByte = [this](uint8_t value) {
-        for (int8_t bit = 7; bit >= 0; --bit)
-        {
-            digitalWrite(_inst->mosiPin, (value >> bit) & 0x01U);
-            delayMicroseconds(2);
-            digitalWrite(_inst->sckPin, HIGH);
-            delayMicroseconds(2);
-            digitalWrite(_inst->sckPin, LOW);
-        }
-    };
-
-    for (uint8_t i = 0; i < 4; ++i)
-        sendByte(0x00);
-
-    const size_t firstFrame = (size_t)_inst->startFrameCount * 4U;
-    const size_t frameCount = (size_t)_inst->ledCount + (_inst->dummyLedMode == 1 ? 1U : 0U);
-    const size_t frameBytes = frameCount * 4U;
-    if (firstFrame > _inst->bufferSize || frameBytes > _inst->bufferSize - firstFrame)
-        return false;
-
-    for (size_t i = 0; i < frameBytes; ++i)
-        sendByte(_inst->buffer[firstFrame + i]);
-
-    // Extra all-one clocks propagate the final pixel data through the chain and
-    // latch it. Four guard bytes also cover short strips and clone variants.
-    const size_t endBytes = frameCount / 16U + 4U;
-    for (size_t i = 0; i < endBytes; ++i)
-        sendByte(0xFF);
-
-    digitalWrite(_inst->mosiPin, LOW);
-    return true;
-#else
-    return false;
-#endif
-}
-
-/**
  * Show LEDs (send data over SPI)
  */
 bool HW_NeoPixel_SPI::show()
@@ -807,21 +736,16 @@ bool HW_NeoPixel_SPI::show()
 
     _inst->busy = true;
 
-    if (_inst->useSoftwareSpi)
-    {
-        const bool sent = showSoftwareApa();
-        _inst->busy = false;
-        return sent;
-    }
-
     SPISettings settings(_inst->spiFrequency, MSBFIRST, SPI_MODE0); // APA102/WS2801/LPD8806 are using Mode 0 (CPOL=0, CPHA=0)
 
+    if (_inst->csPin >= 0) digitalWrite(_inst->csPin, LOW);
     _inst->spi->beginTransaction(settings); // Begin SPI Transaction
     for (size_t i = 0; i < _inst->bufferSize; i++)
     {
         _inst->spi->transfer(_inst->buffer[i]);
     } // Send complete buffer byte by byte
     _inst->spi->endTransaction(); // End SPI Transaction
+    if (_inst->csPin >= 0) digitalWrite(_inst->csPin, HIGH);
 
     _inst->busy = false;
 

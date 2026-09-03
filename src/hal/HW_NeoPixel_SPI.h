@@ -64,7 +64,6 @@ struct hw_neopixel_spi_inst
 
     bool initialized;   // Initialized?
     volatile bool busy; // Transfer in progress?
-    bool useSoftwareSpi; // ESP32-S3/TXS0108E APA102 reliability fallback
 };
 typedef struct hw_neopixel_spi_inst hw_neopixel_spi_inst_t;
 
@@ -185,7 +184,6 @@ class HW_NeoPixel_SPI : public IHardwareDriver
     void sendStartFrame();
     void sendEndFrame();
     void initBufferFraming();
-    bool showSoftwareApa();
     bool rebuildFrameBuffer();
     void rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint8_t b);
 
