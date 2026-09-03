@@ -2501,20 +2501,8 @@ bool NeoPixel::processPhysListCommand()
             auto strip = _manager->getStrip(i);
             if (strip)
             {
-                // Get protocol name
-                const char* protocol = "???";
                 LedProtocol proto = strip->getProtocol();
-                switch (proto)
-                {
-                    case LedProtocol::WS2812: protocol = "WS2812"; break;
-                    case LedProtocol::WS2812B: protocol = "WS2812B"; break;
-                    case LedProtocol::SK6812: protocol = "SK6812"; break;
-                    case LedProtocol::APA102: protocol = "APA102"; break;
-                    case LedProtocol::SK9822: protocol = "SK9822"; break;
-                    case LedProtocol::WS2801: protocol = "WS2801"; break;
-                    case LedProtocol::LPD8806: protocol = "LPD8806"; break;
-                    default: break;
-                }
+                const char* protocol = getProtocolName(proto);
 
                 // Get ColorOrder from PhysicalStrip
                 const char* colorOrder = "???";
