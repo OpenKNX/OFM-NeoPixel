@@ -205,6 +205,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("neo update", "Force update all strips");
         openknx.console.printHelpLine("neo clear", "Turn off all LEDs");
         openknx.console.printHelpLine("neo test <strip>", "Run test pattern on strip (0-based index)");
+        openknx.console.printHelpLine("neo pincheck <strip>", "Check SPI DATA/CLOCK GPIO output state");
         openknx.console.printHelpLine("neo bitbang <strip> [swap]", "Direct APA102 GPIO test; optionally swap DATA/CLOCK");
         openknx.console.printHelpLine("neo speed <mode>", "Set update speed: slow|normal|fast|max|extrameludicrous|ftl");
         openknx.console.printHelpLine("neo auto on|off", "Enable/disable auto-update mode");
@@ -533,6 +534,10 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     else if (command.compare(0, 9, "neo test ") == 0)
     {
         return processTestCommand(command.substr(9));
+    }
+    else if (command.compare(0, 13, "neo pincheck ") == 0)
+    {
+        return processPinCheckCommand(command.substr(13));
     }
     else if (command.compare(0, 12, "neo bitbang ") == 0)
     {
@@ -1792,6 +1797,107 @@ bool NeoPixel::processTestCommand(const std::string& args)
 
     openknx.logger.log("Test pattern complete");
 
+    return true;
+}
+
+/**
+ * @brief Verify that both pins of an SPI strip can be driven as plain GPIO.
+ *
+ * The ESP32 diagnostics report three independent views of the output: the
+ * requested output latch, the output-enable register and the physical pad
+ * input. The checks execute inside one console handler so the application loop
+ * cannot change the pin between writing and reading it.
+ */
+bool NeoPixel::processPinCheckCommand(const std::string& args)
+{
+    if (!_initialized || !_manager)
+    {
+        openknx.logger.log("ERROR: NeoPixel module not initialized!");
+        return true;
+    }
+
+    const int stripIndex = atoi(args.c_str());
+    auto* strip = _manager->getStrip(stripIndex);
+    if (!strip)
+    {
+        openknx.logger.logWithValues("ERROR: Strip %d not found!", stripIndex);
+        return true;
+    }
+    if (!strip->isSpiStrip())
+    {
+        openknx.logger.logWithValues("ERROR: Strip %d is not an SPI strip!", stripIndex);
+        return true;
+    }
+
+    const uint32_t dataPin = strip->getDataPin();
+    const uint32_t clockPin = strip->getClockPin();
+    openknx.logger.logWithValues("SPI pin check: DATA=GPIO%d, CLOCK=GPIO%d", (int)dataPin, (int)clockPin);
+
+#ifdef ARDUINO_ARCH_ESP32
+    auto checkPin = [&](uint32_t pin, const char* role) {
+        const gpio_num_t gpio = (gpio_num_t)pin;
+        const esp_err_t resetResult = gpio_reset_pin(gpio);
+        const esp_err_t directionResult = gpio_set_direction(gpio, GPIO_MODE_INPUT_OUTPUT);
+        const esp_err_t pullResult = gpio_set_pull_mode(gpio, GPIO_FLOATING);
+
+        const uint32_t port = digitalPinToPort(pin);
+        const uint32_t mask = digitalPinToBitMask(pin);
+        auto readLatch = [&]() { return ((*portOutputRegister(port) & mask) != 0U) ? 1 : 0; };
+        auto readOutputEnable = [&]() { return ((*portModeRegister(port) & mask) != 0U) ? 1 : 0; };
+
+        const esp_err_t lowResult = gpio_set_level(gpio, 0);
+        delayMicroseconds(20);
+        const int lowLatch = readLatch();
+        const int lowOutputEnable = readOutputEnable();
+        const int lowPad = gpio_get_level(gpio);
+
+        const esp_err_t highResult = gpio_set_level(gpio, 1);
+        delayMicroseconds(20);
+        const int highLatch = readLatch();
+        const int highOutputEnable = readOutputEnable();
+        const int highPad = gpio_get_level(gpio);
+
+        // Do not hold a pin high when the pad cannot follow it; that can indicate
+        // a short or a board-level load. Leave every checked pin in the safe LOW state.
+        gpio_set_level(gpio, 0);
+
+        openknx.logger.logWithValues(
+            "%s GPIO%d: api reset=%d dir=%d pull=%d low=%d high=%d",
+            role, (int)pin, (int)resetResult, (int)directionResult, (int)pullResult,
+            (int)lowResult, (int)highResult);
+        openknx.logger.logWithValues(
+            "%s GPIO%d: LOW latch=%d oe=%d pad=%d; HIGH latch=%d oe=%d pad=%d",
+            role, (int)pin, lowLatch, lowOutputEnable, lowPad,
+            highLatch, highOutputEnable, highPad);
+
+        return resetResult == ESP_OK && directionResult == ESP_OK && pullResult == ESP_OK &&
+               lowResult == ESP_OK && highResult == ESP_OK &&
+               lowLatch == 0 && lowOutputEnable == 1 && lowPad == 0 &&
+               highLatch == 1 && highOutputEnable == 1 && highPad == 1;
+    };
+#else
+    auto checkPin = [&](uint32_t pin, const char* role) {
+        pinMode(pin, OUTPUT);
+        digitalWrite(pin, LOW);
+        delayMicroseconds(20);
+        const int lowPad = digitalRead(pin);
+        digitalWrite(pin, HIGH);
+        delayMicroseconds(20);
+        const int highPad = digitalRead(pin);
+        digitalWrite(pin, LOW);
+        openknx.logger.logWithValues("%s GPIO%d: LOW pad=%d; HIGH pad=%d", role, (int)pin, lowPad, highPad);
+        return lowPad == 0 && highPad == 1;
+    };
+#endif
+
+    const bool dataOk = checkPin(dataPin, "DATA");
+    const bool clockOk = checkPin(clockPin, "CLOCK");
+    if (dataOk && clockOk)
+        openknx.logger.log("SPI pin check PASS: both pins follow LOW and HIGH");
+    else
+        openknx.logger.log("SPI pin check FAIL: a pin does not follow its output latch; inspect the reported latch/oe/pad values");
+
+    openknx.logger.log("SPI pins left LOW; reboot before returning to normal output.");
     return true;
 }
 

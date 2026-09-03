@@ -119,6 +119,7 @@ class NeoPixel : public OpenKNX::Module
     bool processUpdateCommand(const std::string& args);
     bool processClearCommand();
     bool processTestCommand(const std::string& args);
+    bool processPinCheckCommand(const std::string& args);
     bool processBitbangCommand(const std::string& args);
     bool processSpeedCommand(const std::string& args);
     bool processAutoCommand(const std::string& args);
