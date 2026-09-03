@@ -154,17 +154,24 @@ static bool should_request_rmt_dma(LedProtocol protocol)
 
 /**
  * In DMA mode mem_block_symbols is a symbol-buffer size, not a hardware block
- * count. Size it for a complete normal WS2805 frame when practical, with a cap
- * that bounds internal DMA RAM for unusually long strips.
+ * count. ESP-IDF divides it across two GDMA descriptors; each descriptor can
+ * carry at most 4095 bytes. RMT symbols are four bytes and the size must be even,
+ * so 2046 symbols is the largest valid request (2 * 4092 / 4).
+ *
+ * The encoder refills this ping-pong buffer while transmitting, so the buffer
+ * does not need to contain the complete WS2805 frame.
  */
 static size_t rmt_dma_buffer_symbols(const rmt_neopixel_serial_inst_t* inst)
 {
-    if (!inst) return 64;
+    static constexpr size_t kMinDmaSymbols = 64U;
+    static constexpr size_t kMaxDmaSymbols = 2046U;
+
+    if (!inst) return kMinDmaSymbols;
 
     size_t symbols = inst->bufferSize * 8U;
-    if (symbols < 64U) symbols = 64U;       // ESP-IDF documented minimum
-    if (symbols > 4096U) symbols = 4096U;   // 16 KiB DMA buffer ceiling
-    if (symbols & 1U) ++symbols;            // RMT requires an even size
+    if (symbols < kMinDmaSymbols) symbols = kMinDmaSymbols;
+    if (symbols & 1U) ++symbols; // rmt_new_tx_channel() requires an even size
+    if (symbols > kMaxDmaSymbols) symbols = kMaxDmaSymbols;
     return symbols;
 }
 
