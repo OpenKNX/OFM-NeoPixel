@@ -1264,7 +1264,7 @@ bool NeoPixelManager::showAll()
         // set, so an uninitialized strip here is expected, not an error to count.
         if (!strip || !strip->isInitialized()) continue;
         if (strip->getTransportArbitration() == PhysicalTransportArbitration::TXS0108E_EXCLUSIVE) continue;
-        if (!strip->isDirty()) continue;
+        if (_suppressUnchangedFrames && !strip->isDirty()) continue;
         if (!strip->show())
         {
             allSuccess = false;
@@ -1297,7 +1297,7 @@ bool NeoPixelManager::showAll()
     {
         if (!strip || !strip->isInitialized()) continue;
         if (strip->getTransportArbitration() != PhysicalTransportArbitration::TXS0108E_EXCLUSIVE) continue;
-        if (!strip->isDirty()) continue;
+        if (_suppressUnchangedFrames && !strip->isDirty()) continue;
 
         if (!strip->show())
         {

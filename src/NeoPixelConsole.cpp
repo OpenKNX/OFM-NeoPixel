@@ -209,6 +209,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("neo bitbang <strip> [swap]", "Direct APA102 GPIO test; optionally swap DATA/CLOCK");
         openknx.console.printHelpLine("neo speed <mode>", "Set update speed: slow|normal|fast|max|extrameludicrous|ftl");
         openknx.console.printHelpLine("neo auto on|off", "Enable/disable auto-update mode");
+        openknx.console.printHelpLine("neo frameskip on|off", "Skip unchanged frames (default: off)");
         openknx.console.printHelpLine("neo perf", "Show performance statistics (requires auto-update)");
 
         printHelpSectionHeader("PhysicalStrip Management");
@@ -550,6 +551,10 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     else if (command.compare(0, 9, "neo auto ") == 0)
     {
         return processAutoCommand(command.substr(9));
+    }
+    else if (command.compare(0, 14, "neo frameskip ") == 0)
+    {
+        return processFrameSkipCommand(command.substr(14));
     }
 
     // PhysicalStrip commands
@@ -2107,6 +2112,36 @@ bool NeoPixel::processAutoCommand(const std::string& args)
     else
     {
         openknx.logger.log("ERROR: Use 'neo auto on' or 'neo auto off'");
+    }
+
+    return true;
+}
+
+/**
+ * @brief Process 'neo frameskip' diagnostic command
+ */
+bool NeoPixel::processFrameSkipCommand(const std::string& args)
+{
+    if (!_initialized || !_manager)
+    {
+        openknx.logger.log("ERROR: NeoPixel module not initialized!");
+        return true;
+    }
+
+    if (args == "on")
+    {
+        _manager->setUnchangedFrameSuppression(true);
+        openknx.logger.log("Unchanged-frame suppression enabled (optimized output)");
+    }
+    else if (args == "off")
+    {
+        _manager->setUnchangedFrameSuppression(false);
+        openknx.logger.log("Unchanged-frame suppression disabled; all strips transmit continuously");
+        openknx.logger.log("Use 'neo frameskip on' to enable optimized output");
+    }
+    else
+    {
+        openknx.logger.log("ERROR: Use 'neo frameskip on' or 'neo frameskip off'");
     }
 
     return true;

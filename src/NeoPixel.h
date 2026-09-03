@@ -123,6 +123,7 @@ class NeoPixel : public OpenKNX::Module
     bool processBitbangCommand(const std::string& args);
     bool processSpeedCommand(const std::string& args);
     bool processAutoCommand(const std::string& args);
+    bool processFrameSkipCommand(const std::string& args);
     bool processPerformanceCommand();
 
     // PhysicalStrip management commands

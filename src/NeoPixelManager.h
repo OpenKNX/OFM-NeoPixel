@@ -144,6 +144,13 @@ class NeoPixelManager
     void reset();
     uint32_t getErrorCount() const { return _errorCount; }
 
+    /**
+     * @brief Enable or disable suppression of unchanged physical frames
+     * @note Disabled by default. Enabling avoids physical transfers for unchanged frames.
+     */
+    void setUnchangedFrameSuppression(bool enabled) { _suppressUnchangedFrames = enabled; }
+    bool getUnchangedFrameSuppression() const { return _suppressUnchangedFrames; }
+
     // ====================================================================
     // Update Control (4-Phase Pipeline)
     // ====================================================================
@@ -278,6 +285,7 @@ class NeoPixelManager
     uint32_t _lastUpdateTime;                  // Last update time in milliseconds
     uint32_t _updateCount;                     // Number of updates since start
     uint32_t _errorCount;                      // Error counter
+    bool _suppressUnchangedFrames = false;      // Skip physical transfers when frame bytes did not change
     PowerManager _powerManager;                // Power/Current management
 
     // Power monitoring cache (per-strip values for PER_CHANNEL mode)
