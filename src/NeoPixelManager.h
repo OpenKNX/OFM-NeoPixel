@@ -167,10 +167,21 @@ class NeoPixelManager
     void applyPowerLimit();                 // Phase 2: Global power scaling
     void measureCurrentOnly();              // Consumption only, used while limiting is off
     bool syncAll();                         // Phase 3: VirtualStrip → PhysicalStrip
-    bool showAll();                         // Phase 4: Hardware transfer
+    bool showAll();                         // Phase 4: Hardware transfer, one step per call
     bool updateAll();                       // Phase 2-4: Convenience method
-    bool waitForAll(uint32_t timeoutMs = 0);
-    bool waitForStrip(PhysicalStrip* strip, uint32_t timeoutMs = 0);
+
+    /// True while a frame started by showAll() is still on the wire.
+    bool isFrameInFlight() const { return _framePhase != FramePhase::Idle; }
+
+    /**
+     * @brief Drive the in-flight frame to completion, blocking
+     * @param timeoutMs Overall budget, 0 = derive from the strips' own frame deadlines
+     *
+     * Only where the frame must be on the LEDs before continuing (pending restart, console).
+     * Never from the render path.
+     */
+    bool flushFrame(uint32_t timeoutMs = 0);
+
     bool isAnyBusy() const;
     bool areAllReady() const;
 
@@ -286,6 +297,28 @@ class NeoPixelManager
     uint32_t _updateCount;                     // Number of updates since start
     uint32_t _errorCount;                      // Error counter
     bool _suppressUnchangedFrames = false;      // Skip physical transfers when frame bytes did not change
+
+    // Frame state machine: showAll() used to transmit a whole frame in one call, blocking the
+    // caller for payload + latch. It is now started and polled across later calls.
+    enum class FramePhase : uint8_t
+    {
+        Idle,      ///< no transfer running; the buffers are free to be rewritten
+        Parallel,  ///< strips without a transport restriction, all in flight at once
+        Exclusive  ///< TXS0108E strips, one at a time, after every parallel frame finished
+    };
+
+    FramePhase _framePhase = FramePhase::Idle;
+    std::vector<PhysicalStrip *> _startedStrips; ///< parallel strips awaiting completion
+    uint32_t _exclusiveIndex = 0;                ///< next _strips index for the exclusive phase
+    PhysicalStrip *_exclusiveActive = nullptr;   ///< exclusive strip currently on the wire
+    uint32_t _frameStartMs = 0;
+    uint32_t _phaseDeadlineMs = 0;               ///< absolute deadline of the running phase
+    bool _frameSuccess = true;
+
+    bool beginFrame();      ///< start every parallel strip, enter Parallel (or Exclusive when none)
+    bool advanceParallel(); ///< poll the parallel strips, then hand over to the exclusive phase
+    bool advanceExclusive(); ///< finish the running exclusive strip and start the next one
+    void finishFrame();      ///< back to Idle, update statistics
     PowerManager _powerManager;                // Power/Current management
 
     // Power monitoring cache (per-strip values for PER_CHANNEL mode)

@@ -1704,7 +1704,9 @@ bool NeoPixel::processUpdateCommand(const std::string& args)
     }
 
     openknx.logger.log("Updating all LED strips...");
+    _manager->flushFrame(); // retire an in-flight frame first, or updateAll() only advances that one
     _manager->updateAll();
+    _manager->flushFrame(); // showAll() only starts the frame; "complete" has to mean it
     openknx.logger.log("Update complete");
 
     return true;
@@ -1722,8 +1724,7 @@ bool NeoPixel::processClearCommand()
     }
 
     openknx.logger.log("Clearing all LEDs...");
-    _manager->clearAll();
-    _manager->updateAll();
+    _manager->allOff(); // clearAll()+updateAll() was undone by syncAll()
     openknx.logger.log("All LEDs turned off");
 
     return true;

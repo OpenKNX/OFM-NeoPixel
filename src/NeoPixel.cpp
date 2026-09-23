@@ -108,6 +108,10 @@ void NeoPixel::loop(bool configured)
         return;
     }
 
+    // Scan, tuners and bench tests bypass the auto-update below, which is the only other thing
+    // that advances the frame machine - a frame parked there would never retire.
+    if (_manager->isFrameInFlight()) _manager->showAll();
+
     // Clone timing scan state machine (non-blocking)
     if (_scanPhase != ScanPhase::IDLE)
     {

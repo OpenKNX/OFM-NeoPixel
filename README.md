@@ -1573,7 +1573,7 @@ public:
     void updateEffects(uint32_t deltaTime); // Phase 1: Effect calculations only
     void applyPowerLimit();               // Phase 2: Global power scaling
     void syncAll();                       // Phase 3: VirtualStrip → PhysicalStrip sync
-    bool showAll();                       // Phase 4: PhysicalStrip → Hardware (blocking)
+    bool showAll();                       // Phase 4: PhysicalStrip → Hardware, one step per call
     void updateAll();                     // Phase 2-4: Convenience method
     
     // Clear & Reset
@@ -2928,7 +2928,7 @@ mgr->update(deltaTime);
 // Phase 2-4: Calls updateAll() internally
 // Override timing=0 for non-blocking
 
-// Method 2: Manual control (blocking)
+// Method 2: Manual control (starts a frame; flushFrame() waits for it)
 mgr->updateAll();
 // _applyPowerLimit()  (private: calculates global power scaling)
 // syncAll()           (public: VirtualStrip → PhysicalStrip)

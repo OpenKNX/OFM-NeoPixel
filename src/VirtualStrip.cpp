@@ -522,9 +522,10 @@ bool VirtualStrip::syncToPhysical()
             continue;
         }
 
-        // Drivers reject buffer updates during an asynchronous frame. Finish
-        // that frame before modifying its physical buffer.
-        if (pstrip->isBusy() && !pstrip->waitForTransfer())
+        // Drivers reject buffer updates during an asynchronous frame, so a busy strip is
+        // skipped - never waited for. This runs on the render path, where a wait costs a
+        // whole frame time; the frame stays dirty below and the next sync retries it.
+        if (pstrip->isBusy())
         {
             allSuccess = false;
             continue;
@@ -645,37 +646,6 @@ bool VirtualStrip::show()
     }
 
     return allSuccess;
-}
-
-/**
- * @brief Wait for completion
- * @param timeoutMs Timeout in milliseconds
- * @return true if all operations completed within the timeout
- */
-bool VirtualStrip::waitForCompletion(uint32_t timeoutMs)
-{
-    // Never wait unbounded: 0 ("unlimited") becomes a sane absolute ceiling so a wedged
-    // DMA/PIO can't hang the main loop forever → 16 s watchdog reboot.
-    if (timeoutMs == 0) timeoutMs = 1000;
-    uint32_t startTime = millis();
-
-    while (true)
-    {
-        if (!isAnyBusy())
-        {
-            return true; // All done
-        }
-
-        if (timeoutMs > 0 && (millis() - startTime) >= timeoutMs)
-        {
-            logErrorP("waitForCompletion timeout!");
-            return false;
-        }
-
-        // Small pause to save CPU
-        delayMicroseconds(10);
-        // ToDo: Prevent busy-waiting, adjust delay as needed and optimize
-    }
 }
 
 /**

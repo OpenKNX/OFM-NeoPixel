@@ -430,6 +430,13 @@ bool NeoPixelManager::removeStrip(PhysicalStrip* strip)
 {
     if (!strip) return false;
 
+    // The frame state caches raw strip pointers; drop the frame before anything is freed.
+    if (_framePhase != FramePhase::Idle) flushFrame();
+    _framePhase = FramePhase::Idle;
+    _startedStrips.clear();
+    _exclusiveActive = nullptr;
+    _exclusiveIndex = 0;
+
     for (auto it = _strips.begin(); it != _strips.end(); ++it)
     {
         if (*it == strip)
@@ -580,6 +587,8 @@ void NeoPixelManager::measureCurrentOnly()
 
 void NeoPixelManager::applyPowerLimit()
 {
+    if (_framePhase != FramePhase::Idle) return; // scales the buffers raw, public API
+
     // Rebuild mapping if needed (for LED count calculations)
     if (_mappingDirty)
     {
@@ -1239,8 +1248,10 @@ bool NeoPixelManager::syncAll()
 }
 
 /**
- * Send all PhysicalStrips to hardware (blocking)
- * @return true if all strips were successfully updated
+ * @brief Advance the hardware transfer by one step (non-blocking)
+ * @return false once anything in the running frame failed
+ *
+ * A frame spans several loop passes instead of blocking one for its whole duration.
  */
 bool NeoPixelManager::showAll()
 {
@@ -1250,14 +1261,33 @@ bool NeoPixelManager::showAll()
         return false;
     }
 
-    uint32_t startTime = millis();
-    bool allSuccess = true;
-    std::vector<PhysicalStrip*> startedStrips;
-    startedStrips.reserve(_strips.size());
+    switch (_framePhase)
+    {
+        case FramePhase::Idle:
+            return beginFrame();
+        case FramePhase::Parallel:
+            return advanceParallel();
+        case FramePhase::Exclusive:
+            return advanceExclusive();
+    }
 
-    // Start outputs without a shared-transport restriction concurrently. A strip's
-    // PhysicalTransportArbitration derives from its protocol and configured level
-    // shifter, so the manager does not contain a board-agnostic WS2805 workaround.
+    return false;
+}
+
+/**
+ * @brief Start every strip without a shared-transport restriction, concurrently
+ */
+bool NeoPixelManager::beginFrame()
+{
+    _frameStartMs = millis();
+    _frameSuccess = true;
+    _startedStrips.clear();
+    _startedStrips.reserve(_strips.size());
+    _exclusiveIndex = 0;
+    _exclusiveActive = nullptr;
+
+    uint32_t deadline = 0;
+
     for (auto strip : _strips)
     {
         // Skip strips that never came up: init() now keeps the device running on a partial
@@ -1265,74 +1295,173 @@ bool NeoPixelManager::showAll()
         if (!strip || !strip->isInitialized()) continue;
         if (strip->getTransportArbitration() == PhysicalTransportArbitration::TXS0108E_EXCLUSIVE) continue;
         if (_suppressUnchangedFrames && !strip->isDirty()) continue;
+
         if (!strip->show())
         {
-            allSuccess = false;
+            _frameSuccess = false;
             _errorCount++;
+            continue;
         }
-        else
-        {
-            startedStrips.push_back(strip);
-        }
-    }
-    // Phase 2: wait for every in-flight transfer using its frame-derived
-    // deadline. A fixed cap rejects valid long strips.
-    for (auto strip : startedStrips)
-    {
-        if (!strip->waitForTransfer(strip->getTransferTimeoutMs()))
-        {
-            allSuccess = false;
-            _errorCount++;
-        }
-        else
-        {
-            strip->markFrameSent();
-        }
+
+        _startedStrips.push_back(strip);
+        // Frame-derived deadline: a fixed cap rejects valid long strips.
+        const uint32_t stripDeadline = strip->getTransferTimeoutMs();
+        if (stripDeadline > deadline) deadline = stripDeadline;
     }
 
-    // A TXS0108E-exclusive frame owns the external translator/output path from its
-    // reset interval through its final latch. Run these frames sequentially only after
-    // all parallel transfers have completed, avoiding cross-channel edge interaction.
-    for (auto strip : _strips)
+    _phaseDeadlineMs = millis() + deadline;
+    _framePhase = FramePhase::Parallel;
+
+    // Poll once: a frame without parallel strips, and a synchronous driver that is already
+    // done, must not cost an extra render tick before the frame can advance.
+    return advanceParallel();
+}
+
+/**
+ * @brief Poll the parallel strips, then hand over to the exclusive phase
+ */
+bool NeoPixelManager::advanceParallel()
+{
+    for (auto strip : _startedStrips)
     {
+        if (!strip->isBusy()) continue;
+
+        if ((int32_t)(millis() - _phaseDeadlineMs) < 0) return _frameSuccess;
+
+        // Past its deadline and still transmitting: an exclusive frame must not join it on the
+        // wire. Abandon; the exclusive strips stay dirty and the next frame retries them.
+        _frameSuccess = false;
+        _errorCount++;
+        finishFrame();
+        return false;
+    }
+
+    for (auto strip : _startedStrips)
+        if (!strip->isBusy()) strip->markFrameSent();
+
+    _startedStrips.clear();
+    _framePhase = FramePhase::Exclusive;
+
+    return advanceExclusive();
+}
+
+/**
+ * @brief Run the TXS0108E-exclusive strips one at a time
+ *
+ * Such a frame owns the shared translator from its reset interval through its final latch, so
+ * it starts only once every other transfer has finished.
+ */
+bool NeoPixelManager::advanceExclusive()
+{
+    if (_exclusiveActive)
+    {
+        if (_exclusiveActive->isBusy())
+        {
+            if ((int32_t)(millis() - _phaseDeadlineMs) < 0) return _frameSuccess;
+
+            // Starting the next one now would put two frames on the translator at once.
+            _frameSuccess = false;
+            _errorCount++;
+            finishFrame();
+            return false;
+        }
+
+        _exclusiveActive->markFrameSent();
+        _exclusiveActive = nullptr;
+    }
+
+    while (_exclusiveIndex < _strips.size())
+    {
+        PhysicalStrip *strip = _strips[_exclusiveIndex];
+        _exclusiveIndex++;
+
         if (!strip || !strip->isInitialized()) continue;
         if (strip->getTransportArbitration() != PhysicalTransportArbitration::TXS0108E_EXCLUSIVE) continue;
         if (_suppressUnchangedFrames && !strip->isDirty()) continue;
 
         if (!strip->show())
         {
-            allSuccess = false;
+            _frameSuccess = false;
             _errorCount++;
             continue;
         }
-        if (!strip->waitForTransfer(strip->getTransferTimeoutMs()))
-        {
-            allSuccess = false;
-            _errorCount++;
-        }
-        else
-        {
-            strip->markFrameSent();
-        }
+
+        _exclusiveActive = strip;
+        _phaseDeadlineMs = millis() + strip->getTransferTimeoutMs();
+        return _frameSuccess;
     }
 
-    _lastUpdateTime = millis() - startTime;
-    if (allSuccess) _updateCount++;
+    finishFrame();
+    return _frameSuccess;
+}
 
-    return allSuccess;
+void NeoPixelManager::finishFrame()
+{
+    _framePhase = FramePhase::Idle;
+    _startedStrips.clear();
+    _exclusiveActive = nullptr;
+    _exclusiveIndex = 0;
+    _lastUpdateTime = millis() - _frameStartMs;
+    if (_frameSuccess) _updateCount++;
+}
+
+/**
+ * @brief Drive the in-flight frame to completion, blocking
+ *
+ * The render path must not use this - it reintroduces exactly the stall the state machine
+ * exists to avoid. Bounded so a wedged strip cannot hang the caller.
+ */
+bool NeoPixelManager::flushFrame(uint32_t timeoutMs /* = 0 */)
+{
+    if (_framePhase == FramePhase::Idle) return true;
+
+    if (timeoutMs == 0)
+    {
+        // Every remaining strip may still need a full frame, plus a margin for the latch.
+        uint32_t budget = 0;
+        for (auto strip : _strips)
+            if (strip && strip->isInitialized()) budget += strip->getTransferTimeoutMs();
+        timeoutMs = budget + 50;
+    }
+
+    const uint32_t start = millis();
+    while (_framePhase != FramePhase::Idle)
+    {
+        showAll();
+        if (_framePhase == FramePhase::Idle) break;
+
+        if ((uint32_t)(millis() - start) >= timeoutMs)
+        {
+            logErrorP("flushFrame timeout - frame abandoned");
+            _framePhase = FramePhase::Idle;
+            _startedStrips.clear();
+            _exclusiveActive = nullptr;
+            _exclusiveIndex = 0;
+            _errorCount++;
+            return false;
+        }
+
+        delayMicroseconds(10);
+    }
+
+    return _frameSuccess;
 }
 
 /**
  * Convenience method: PowerLimit + Sync + Show all strips
- * @return true if all strips were successfully updated
- *
- * Pipeline:
- * 1. applyPowerLimit() - ABL on VirtualStrip buffers
- * 2. syncAll() - VirtualStrip → PhysicalStrip
- * 3. showAll() - PhysicalStrip → Hardware
+ * @return "started, nothing has failed yet" - NOT "on the LEDs". Use flushFrame() for that.
  */
 bool NeoPixelManager::updateAll()
 {
+    // Keep syncAll() off a live frame: on ESP32 the RMT encoder streams from the working
+    // buffer and its setPixel() has no busy guard. Falling through once the wire is free
+    // rather than returning keeps one render tick = one frame.
+    if (_framePhase != FramePhase::Idle)
+    {
+        showAll();
+        if (_framePhase != FramePhase::Idle) return _frameSuccess;
+    }
+
     // Never transmit a partially synchronized physical frame. A failed virtual
     // write remains dirty and will be retried in full on the next update.
     if (!syncAll())
@@ -1379,6 +1508,14 @@ void NeoPixelManager::loopOffRefresh()
 {
     if (!_initialized) return;
 
+    // The only path still running once the render tick stops (global power off), so it carries
+    // the frame machine and keeps the direct show() below off a busy wire.
+    if (_framePhase != FramePhase::Idle)
+    {
+        showAll();
+        return;
+    }
+
     const uint32_t now = millis();
     for (auto strip : _strips)
     {
@@ -1409,57 +1546,6 @@ void NeoPixelManager::update(uint32_t deltaTime)
     updateAll(); // Calls: applyPowerLimit() → syncAll() → showAll()
 
     _lastUpdateTime = 0; // Override timing for non-blocking mode
-}
-
-/**
- * Wait for all strips (blocking)
- * @param timeoutMs Timeout in milliseconds
- * @return true if all strips are ready, false on timeout
- */
-bool NeoPixelManager::waitForAll(uint32_t timeoutMs)
-{
-    // 0 ("unlimited") → absolute ceiling, so a wedged strip can't hang the loop forever.
-    if (timeoutMs == 0) timeoutMs = 1000;
-    uint32_t startTime = millis();
-
-    while (isAnyBusy())
-    {
-        if (timeoutMs > 0 && (millis() - startTime) >= timeoutMs)
-        {
-            _errorCount++;
-            return false; // Timeout
-        }
-        delayMicroseconds(10);
-    }
-
-    return true;
-}
-
-/**
- * Wait for a specific strip (blocking)
- * @param strip Pointer to the PhysicalStrip
- * @param timeoutMs Timeout in milliseconds
- * @return true if the strip is ready, false on timeout
- */
-bool NeoPixelManager::waitForStrip(PhysicalStrip* strip, uint32_t timeoutMs)
-{
-    if (!strip) return false;
-
-    // 0 ("unlimited") → absolute ceiling, so a wedged strip can't hang the loop forever.
-    if (timeoutMs == 0) timeoutMs = 1000;
-    uint32_t startTime = millis();
-
-    while (strip->isBusy())
-    {
-        if (timeoutMs > 0 && (millis() - startTime) >= timeoutMs)
-        {
-            _errorCount++;
-            return false;
-        }
-        delayMicroseconds(10);
-    }
-
-    return true;
 }
 
 /**
@@ -1541,8 +1627,15 @@ void NeoPixelManager::clearAll()
  */
 void NeoPixelManager::allOff()
 {
+    flushFrame(); // drivers refuse to blank a buffer that is being sent
+
+    // Blank the virtual sources too, or syncAll() rebuilds the physical ones from them.
+    for (auto vstrip : _virtualStrips)
+        if (vstrip) vstrip->clear();
+
     clearAll();
     updateAll();
+    flushFrame(); // callers read a returned allOff() as "the LEDs are dark"
 }
 
 ManagerStats NeoPixelManager::getStats() const

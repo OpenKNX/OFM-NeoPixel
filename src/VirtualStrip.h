@@ -82,7 +82,6 @@ class VirtualStrip
     // ====================================================================
     // Sync & Transfer
     // ====================================================================
-    bool waitForCompletion(uint32_t timeoutMs = 100); // Wait for all physical strips to complete (bounded: 0 would spin forever on a wedged strip)
     bool syncToPhysical();                          // Sync buffer to physical strips
     bool show();
     bool isAnyBusy() const;

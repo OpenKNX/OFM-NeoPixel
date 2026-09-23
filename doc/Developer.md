@@ -383,8 +383,8 @@ uint32_t getErrorCount() const;       // Get error count
 ```cpp
 void update(uint32_t deltaTime);      // Update effects (deltaTime in ms)
 bool updateAll();                     // Send buffers to hardware
-bool waitForAll(uint32_t timeoutMs = 0);     // Wait for transfers
-bool waitForStrip(PhysicalStrip* strip, uint32_t timeoutMs = 0);
+bool isFrameInFlight() const;         // True while a frame started by showAll() is on the wire
+bool flushFrame(uint32_t timeoutMs = 0);     // Drive it to completion, blocking - not for the render path
 bool isAnyBusy() const;               // Check if any strip busy
 bool areAllReady() const;             // Check if all strips ready
 ```
@@ -645,8 +645,7 @@ bool syncToPhysical();
 // Show on all physical strips
 bool show();
 
-// Wait for completion
-bool waitForCompletion(uint32_t timeoutMs = 0);
+// Wait for completion: use NeoPixelManager::flushFrame(), which honours the strip arbitration
 ```
 
 **Example:**

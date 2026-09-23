@@ -183,11 +183,15 @@ Der parallele DMA-Push (alle Strips starten, dann alle abwarten) ist bereits dri
 1. **Pipelining (Frame N+1 rechnen während Frame N per DMA rausgeht)** — der eigentliche Software-Hebel.
    
    - Frame ≈ **max(Compute, Wire)** statt Summe → Richtung Wire-Decke ~70–76 FPS (512-LED-Strip @960 kHz).
-   - **Buffer-Sicherheit ist schon gegeben:** der Treiber sendet aus einem *separaten Snapshot*
-     (`packDataToDMABuffer` RGB/RGBW bzw. `bufferSending`-memcpy RGBCCT) → Arbeitspuffer ist während
-     der Übertragung frei und darf neu berechnet werden.
-   - **Kern-Änderung klein** (~10–20 Z.): den End-of-Frame-Wait in `NeoPixelManager::showAll()` entfernen
-     und auf das Start-of-Frame `while(isBusy())` in `show()` verlassen.
+   - **Buffer-Sicherheit nur auf RP:** die PIO-Treiber senden aus einem *separaten Snapshot*
+     (`packDataToDMABuffer` bzw. `prepareTransferBuffer`) → Arbeitspuffer ist dort während der
+     Übertragung frei. **Auf ESP32 nicht:** `rmt_transmit()` streamt direkt aus `_inst->buffer`,
+     und `RMT_NeoPixel_Serial::setPixel()` hat keinen `busy`-Guard. Pipelining braucht dort einen
+     eigenen Sendepuffer oder den Guard, sonst wird der laufende Frame überschrieben.
+   - **Der End-of-Frame-Wait ist bereits raus:** `showAll()` ist eine Zustandsmaschine, die je Aufruf
+     einen Schritt macht. Was noch fehlt, ist die Entkopplung: `updateAll()` kehrt bei laufendem Frame
+     früh zurück, Compute und Wire bleiben also seriell. Genau dieser Early-Return müsste fallen -
+     zusammen mit der Puffer-Frage oben.
    - **Mitzuziehen:** Perf-Reporting auf **Frame-zu-Frame-Delta** umstellen (nicht mehr Compute-Zeit messen,
      da Compute jetzt unter dem Wire versteckt ist); Edge-Cases bei `stop`/`clear`/Strip-Remove
      (laufenden DMA sauber abwarten/abbrechen bevor Buffer/Strip weg ist).
