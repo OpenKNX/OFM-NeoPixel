@@ -580,6 +580,12 @@ uint32_t RMT_NeoPixel_Serial::getTransferTimeoutUs() const
 void RMT_NeoPixel_Serial::clear()
 {
     if (!_inst || !_inst->buffer) return;
+
+    // The encoder streams straight out of _inst->buffer (see rmt_transmit in show()), so
+    // blanking it mid-transfer corrupts the frame on the wire. Same guard the PIO drivers
+    // carry; callers blank a strip only while it is idle.
+    if (_inst->busy) return;
+
     memset(_inst->buffer, 0, _inst->bufferSize);
     writeSm16825Settings(_inst);
 }
