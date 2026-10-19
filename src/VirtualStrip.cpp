@@ -596,6 +596,9 @@ bool VirtualStrip::syncToPhysical()
                 // Physical strip supports RGBW and virtual buffer has W channel.
                 // Without this an RGB effect leaves the white LED dark and mixes white
                 // from the three colours instead.
+                // An RGBCCT buffer (another strip is RGBCCT) carries white as WW + CW: the single
+                // white LED shows the sum, as the W object and the W status define it.
+                if (_bytesPerLed >= 5) ww = (uint8_t)std::min<uint16_t>(255, (uint16_t)ww + cw);
                 auto* wcfg = pstrip->getConfig();
                 if (wcfg && wcfg->getWhiteMode() != 0)
                     ProtocolHelper::applyWhiteMode(wcfg->getWhiteMode(), r, g, b, ww);
