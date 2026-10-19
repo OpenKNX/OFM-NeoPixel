@@ -364,11 +364,13 @@ void EffektManagerController::tickFade(Segment* segment, const EffektManagerData
             return;
         }
         // Fade-out done — switch cue (applyCue sets the new cue's brightness)
+        const uint16_t fadeMs = _rt.fadeMs; // a chain switch restarts the runtime (fadeMs = 0)
         advanceToNextCue(segment, emData);
         if (!_rt.isRunning()) return; // EM stopped — no fade-in (stop() restored brightness)
-        // Fade in the new cue — also across a chain boundary (start() cleared fading)
+        // Fade in the new cue — also across a chain boundary (start() cleared fading and fadeMs)
         _rt.fading      = true;
         _rt.fadeIn      = true;
+        _rt.fadeMs      = fadeMs;
         _rt.fadeStartMs = millis();
         _rt.fadeFromBri = segment->getBrightness(); // target = new cue brightness
         segment->setBrightness(0);                  // start fade-in from black
