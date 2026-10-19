@@ -541,13 +541,17 @@ bool PIO_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
         #endif
     }
     else if (_inst->levelShifterType == LevelShifterType::SN74HCT125 ||
-             _inst->levelShifterType == LevelShifterType::SN74AHCT125)
+             _inst->levelShifterType == LevelShifterType::SN74AHCT125 ||
+             _inst->levelShifterType == LevelShifterType::SN74LV8T245)
     {
-        // 74HCT/AHCT: unidirectional transparent buffer; OE=GND, always enabled.
+        // Unidirectional transparent buffer; OE fixed, always enabled.
         // TTL input threshold VIH >= 2.0V is satisfied by 3.3V output; no GPIO changes needed.
         // The pin keeps the drive strength set in neopixel_serial_program_init().
+        // The pad also keeps its reset pull-down, which works with a board-side pull-down.
         #ifdef OPENKNX_DEBUG
-        const char* lsN = (_inst->levelShifterType == LevelShifterType::SN74AHCT125) ? "74AHCT125" : "74HCT125";
+        const char* lsN = (_inst->levelShifterType == LevelShifterType::SN74LV8T245)   ? "74LV8T245"
+                          : (_inst->levelShifterType == LevelShifterType::SN74AHCT125) ? "74AHCT125"
+                                                                                       : "74HCT125";
         openknx.logger.logWithValues("PIO NeoPixel Serial GPIO%u: %s mode - no GPIO changes needed", _inst->pin, lsN);
         #endif
     }

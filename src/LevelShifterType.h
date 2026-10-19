@@ -32,21 +32,29 @@
  *   - Same OE/input behaviour; no firmware GPIO changes needed.
  *   - Used on: QuinLED Dig-Next-2
  *
+ * **SN74LV8T245** – TI SN74LV8T245 octal single-supply bus transceiver:
+ *   - Wired one-directional (MCU → LED): DIR tied high, OE tied to GND.
+ *   - TTL-compatible inputs: VIH 2.0V at VCC 5V → satisfied by a 3.3V MCU output.
+ *   - External pull-downs on the MCU side define the power-up state, so the
+ *     driver must not enable an internal pull-up against them.
+ *   - No firmware GPIO changes needed; default drive strength is sufficient.
+ *   - Used on: OpenKNXiao KNeoPiX v1.5
+ *
  * RP2040/RP2350 (PIO driver):
  *   - Drive strength is already 12 mA + FAST slew (sufficient for TXS0108E).
  *   - When TXS0108E is selected: internal pull-up/down is explicitly disabled.
- *   - When SN74HCT125/SN74AHCT125 is selected: no GPIO changes (default 4mA fine).
+ *   - When SN74HCT125/SN74AHCT125/SN74LV8T245 is selected: no GPIO changes (default 4mA fine).
  *
  * ESP32 (RMT driver):
  *   - Default drive capability is 20 mA (GPIO_DRIVE_CAP_2).
  *   - When TXS0108E is selected: boosted to 40 mA (GPIO_DRIVE_CAP_3) +
  *     internal pull explicitly set to FLOATING.
- *   - When SN74HCT125/SN74AHCT125 is selected: no GPIO changes (20mA fine).
+ *   - When SN74HCT125/SN74AHCT125/SN74LV8T245 is selected: no GPIO changes (20mA fine).
  *
  * **Auto-config via build flag:**
  * Set -DNEOPIXEL_HW_LEVELSHIFTER=<value> in platformio.hardware.ini to
  * automatically configure the default level-shifter type at compile time.
- * Values: 0=NONE, 1=TXS0108E, 2=SN74HCT125, 3=SN74AHCT125
+ * Values: 0=NONE, 1=TXS0108E, 2=SN74HCT125, 3=SN74AHCT125, 4=SN74LV8T245
  */
 enum class LevelShifterType : uint8_t
 {
@@ -54,6 +62,7 @@ enum class LevelShifterType : uint8_t
     TXS0108E    = 1,  ///< TI TXS0108E bidirectional auto-direction level shifter (KNeoPiX)
     SN74HCT125  = 2,  ///< TI SN74HCT125 quad unidirectional buffer, OE=GND (QuinLED Dig-Uno/Quad/Octa)
     SN74AHCT125 = 3,  ///< TI SN74AHCT125 quad unidirectional buffer, faster AHCT variant (QuinLED Dig-Next-2)
+    SN74LV8T245 = 4,  ///< TI SN74LV8T245 octal single-supply buffer, DIR=H, OE=GND (KNeoPiX v1.5)
 };
 
 /**

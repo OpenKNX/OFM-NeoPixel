@@ -646,14 +646,17 @@ bool RMT_NeoPixel_Serial::applyConfig(const PhysicalStripConfig* config)
         ESP_LOGI("RMT_NeoPixel", "GPIO%lu: TXS0108E mode - drive=40mA, pull=FLOAT", (unsigned long)_inst->pin);
     }
     else if (_inst->levelShifterType == LevelShifterType::SN74HCT125 ||
-             _inst->levelShifterType == LevelShifterType::SN74AHCT125)
+             _inst->levelShifterType == LevelShifterType::SN74AHCT125 ||
+             _inst->levelShifterType == LevelShifterType::SN74LV8T245)
     {
-        // 74HCT/AHCT: unidirectional transparent buffer; OE=GND, always enabled.
+        // Unidirectional transparent buffer; OE fixed, always enabled.
         // TTL input threshold VIH >= 2.0V is satisfied by 3.3V output; no GPIO changes needed.
         // Default 20mA drive (GPIO_DRIVE_CAP_2) is more than sufficient for a logic input.
         ESP_LOGI("RMT_NeoPixel", "GPIO%lu: %s mode - no GPIO changes needed",
                  (unsigned long)_inst->pin,
-                 (_inst->levelShifterType == LevelShifterType::SN74AHCT125) ? "74AHCT125" : "74HCT125");
+                 (_inst->levelShifterType == LevelShifterType::SN74LV8T245)   ? "74LV8T245"
+                 : (_inst->levelShifterType == LevelShifterType::SN74AHCT125) ? "74AHCT125"
+                                                                              : "74HCT125");
     }
 
     // Reset/latch time is independent of the bit timing, so apply it either way.

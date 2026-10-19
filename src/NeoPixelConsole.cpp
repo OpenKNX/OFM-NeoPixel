@@ -324,7 +324,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("config <i> skipmask clear", "Clear skip mask and free memory");
         openknx.console.printHelpLine("config <i> skipmask set <idx> <0|1>", "Enable (0) or skip (1) individual LED");
         openknx.console.printHelpLine("config <i> skipmask list", "List all skipped LEDs");
-        openknx.console.printHelpLine("config <i> levelshifter <none|txs0108|hct125|ahct125>", "Set level-shifter type (applies GPIO optimizations)");
+        openknx.console.printHelpLine("config <i> levelshifter <none|txs0108|hct125|ahct125|lv8t245>", "Set level-shifter type (applies GPIO optimizations)");
         printDetailHelpSeparator();
         printDetailHelpParameter("<i>=ID/Index, <n>=LED Count, <gpio>=Pin, <clk>=Clock Pin, <data>=Data Pin");
         printDetailHelpExample("neo phys add 22 64 ws2812b     Create 1-Wire strip on GPIO22 with 64 LEDs");
@@ -6045,7 +6045,7 @@ bool NeoPixel::processPhysConfigCommand(const std::string& args)
         std::string typeStr;
         if (!(iss >> typeStr))
         {
-            openknx.logger.log("ERROR: Usage: neo phys config <id> levelshifter <none|txs0108|hct125|ahct125>");
+            openknx.logger.log("ERROR: Usage: neo phys config <id> levelshifter <none|txs0108|hct125|ahct125|lv8t245>");
             return true;
         }
         LevelShifterType lsType;
@@ -6057,9 +6057,11 @@ bool NeoPixel::processPhysConfigCommand(const std::string& args)
             lsType = LevelShifterType::SN74HCT125;
         else if (typeStr == "ahct125" || typeStr == "74ahct125" || typeStr == "3")
             lsType = LevelShifterType::SN74AHCT125;
+        else if (typeStr == "lv8t245" || typeStr == "74lv8t245" || typeStr == "4")
+            lsType = LevelShifterType::SN74LV8T245;
         else
         {
-            openknx.logger.logWithValues("ERROR: Unknown type '%s'. Use: none | txs0108 | hct125 | ahct125", typeStr.c_str());
+            openknx.logger.logWithValues("ERROR: Unknown type '%s'. Use: none | txs0108 | hct125 | ahct125 | lv8t245", typeStr.c_str());
             return true;
         }
         return processPhysConfigLevelShifterCommand(stripId, lsType);
@@ -6207,6 +6209,7 @@ bool NeoPixel::processPhysConfigInfoCommand(uint32_t stripId)
             case LevelShifterType::TXS0108E:    lsName = "TXS0108E (bidirect., pull=off, drive+)"; break;
             case LevelShifterType::SN74HCT125:  lsName = "74HCT125 (unidirect. buffer)";          break;
             case LevelShifterType::SN74AHCT125: lsName = "74AHCT125 (unidirect. buffer, faster)"; break;
+            case LevelShifterType::SN74LV8T245: lsName = "74LV8T245 (unidirect. buffer, octal)";  break;
             default:                            lsName = "none";                                    break;
         }
         openknx.logger.logWithValues("Level Shifter:     %s", lsName);
@@ -6698,6 +6701,7 @@ bool NeoPixel::processPhysConfigLevelShifterCommand(uint32_t stripId, LevelShift
         case LevelShifterType::TXS0108E:    typeName = "TXS0108E";   break;
         case LevelShifterType::SN74HCT125:  typeName = "74HCT125";   break;
         case LevelShifterType::SN74AHCT125: typeName = "74AHCT125";  break;
+        case LevelShifterType::SN74LV8T245: typeName = "74LV8T245";  break;
         default:                            typeName = "none";        break;
     }
     openknx.logger.logWithValues("Level-shifter set to: %s (applied)", typeName);
@@ -6705,13 +6709,15 @@ bool NeoPixel::processPhysConfigLevelShifterCommand(uint32_t stripId, LevelShift
 #ifdef ARDUINO_ARCH_RP2040
     if (type == LevelShifterType::TXS0108E)
         openknx.logger.log("  RP2040: internal pull-up/down disabled on data pin");
-    else if (type == LevelShifterType::SN74HCT125 || type == LevelShifterType::SN74AHCT125)
+    else if (type == LevelShifterType::SN74HCT125 || type == LevelShifterType::SN74AHCT125 ||
+             type == LevelShifterType::SN74LV8T245)
         openknx.logger.log("  RP2040: no GPIO changes (4mA drive sufficient for logic input)");
 #endif
 #ifdef ARDUINO_ARCH_ESP32
     if (type == LevelShifterType::TXS0108E)
         openknx.logger.log("  ESP32: drive strength boosted to 40mA, pull mode = FLOATING");
-    else if (type == LevelShifterType::SN74HCT125 || type == LevelShifterType::SN74AHCT125)
+    else if (type == LevelShifterType::SN74HCT125 || type == LevelShifterType::SN74AHCT125 ||
+             type == LevelShifterType::SN74LV8T245)
         openknx.logger.log("  ESP32: no GPIO changes (20mA drive sufficient for logic input)");
 #endif
 
