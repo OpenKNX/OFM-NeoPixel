@@ -268,7 +268,7 @@ void EffektManagerController::reapplyMasterBrightness(Segment* segment)
 {
     if (!segment || !_rt.isRunning()) return;
     // Don't fight an in-flight crossfade — tickFade owns the brightness register
-    // during a transition and will pick up the new master on the next cue anyway.
+    // during a transition and derives its target from the live master every tick.
     if (_rt.fading) return;
     segment->setBrightness((uint8_t)(((uint16_t)segment->getMasterBrightness() * (uint16_t)_rt.cueBri + 127) / 255));
 }
@@ -350,6 +350,10 @@ void EffektManagerController::tickFade(Segment* segment, const EffektManagerData
 {
     uint32_t elapsed = millis() - _rt.fadeStartMs;
     uint16_t half    = _rt.fadeMs / 2 ? _rt.fadeMs / 2 : 1;
+
+    // Ramp reference = the current cue at the live master, so a brightness change during the
+    // fade (KO, global, power-on) is not lost when the fade ends.
+    _rt.fadeFromBri = (uint8_t)(((uint16_t)segment->getMasterBrightness() * (uint16_t)_rt.cueBri + 127) / 255);
 
     if (!_rt.fadeIn)
     {
