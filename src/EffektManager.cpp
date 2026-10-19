@@ -395,6 +395,7 @@ bool EffektManagerController::triggerCue(uint8_t cueNum, Segment* segment, const
     _rt.fadeStartMs = 0;
 
     applyCue(em.cues[_rt.activeCueIdx], segment);
+    if (_rt.paused) _rt.pauseElapsed = 0; // a cue set while paused starts from its beginning on resume
     return true;
 }
 
