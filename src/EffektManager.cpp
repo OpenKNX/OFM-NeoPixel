@@ -197,8 +197,13 @@ void EffektManagerController::applyCue(const EffektCue& cue, Segment* segment)
     // pause()/resume() never calls applyCue() and therefore preserves this state.
     segment->resetEffectState();
 
-    // Set colour
-    segment->setPrimaryColor(cue.r, cue.g, cue.b, cue.w);
+    // Set colour. A cue has one white value: on RGBCCT it is split like the generic W object
+    // (warm half, cool rest), so a direct CW does not mix into the cue.
+    const VirtualStrip* vstrip = segment->getVirtualStrip();
+    if (vstrip && vstrip->hasDualWhiteChannel())
+        segment->setPrimaryColor(cue.r, cue.g, cue.b, cue.w / 2, cue.w - cue.w / 2);
+    else
+        segment->setPrimaryColor(cue.r, cue.g, cue.b, cue.w, 0);
 
     // Cue brightness is RELATIVE to the segment's master (KO/global/console) brightness:
     // render = master * cue / 255. This way a runtime dim (brightness KO) stays authoritative
