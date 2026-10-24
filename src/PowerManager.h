@@ -297,7 +297,7 @@ class PowerManager
      * Example: With 1000mA limit and 80% threshold:
      *  - 0-800mA: No limiting
      *  - 800-1000mA: Gradual brightness reduction
-     *  - >1000mA: Hard limit to 1000mA
+     *  - >1000mA: 95 % of the limit, at most the brightness reached at the limit
      */
     void setThresholdPercent(uint8_t percent)
     {
@@ -319,11 +319,10 @@ class PowerManager
     // ====================================================================
 
     /**
-     * @brief Set maximum brightness cap
-     * @param percent Maximum brightness (0-100%, default 100)
+     * @brief Set the brightness at the limit (auto brightness limit)
+     * @param percent Brightness the soft zone reaches at the limit (0-100%, default 100)
      *
-     * Caps brightness regardless of power consumption. Useful for
-     * preventing strips from being too bright in specific installations.
+     * NeoPixelManager scales linearly from 100 % at the threshold to this value at the limit.
      */
     void setMaxBrightnessPercent(uint8_t percent)
     {
@@ -332,8 +331,8 @@ class PowerManager
     }
 
     /**
-     * @brief Get maximum brightness cap
-     * @return Maximum brightness percentage (0-100)
+     * @brief Get the brightness at the limit (auto brightness limit)
+     * @return Percentage (0-100)
      */
     uint8_t getMaxBrightnessPercent() const
     {
@@ -348,8 +347,8 @@ class PowerManager
      * @brief Set brightness slew rate
      * @param percentPerSecond Rate of change (0-100%/s, 0 = instant)
      *
-     * Controls how fast brightness changes when power limiting kicks in.
-     * 0 = instant change, 100 = full range in 1 second.
+     * NeoPixelManager (GLOBAL budget): a reduction applies at once, a recovery rises by this
+     * rate; 0 and 100 = at once.
      */
     void setBrightnessSlewRate(uint8_t percentPerSecond)
     {
@@ -627,7 +626,7 @@ class PowerManager
      *         1.0 = no limiting needed
      *         <1.0 = reduce brightness by this factor
      *
-     * Enhanced with soft-limiting threshold and auto brightness cap.
+     * Not used by NeoPixelManager; applies the auto brightness limit as a cap at any load.
      */
     float calculateBrightnessScale(const uint8_t* pixels, uint16_t numPixels, uint8_t bytesPerPixel, uint8_t hardwareBrightness = 255) const
     {
@@ -699,7 +698,7 @@ class PowerManager
      * @param deltaTimeMs Time since last update (for slew rate, 0 = no slew)
      * @return true if scaling was applied, false if not needed
      *
-     * Enhanced with slew rate control for smooth transitions.
+     * Not used by NeoPixelManager, which applies its own curve (applyPowerLimit()).
      */
     bool applyCurrentLimit(uint8_t* pixels, uint16_t numPixels, uint8_t bytesPerPixel, uint8_t hardwareBrightness = 255, uint32_t deltaTimeMs = 0)
     {
@@ -884,7 +883,7 @@ class PowerManager
 
     // Phase 2: Soft Limiting & Brightness Cap
     uint8_t _thresholdPercent;     // Soft-limiting threshold (0-100%, default 100)
-    uint8_t _maxBrightnessPercent; // Maximum brightness cap (0-100%, default 100)
+    uint8_t _maxBrightnessPercent; // Brightness at the limit (0-100%, default 100)
 
     // Phase 3: Slew Rate Control
     uint8_t _slewRatePercentPerSec;  // Brightness change rate (%/s, 0 = instant)

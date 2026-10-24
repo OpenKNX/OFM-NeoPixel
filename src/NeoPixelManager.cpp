@@ -2,6 +2,48 @@
 #include "OpenKNX/Log/Logger.h"
 #include <Arduino.h>
 
+namespace
+{
+/**
+ * @brief Brightness scale for one power budget.
+ * @note 1.0 up to the threshold, then linear down to minBrightnessPct at the limit; above the
+ *       limit 95 % of it, but never brighter than the curve reaches at the limit.
+ */
+float ablScale(uint32_t requestedMa, uint32_t limitMa, uint8_t thresholdPct, uint8_t minBrightnessPct)
+{
+    if (limitMa == 0) return 1.0f;
+    if (minBrightnessPct > 100) minBrightnessPct = 100;
+    const uint32_t thresholdMa = (limitMa * thresholdPct) / 100;
+    if (requestedMa <= thresholdMa) return 1.0f;
+
+    // With threshold >= 100 % there is no soft zone: full brightness up to the limit
+    const float atLimit = (thresholdMa < limitMa) ? minBrightnessPct / 100.0f : 1.0f;
+    if (requestedMa > limitMa)
+    {
+        const float hard = (float)((limitMa * 95) / 100) / (float)requestedMa;
+        return (hard < atLimit) ? hard : atLimit;
+    }
+    // thresholdMa < requestedMa <= limitMa, so limitMa > thresholdMa here
+    const float exceed = (float)(requestedMa - thresholdMa) / (float)(limitMa - thresholdMa);
+    return 1.0f - exceed * (1.0f - atLimit);
+}
+
+/** @brief Load in percent of the limit, clamped to 100 (0 without a limit). */
+uint8_t loadPercentOf(uint32_t currentMa, uint32_t limitMa)
+{
+    if (limitMa == 0) return 0;
+    const uint32_t pct = (currentMa * 100) / limitMa;
+    return (uint8_t)(pct > 100 ? 100 : pct);
+}
+
+/** @brief Current after scaling, rounded and never above the limit (limit 0 = none). */
+uint32_t scaledCurrentMa(uint32_t requestedMa, float scale, uint32_t limitMa)
+{
+    const uint32_t ma = (uint32_t)((float)requestedMa * scale + 0.5f);
+    return (limitMa > 0 && ma > limitMa) ? limitMa : ma;
+}
+} // namespace
+
 // ============================================================================
 // Constructor & Destructor
 // ============================================================================
@@ -582,7 +624,29 @@ void NeoPixelManager::measureCurrentOnly()
     _powerManager.setCachedCurrentValues(total, total);
     _globalCurrentMa = total;
     _globalLimitMa = limit;
-    _globalLoadPercent = (limit > 0) ? (uint8_t)((total * 100) / limit) : 0;
+    _globalLoadPercent = loadPercentOf(total, limit);
+}
+
+/**
+ * @brief Apply the ABL slew rate to the GLOBAL budget scale.
+ * @note A lower scale applies at once so the supply never sees the overload; a higher one rises by
+ *       the slew rate in percent per second (0 or 100 = at once).
+ */
+float NeoPixelManager::slewGlobalScale(float target)
+{
+    const uint32_t now = millis();
+    const uint32_t dt = now - _globalAblMs;
+    _globalAblMs = now;
+
+    const uint8_t rate = _powerManager.getBrightnessSlewRate();
+    if (target <= _globalAblScale || rate == 0 || rate >= 100)
+    {
+        _globalAblScale = target;
+        return target;
+    }
+    const float step = (float)rate * (float)dt / 100000.0f;
+    _globalAblScale = (target - _globalAblScale > step) ? _globalAblScale + step : target;
+    return _globalAblScale;
 }
 
 void NeoPixelManager::applyPowerLimit()
@@ -594,6 +658,7 @@ void NeoPixelManager::applyPowerLimit()
     {
         rebuildPhysToVirtualMapping();
     }
+    bool limitApplied = false; // published once at the end, read by the module between frames
 
     // Limiting switched off in ETS: never touch the pixels. The consumption is still
     // reported, but the console and the KO read it seconds apart - walking every pixel
@@ -607,6 +672,8 @@ void NeoPixelManager::applyPowerLimit()
             _lastIdleCurrentMeasureMs = now;
             measureCurrentOnly();
         }
+        _powerLimitActive = false;
+        _powerLimitSeen = false;
         return;
     }
 
@@ -618,6 +685,7 @@ void NeoPixelManager::applyPowerLimit()
         // Calculate total requested current from ALL "UseGlobal" strips
 
         uint32_t totalRequestedCurrent = 0;
+        uint32_t unscalableCurrent = 0; // SPI strips: applyScaleToPhysicalBuffer() leaves them unchanged
 
         // Step 1: Sum up requested current from all PhysicalStrips with "UseGlobal" mode
         for (auto phys : _strips)
@@ -644,18 +712,21 @@ void NeoPixelManager::applyPowerLimit()
             uint32_t stripCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, hardwareBrightness,
                     _powerManager.profileForProtocol(phys->getProtocol()));
             totalRequestedCurrent += stripCurrent;
+            if (phys->isSpiStrip()) unscalableCurrent += stripCurrent;
         }
 
-        // Step 2: Check if limiting is needed
+        // Step 2: One scale for the shared budget, same curve as a strip with its own limit
         uint32_t effectiveLimit = _powerManager.getMaxCurrent();
+        const float globalScale = slewGlobalScale(ablScale(totalRequestedCurrent, effectiveLimit,
+                                                           _powerManager.getThresholdPercent(),
+                                                           _powerManager.getMaxBrightnessPercent()));
 
-        if (totalRequestedCurrent > effectiveLimit)
+        if (globalScale < 1.0f)
         {
-            // Apply hysteresis: Target 95% of limit to prevent oscillation
-            uint32_t targetCurrent = (effectiveLimit * 95) / 100;
-
-            // Calculate global scale factor
-            float globalScale = (float)targetCurrent / (float)totalRequestedCurrent;
+            const uint32_t scalableCurrent = totalRequestedCurrent - unscalableCurrent;
+            const uint32_t actualCurrent = unscalableCurrent + scaledCurrentMa(scalableCurrent, globalScale, 0);
+            // Only content that is dimmed counts (no SPI strip, not all dark during the slew recovery)
+            if (scalableCurrent > 0) limitApplied = true;
 
             // Step 3: Apply same scale to ALL PhysicalStrip buffers with UseGlobal mode
             for (auto phys : _strips)
@@ -667,16 +738,16 @@ void NeoPixelManager::applyPowerLimit()
                 uint8_t stripPowerMode = cfg->getPowerLimitMode();
                 if (stripPowerMode == 1 && phys->getBuffer())
                 {
-                    applyScaleToPhysicalBuffer(phys, globalScale);
+                    (void)applyScaleToPhysicalBuffer(phys, globalScale);
                 }
             }
 
-            _powerManager.setCachedCurrentValues(totalRequestedCurrent, targetCurrent);
+            _powerManager.setCachedCurrentValues(totalRequestedCurrent, actualCurrent);
 
             // Cache global stats
-            _globalCurrentMa = targetCurrent;
+            _globalCurrentMa = actualCurrent;
             _globalLimitMa = effectiveLimit;
-            _globalLoadPercent = (uint8_t)((targetCurrent * 100) / effectiveLimit);
+            _globalLoadPercent = loadPercentOf(actualCurrent, effectiveLimit);
         }
         else
         {
@@ -685,7 +756,7 @@ void NeoPixelManager::applyPowerLimit()
 
             _globalCurrentMa = totalRequestedCurrent;
             _globalLimitMa = effectiveLimit;
-            _globalLoadPercent = effectiveLimit > 0 ? (uint8_t)((totalRequestedCurrent * 100) / effectiveLimit) : 0;
+            _globalLoadPercent = loadPercentOf(totalRequestedCurrent, effectiveLimit);
         }
 
         // Cache per-strip stats for ALL strips (for monitoring)
@@ -735,7 +806,7 @@ void NeoPixelManager::applyPowerLimit()
             StripPowerStats stats;
             stats.currentMa = stripCurrent;
             stats.limitMa = stripLimit;
-            stats.loadPercent = stripLimit > 0 ? (uint8_t)((stripCurrent * 100) / stripLimit) : 0;
+            stats.loadPercent = loadPercentOf(stripCurrent, stripLimit);
             _stripPowerCache[phys] = stats;
         }
 
@@ -779,42 +850,24 @@ void NeoPixelManager::applyPowerLimit()
             // Get ABL parameters
             uint8_t autoBrLimit = cfg->getAutoBrightnessLimit();
             uint8_t threshold = cfg->getPowerLimitThreshold();
-            uint32_t thresholdCurrent = (stripLimit * threshold) / 100;
 
             // Apply ABL if needed
             uint32_t actualCurrent = stripRequestedCurrent;
-            if (stripRequestedCurrent > thresholdCurrent)
+            const float stripScale = ablScale(stripRequestedCurrent, stripLimit, threshold, autoBrLimit);
+            if (stripScale < 1.0f)
             {
-                float stripScale = 1.0f;
-
-                if (stripRequestedCurrent > stripLimit)
+                if (applyScaleToPhysicalBuffer(phys, stripScale))
                 {
-                    uint32_t targetCurrent = (stripLimit * 95) / 100;
-                    stripScale = (float)targetCurrent / (float)stripRequestedCurrent;
-                    actualCurrent = targetCurrent;
+                    actualCurrent = scaledCurrentMa(stripRequestedCurrent, stripScale, stripLimit);
+                    limitApplied = true;
                 }
-                else if (stripLimit > thresholdCurrent)
-                {
-                    float exceedRatio = (float)(stripRequestedCurrent - thresholdCurrent) /
-                                        (float)(stripLimit - thresholdCurrent);
-                    float targetBrightness = 100.0f - (exceedRatio * (100.0f - autoBrLimit));
-                    stripScale = targetBrightness / 100.0f;
-                    actualCurrent = (uint32_t)(stripRequestedCurrent * stripScale);
-                }
-                else
-                {
-                    stripScale = (float)stripLimit / (float)stripRequestedCurrent;
-                    actualCurrent = stripLimit;
-                }
-
-                applyScaleToPhysicalBuffer(phys, stripScale);
             }
 
             // Update cache
             StripPowerStats stats;
             stats.currentMa = actualCurrent;
             stats.limitMa = stripLimit;
-            stats.loadPercent = stripLimit > 0 ? (uint8_t)((actualCurrent * 100) / stripLimit) : 0;
+            stats.loadPercent = loadPercentOf(actualCurrent, stripLimit);
             _stripPowerCache[phys] = stats;
         }
     }
@@ -870,7 +923,7 @@ void NeoPixelManager::applyPowerLimit()
             StripPowerStats stats;
             stats.currentMa = stripRequestedCurrent;
             stats.limitMa = stripLimit;
-            stats.loadPercent = stripLimit > 0 ? (uint8_t)((stripRequestedCurrent * 100) / stripLimit) : 0;
+            stats.loadPercent = loadPercentOf(stripRequestedCurrent, stripLimit);
             _stripPowerCache[phys] = stats;
         }
 
@@ -913,39 +966,19 @@ void NeoPixelManager::applyPowerLimit()
                 threshold = cfg->getPowerLimitThreshold();
             }
 
-            // Calculate threshold current (when ABL starts dimming)
-            uint32_t thresholdCurrent = (stripLimit * threshold) / 100;
-
             // Apply ABL-based limiting if needed
             uint32_t actualCurrent = stripRequestedCurrent;
-            if (stripRequestedCurrent > thresholdCurrent)
+            const float stripScale = ablScale(stripRequestedCurrent, stripLimit, threshold, autoBrLimit);
+            if (stripScale < 1.0f)
             {
-                float stripScale = 1.0f;
-
-                if (stripRequestedCurrent > stripLimit)
+                if (applyScaleToPhysicalBuffer(phys, stripScale))
                 {
-                    uint32_t targetCurrent = (stripLimit * 95) / 100;
-                    stripScale = (float)targetCurrent / (float)stripRequestedCurrent;
+                    actualCurrent = scaledCurrentMa(stripRequestedCurrent, stripScale, stripLimit);
+                    limitApplied = true;
                 }
-                else if (stripLimit > thresholdCurrent)
-                {
-                    float exceedRatio = (float)(stripRequestedCurrent - thresholdCurrent) /
-                                        (float)(stripLimit - thresholdCurrent);
-                    float targetBrightness = 100.0f - (exceedRatio * (100.0f - autoBrLimit));
-                    stripScale = targetBrightness / 100.0f;
-                }
-                else
-                {
-                    stripScale = (float)stripLimit / (float)stripRequestedCurrent;
-                }
-
-                applyScaleToPhysicalBuffer(phys, stripScale);
-
-                actualCurrent = (uint32_t)(stripRequestedCurrent * stripScale);
-                if (actualCurrent > stripLimit) actualCurrent = stripLimit;
 
                 cacheIt->second.currentMa = actualCurrent;
-                cacheIt->second.loadPercent = stripLimit > 0 ? (uint8_t)((actualCurrent * 100) / stripLimit) : 0;
+                cacheIt->second.loadPercent = loadPercentOf(actualCurrent, stripLimit);
             }
         }
 
@@ -957,7 +990,7 @@ void NeoPixelManager::applyPowerLimit()
             _globalCurrentMa += entry.second.currentMa;
             _globalLimitMa += entry.second.limitMa;
         }
-        _globalLoadPercent = _globalLimitMa > 0 ? (uint8_t)((_globalCurrentMa * 100) / _globalLimitMa) : 0;
+        _globalLoadPercent = loadPercentOf(_globalCurrentMa, _globalLimitMa);
     }
     else if (mode == PowerLimitMode::PER_LED)
     {
@@ -1014,7 +1047,7 @@ void NeoPixelManager::applyPowerLimit()
             StripPowerStats stats;
             stats.currentMa = stripRequestedCurrent;
             stats.limitMa = stripLimit;
-            stats.loadPercent = stripLimit > 0 ? (uint8_t)((stripRequestedCurrent * 100) / stripLimit) : 0;
+            stats.loadPercent = loadPercentOf(stripRequestedCurrent, stripLimit);
             _stripPowerCache[phys] = stats;
         }
 
@@ -1051,38 +1084,19 @@ void NeoPixelManager::applyPowerLimit()
                 threshold = cfg->getPowerLimitThreshold();
             }
 
-            uint32_t thresholdCurrent = (stripLimit * threshold) / 100;
-
             // Apply ABL if needed
             uint32_t actualCurrent = stripRequestedCurrent;
-            if (stripRequestedCurrent > thresholdCurrent)
+            const float stripScale = ablScale(stripRequestedCurrent, stripLimit, threshold, autoBrLimit);
+            if (stripScale < 1.0f)
             {
-                float stripScale = 1.0f;
-
-                if (stripRequestedCurrent > stripLimit)
+                if (applyScaleToPhysicalBuffer(phys, stripScale))
                 {
-                    uint32_t targetCurrent = (stripLimit * 95) / 100;
-                    stripScale = (float)targetCurrent / (float)stripRequestedCurrent;
+                    actualCurrent = scaledCurrentMa(stripRequestedCurrent, stripScale, stripLimit);
+                    limitApplied = true;
                 }
-                else if (stripLimit > thresholdCurrent)
-                {
-                    float exceedRatio = (float)(stripRequestedCurrent - thresholdCurrent) /
-                                        (float)(stripLimit - thresholdCurrent);
-                    float targetBrightness = 100.0f - (exceedRatio * (100.0f - autoBrLimit));
-                    stripScale = targetBrightness / 100.0f;
-                }
-                else
-                {
-                    stripScale = (float)stripLimit / (float)stripRequestedCurrent;
-                }
-
-                applyScaleToPhysicalBuffer(phys, stripScale);
-
-                actualCurrent = (uint32_t)(stripRequestedCurrent * stripScale);
-                if (actualCurrent > stripLimit) actualCurrent = stripLimit;
 
                 cacheIt->second.currentMa = actualCurrent;
-                cacheIt->second.loadPercent = stripLimit > 0 ? (uint8_t)((actualCurrent * 100) / stripLimit) : 0;
+                cacheIt->second.loadPercent = loadPercentOf(actualCurrent, stripLimit);
             }
         }
 
@@ -1094,8 +1108,10 @@ void NeoPixelManager::applyPowerLimit()
             _globalCurrentMa += entry.second.currentMa;
             _globalLimitMa += entry.second.limitMa;
         }
-        _globalLoadPercent = _globalLimitMa > 0 ? (uint8_t)((_globalCurrentMa * 100) / _globalLimitMa) : 0;
+        _globalLoadPercent = loadPercentOf(_globalCurrentMa, _globalLimitMa);
     }
+    _powerLimitActive = limitApplied;
+    if (limitApplied) _powerLimitSeen = true;
 }
 
 /**
@@ -1145,15 +1161,15 @@ void NeoPixelManager::applyScaleToBuffer(VirtualStrip* vstrip, float scale)
  * Used by applyPowerLimit() when working on PhysicalStrip buffers (after syncAll())
  * @private
  */
-void NeoPixelManager::applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scale)
+bool NeoPixelManager::applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scale)
 {
-    if (!phys || !phys->getBuffer()) return;
+    if (!phys || !phys->getBuffer()) return false;
 
     // SPI (APA102/SK9822) buffers are FRAMED (start/end frame + per-LED 111-marker brightness byte),
     // not contiguous RGB — scaling them as RGB corrupts the frame markers. Skip ABL for SPI here
     // (proper APA102 dimming via the 5-bit global-brightness field is a separate task).
     if (phys && phys->isSpiStrip())
-        return;
+        return false;
 
     uint16_t ledCount = phys->getLedCount();
     uint8_t bytesPerPixel = bufferStride(phys);
@@ -1185,6 +1201,7 @@ void NeoPixelManager::applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scal
             buffer[offset + 4] = (uint8_t)(buffer[offset + 4] * scale); // CW
         }
     }
+    return true;
 }
 
 /**

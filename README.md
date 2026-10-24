@@ -2616,105 +2616,35 @@ pm->setMaxCurrentPerLed(50);  // 50mA max per LED
 | `PER_CHANNEL` | Multiple output channels, separate fusing |
 | `PER_LED` | Protect LEDs from over-driving |
 
-#### Soft-Limiting (Threshold)
+#### Limiting Curve (Threshold, Auto Brightness Limit)
 
-Gradual brightness reduction instead of hard cutoff:
-
-```cpp
-PowerManager* pm = mgr->getPowerManager();
-
-// Start dimming at 80% of limit (smooth transition)
-pm->setThresholdPercent(80);
-
-// With 1000mA limit and 80% threshold:
-//  - 0-800mA:    No limiting (full brightness)
-//  - 800-1000mA: Gradual brightness reduction (soft curve)
-//  - >1000mA:    Hard limit to 1000mA
-```
-
-**Why use soft-limiting?**
-- Prevents sudden brightness jumps during animations
-- Smoother visual transitions when approaching limit
-- Less noticeable power management intervention
-
-#### Auto Brightness Cap
-
-Maximum brightness limit independent of power consumption:
+`NeoPixelManager::applyPowerLimit()` uses one curve for every budget (the GLOBAL budget and each
+strip with its own limit):
 
 ```cpp
 PowerManager* pm = mgr->getPowerManager();
+pm->setThresholdPercent(80);       // soft zone starts at 80 % of the limit
+pm->setMaxBrightnessPercent(70);   // brightness reached at the limit
 
-// Cap brightness at 80% regardless of power consumption
-pm->setMaxBrightnessPercent(80);
+// With 1000 mA limit, threshold 80 %, auto brightness limit 70 %:
+//  - 0-800 mA:    no limiting
+//  - 800-1000 mA: brightness falls linearly from 100 % to 70 %
+//  - >1000 mA:    95 % of the limit, at most the 70 % reached at the limit
+// Threshold 100 %: no soft zone, full brightness up to the limit, then 95 %.
+// Auto brightness limit 100 % (default): no reduction inside the soft zone.
 ```
 
-**Use cases:**
-- Outdoor installations (prevent blinding)
-- Night mode operation
-- Preserving LED lifespan
-- Consistent brightness across different strip lengths
+`isPowerLimitActive()` reports whether the last frame reduced at least one strip.
 
-#### Slew Rate Control (Smooth Transitions)
-
-Control how fast brightness changes when power limiting kicks in:
+#### Slew Rate (GLOBAL budget)
 
 ```cpp
-PowerManager* pm = mgr->getPowerManager();
-
-// 50% brightness change per second (smooth)
-pm->setBrightnessSlewRate(50);
-
-// 0 = instant change (default)
-// 100 = full range in 1 second
-// 25 = full range in 4 seconds
-
-// IMPORTANT: Must call updateSlewRate() in your loop!
-void loop() {
-    uint32_t deltaTime = millis() - lastUpdate;
-    pm->updateSlewRate(deltaTime);
-    lastUpdate = millis();
-    
-    // ... rest of update logic
-}
+pm->setBrightnessSlewRate(20);     // recovery at 20 % per second
 ```
 
-**Why use slew rate?**
-- Prevents jarring brightness changes
-- Professional-looking power limiting
-- Reduces stress on power supply (gradual current changes)
-
-#### Combined Example:
-
-```cpp
-void setup() {
-    NeoPixelManager* mgr = neoPixelModule.getManager();
-    PowerManager* pm = mgr->getPowerManager();
-    
-    // 500 WS2805 RGBCCT LEDs, 15A power supply
-    mgr->setMaxCurrent(14000);  // Leave 1A safety margin
-    pm->setLedProfile(LedProfiles::WS2805_RGBCCT);
-    
-    // Advanced features
-    pm->setThresholdPercent(85);       // Soft-limit from 85%
-    pm->setMaxBrightnessPercent(90);   // Never exceed 90% brightness
-    pm->setBrightnessSlewRate(30);     // Smooth 3s transitions
-    
-    mgr->setPowerManagementEnabled(true);
-}
-
-void loop() {
-    static uint32_t lastUpdate = 0;
-    uint32_t now = millis();
-    uint32_t deltaTime = now - lastUpdate;
-    lastUpdate = now;
-    
-    PowerManager* pm = mgr->getPowerManager();
-    pm->updateSlewRate(deltaTime);
-    
-    // Normal update
-    mgr->update(deltaTime);
-}
-```
+The shared GLOBAL scale drops at once when the load rises; it rises again by the slew rate in
+percent per second (0 and 100 = at once). Strips with their own limit are scaled without slew.
+`PowerManager::updateSlewRate()` / `applyCurrentLimit()` are not used by `NeoPixelManager`.
 
 ### Per-Strip Power Limit Override
 
@@ -2790,16 +2720,16 @@ PhysicalStripConfig* cfg = strip->getConfig();
 // Configure ABL for this strip
 cfg->setPowerLimitMode(2);               // Custom mode required
 cfg->setMaxCurrentMa(2500);              // 2.5A limit
-cfg->setPowerLimitThreshold(80);         // Start ABL at 80% (2A)
-cfg->setAblSlewRate(20);                 // 20% brightness change per second
+cfg->setPowerLimitThreshold(80);         // Soft zone from 80 % (2 A)
+cfg->setAutoBrightnessLimit(70);         // 70 % brightness at 2.5 A
 
-// Strip will gradually dim when exceeding 2A, hard-limit at 2.5A
+// Same curve as the GLOBAL budget, see "Limiting Curve"
 ```
 
 **ABL Parameters:**
-- **Threshold (%)**: When to start gradual dimming (default: 80%)
-- **Slew Rate (%)**: How fast to dim (default: 20% per second)
-- **Brightness Cap (%)**: Maximum brightness limit (default: 100%)
+- **Threshold (%)**: Start of the soft zone (default: 80%)
+- **Auto Brightness Limit (%)**: Brightness reached at the limit (default: 100%)
+- **Slew Rate (%)**: stored (`setAblSlewRate`), not applied to a strip with its own limit
 
 #### Console Commands
 
@@ -2811,7 +2741,7 @@ neo phys config 0
 neo phys config 0 powermode 2        # Set to Custom (Fixed Value)
 neo phys config 0 maxcurrent 3000    # Set 3A limit
 neo phys config 0 threshold 85       # ABL starts at 85%
-neo phys config 0 slew 30            # 30% brightness change/sec
+neo phys config 0 slew 30            # stored, not applied to a strip with its own limit
 
 # Per-LED mode
 neo phys config 1 powermode 3        # Set to Custom (Per LED)

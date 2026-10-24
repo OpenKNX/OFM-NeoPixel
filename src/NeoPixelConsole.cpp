@@ -4350,11 +4350,11 @@ bool NeoPixel::processPowerCommand(const std::string& args)
         openknx.logger.logWithValues("Total Power:      %.2f W (all strips)", totalPowerWatts);
 
         // Show if limiting is active
-        if (pm->isEnabled() && globalCurrentMa > globalLimitMa * 0.95f)
+        if (pm->isEnabled() && _manager->isPowerLimitActive())
         {
             openknx.logger.log("");
             openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-            openknx.logger.logWithValues("WARNING: APPROACHING/AT LIMIT - Current Load: %u%%", globalLoadPercent);
+            openknx.logger.logWithValues("WARNING: POWER LIMITING ACTIVE - Current Load: %u%%", globalLoadPercent);
             openknx.logger.color(0);
         }
 
@@ -4390,7 +4390,8 @@ bool NeoPixel::processPowerCommand(const std::string& args)
                         phys->getColorOrder(),
                         true); // hasDummyLed = true for APA102
                     stripLimitMa = cfg->getMaxCurrentMa();
-                    stripLoadPercent = stripLimitMa > 0 ? (uint8_t)((stripCurrentMa * 100) / stripLimitMa) : 0;
+                    const uint32_t pct = stripLimitMa > 0 ? (stripCurrentMa * 100) / stripLimitMa : 0;
+                    stripLoadPercent = (uint8_t)(pct > 100 ? 100 : pct);
                 }
 
                 // Get power mode name

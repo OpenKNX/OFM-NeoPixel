@@ -267,6 +267,17 @@ class NeoPixelManager
         loadPercent = _globalLoadPercent;
     }
 
+    /** @brief true if the last applyPowerLimit() reduced the brightness of at least one strip. */
+    bool isPowerLimitActive() const { return _powerLimitActive; }
+
+    /** @brief true if any frame since the previous call reduced the brightness; clears the latch. */
+    bool takePowerLimitSeen()
+    {
+        const bool seen = _powerLimitSeen;
+        _powerLimitSeen = false;
+        return seen;
+    }
+
     /**
      * @brief Get power statistics for a specific PhysicalStrip
      * @param strip Physical strip pointer
@@ -332,6 +343,11 @@ class NeoPixelManager
     // Limiting switched off: measure at the reporting cadence instead of once per frame.
     static constexpr uint32_t kIdleCurrentMeasureIntervalMs = 1000;
     uint32_t _lastIdleCurrentMeasureMs = 0;
+    // GLOBAL budget: scale after the ABL slew (reductions apply at once, recovery is slewed)
+    float _globalAblScale = 1.0f;
+    bool _powerLimitActive = false;
+    bool _powerLimitSeen = false; // latched until takePowerLimitSeen()
+    uint32_t _globalAblMs = 0;
 
     mutable uint32_t _globalCurrentMa;                                  // Global total current (all strips)
     mutable uint32_t _globalLimitMa;                                    // Global limit
@@ -348,5 +364,6 @@ class NeoPixelManager
     void applyScaleToBuffer(VirtualStrip* vstrip, float scale);                       // Apply brightness scale to VirtualStrip buffer
     void rebuildPhysToVirtualMapping();                                               // Rebuild Physical→Virtual mapping table
     void applyPowerLimitToStrip(PhysicalStrip* phys, uint32_t stripLimit);            // Apply power limit to a specific PhysicalStrip
-    void applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scale);                // Apply brightness scale to PhysicalStrip buffer
+    bool applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scale);                // Scale a PhysicalStrip buffer; false for SPI strips (left unscaled)
+    float slewGlobalScale(float target);                                              // ABL slew for the GLOBAL budget scale
 };
