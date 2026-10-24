@@ -16,7 +16,7 @@
 
 /**
  * State stored in Segment's EffectState:
- *   - position: Current wipe position (0..length-1)
+ *   - position: Current wipe position (0..length-1; matrix row for top/bottom on 2D)
  *   - lastUpdate: Time accumulator for speed control
  *
  * Config from Segment's EffectConfig:
@@ -103,8 +103,8 @@ class EffectWipe : public Effect
         switch (index)
         {
             case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Wischgeschwindigkeit", "Speed: Wipe animation speed");
-            case 1: return PARAM_DESC_DE_EN("Richtung (0-5): 0=Links→Rechts, 1=Rechts→Links, 2=Oben→Unten, 3=Unten→Oben, 4=Mitte→Außen, 5=Außen→Mitte",
-                                            "Direction (0-5): 0=Left→Right, 1=Right→Left, 2=Top→Bottom, 3=Bottom→Top, 4=Center→Out, 5=Edges→In");
+            case 1: return PARAM_DESC_DE_EN("Richtung (0-5): 0=Links→Rechts, 1=Rechts→Links, 2=Oben→Unten, 3=Unten→Oben (2/3 zeilenweise auf einer 2D-Matrix, sonst wie 0), 4=Mitte→Außen, 5=Außen→Mitte",
+                                            "Direction (0-5): 0=Left→Right, 1=Right→Left, 2=Top→Bottom, 3=Bottom→Top (2/3 row by row on a 2D matrix, otherwise like 0), 4=Center→Out, 5=Edges→In");
             case 2: return PARAM_DESC_DE_EN("Wiederholen: Nach einem vollständigen Wipe den Hintergrund wiederherstellen und erneut starten",
                                             "Loop: Restore the background after a completed wipe and start again");
             default: return "";

@@ -45,13 +45,29 @@ void EffectWipe::update(Segment* segment, uint32_t deltaTime)
         uint16_t length = segment->getLength();
         if (length == 0) return;
 
-        // Set pixel at current position based on direction (stored in mode field)
-        // Direction is stored in config.option1 (0..5)
         uint8_t dirVal = config.option1;
         if (dirVal > 5) dirVal = 5;
         WipeDirection dir = (WipeDirection)dirVal;
 
-        switch (dir) // Determine which wipe direction to use
+        // Top/bottom wipes fill one matrix row per step; on 1D/3D they keep the left-to-right fallback
+        const bool rowWipe = (dir == WIPE_TOP_TO_BOTTOM || dir == WIPE_BOTTOM_TO_TOP) && segment->is2D();
+        const LedGeometry& geo = segment->getGeometry();
+        if (rowWipe) length = geo.height;
+
+        if (rowWipe)
+        {
+            if (state.position < length)
+            {
+                const uint8_t y = (dir == WIPE_TOP_TO_BOTTOM) ? (uint8_t)state.position
+                                                              : (uint8_t)(length - 1 - state.position);
+                for (uint8_t x = 0; x < geo.width; x++)
+                {
+                    const uint16_t idx = segment->localToBandIndex(segment->xyToIndex(x, y));
+                    if (idx != 0xFFFF) segment->setPixel(idx, r, g, b, ww, cw);
+                }
+            }
+        }
+        else switch (dir) // Determine which wipe direction to use
         {
             case WIPE_LEFT_TO_RIGHT: // Simple left-to-right, direct mapping
                 if (state.position < length)

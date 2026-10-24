@@ -37,7 +37,7 @@ No additional options. Color and brightness are set via the general segment sett
 | Option | Meaning |
 |--------|---------|
 | Speed | How fast the wipe runs. |
-| Direction | Which direction the wipe comes from: **Left to right**, **Right to left**, **Top to bottom**, **Bottom to top**, **Center to edges** or **Edges to center**. |
+| Direction | Which direction the wipe comes from: **Left to right**, **Right to left**, **Top to bottom**, **Bottom to top** (row by row on a 2D matrix, left to right on 1D/3D), **Center to edges** or **Edges to center**. |
 
 ---
 
