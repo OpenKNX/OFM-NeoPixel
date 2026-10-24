@@ -34,7 +34,7 @@ class FireEffect : public Effect
 {
   private:
     // Heat array for fire simulation
-    static const uint16_t MAX_HEAT_CELLS = 512; // Support up to 512 LEDs
+    static const uint16_t MAX_HEAT_CELLS = 512; // Longer segments map several LEDs onto one cell
     uint8_t _heat[MAX_HEAT_CELLS];
     uint16_t _numCells;
 
@@ -75,18 +75,16 @@ class FireEffect : public Effect
         const uint8_t option2 = config.option2;        // Sparking probability (0=default)
         const bool reverseDir = (config.reverse != 0); // Reverse direction
         const bool blueMode = config.feature2;         // Blue fire mode
-        uint16_t length = segment->getLength();
+        const uint16_t length = segment->getLength();
+        if (length == 0) return;
 
-        // Ensure we don't exceed our heat array
-        if (length > MAX_HEAT_CELLS)
-        {
-            length = MAX_HEAT_CELLS;
-        }
+        // Longer segments/bands share one heat cell between several pixels
+        const uint16_t cells = (length > MAX_HEAT_CELLS) ? MAX_HEAT_CELLS : length;
 
         // Update heat array size if needed
-        if (_numCells != length)
+        if (_numCells != cells)
         {
-            _numCells = length;
+            _numCells = cells;
             // Clear heat array for new size
             for (uint16_t i = 0; i < MAX_HEAT_CELLS; i++)
             {
@@ -130,17 +128,19 @@ class FireEffect : public Effect
         }
 
         // Step 4. Map from heat cells to LED colors
-        for (uint16_t j = 0; j < _numCells; j++)
+        for (uint16_t j = 0; j < length; j++)
         {
+            const uint16_t cell = (length == _numCells) ? j : (uint16_t)(((uint32_t)j * _numCells) / length);
+
             // Use feature2 for color mode (normal fire vs blue fire)
             uint32_t color;
             if (blueMode)
             {
-                color = blueFire(_heat[j]); // Blue fire variant
+                color = blueFire(_heat[cell]); // Blue fire variant
             }
             else
             {
-                color = heatColor(_heat[j]); // Normal fire
+                color = heatColor(_heat[cell]); // Normal fire
             }
 
             // Apply master brightness
@@ -157,7 +157,7 @@ class FireEffect : public Effect
             uint16_t pixelnum;
             if (_reverseDirection)
             {
-                pixelnum = (_numCells - 1) - j;
+                pixelnum = (length - 1) - j;
             }
             else
             {
