@@ -35,16 +35,16 @@
 class TheaterChaseEffect : public Effect
 {
   private:
-    uint32_t _lastUpdate;
-    int16_t _position;
-    int8_t _direction;
-    uint8_t _hue;
+    /// Per-segment state in Segment::effectScratch(); all-zero is the start state
+    struct State
+    {
+        uint32_t lastUpdate;
+        int16_t position;
+        bool reverse; // bounce moves the offset down
+        uint8_t hue;
+    };
 
   public:
-    TheaterChaseEffect() : _lastUpdate(0), _position(0), _direction(1), _hue(0)
-    {
-    }
-
     void update(Segment* segment, uint32_t deltaTime) override
     {
         if (!segment) return;
@@ -52,6 +52,7 @@ class TheaterChaseEffect : public Effect
         auto& config = segment->getConfig();
         uint16_t length = segment->getLength();
         if (length == 0) return;
+        State& s = segment->effectScratch<State>();
 
         // Use mode for color mode (0=single color, 1=rainbow)
         bool rainbow = (config.mode == 1);
@@ -62,11 +63,11 @@ class TheaterChaseEffect : public Effect
                                     : (20 + ((255 - config.speed) * 180) / 255);
 
         uint32_t now = millis();
-        if (now - _lastUpdate < interval)
+        if (now - s.lastUpdate < interval)
         {
             return; // Not time to update yet
         }
-        _lastUpdate = now;
+        s.lastUpdate = now;
 
         // Use option1 for spacing (1-10, default 3)
         uint8_t spacing = config.option1 > 0 ? config.option1 : 3;
@@ -115,14 +116,14 @@ class TheaterChaseEffect : public Effect
         uint8_t ccw = FastLEDMath::scale8(config.cw(), config.intensity);
 
         // Light pixels starting from current position with dot size
-        for (int16_t i = _position; i < (int16_t)length; i += spacing)
+        for (int16_t i = s.position; i < (int16_t)length; i += spacing)
         {
             if (i < 0) continue;
 
             uint8_t r, g, b, ww = 0, cw = 0;
             if (rainbow)
             {
-                uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, config.intensity);
+                uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(s.hue, 255, config.intensity);
                 r = (rgb >> 16) & 0xFF;
                 g = (rgb >> 8) & 0xFF;
                 b = rgb & 0xFF;
@@ -140,47 +141,39 @@ class TheaterChaseEffect : public Effect
         }
 
         // Advance position
-        _position += _direction;
+        s.position += s.reverse ? -1 : 1;
         if (bounceMode)
         {
             // Runway: bounce the chase offset between 0 and spacing-1
-            if (_position >= (int16_t)spacing)
+            if (s.position >= (int16_t)spacing)
             {
-                _position = (int16_t)spacing - 1;
-                _direction = -1;
+                s.position = (int16_t)spacing - 1;
+                s.reverse = true;
             }
-            else if (_position < 0)
+            else if (s.position < 0)
             {
-                _position = 0;
-                _direction = 1;
+                s.position = 0;
+                s.reverse = false;
             }
         }
         else
         {
             // Wrap around within one spacing period
-            if (_position >= (int16_t)spacing)
+            if (s.position >= (int16_t)spacing)
             {
-                _position = 0;
+                s.position = 0;
             }
-            else if (_position < 0)
+            else if (s.position < 0)
             {
-                _position = (int16_t)spacing - 1;
+                s.position = (int16_t)spacing - 1;
             }
         }
 
         // Advance hue for rainbow mode
         if (rainbow)
         {
-            _hue += colorSpeed;
+            s.hue += colorSpeed;
         }
-    }
-
-    void reset() override
-    {
-        _position = 0;
-        _direction = 1;
-        _hue = 0;
-        _lastUpdate = 0;
     }
 
     const char* getName(const char* lang = nullptr) override

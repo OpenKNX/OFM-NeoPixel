@@ -22,7 +22,11 @@
 class Aurora2DEffect : public Effect
 {
   private:
-    uint32_t _timebase = 0;
+    /// Per-segment state in Segment::effectScratch(); all-zero is the start state
+    struct State
+    {
+        uint32_t timebase; // accumulated ms
+    };
 
     static uint32_t mapLinear(uint32_t value, uint32_t inMin, uint32_t inMax, uint32_t outMin, uint32_t outMax)
     {
@@ -159,7 +163,8 @@ class Aurora2DEffect : public Effect
         const auto& geo = segment->getGeometry();
         if (geo.is1D() || geo.width < 2 || geo.height < 2) return;
 
-        _timebase += deltaTime;
+        State& s = segment->effectScratch<State>();
+        s.timebase += deltaTime;
 
         const auto& cfg = segment->getConfig();
         const uint8_t baseHue = cfg.option1;
@@ -169,7 +174,7 @@ class Aurora2DEffect : public Effect
         const uint16_t h = geo.height;
 
         const uint32_t spd = mapLinear(cfg.speed, 1, 255, 4, 80);
-        const uint8_t phase = static_cast<uint8_t>((_timebase * spd) >> 10);
+        const uint8_t phase = static_cast<uint8_t>((s.timebase * spd) >> 10);
         const uint8_t sx = static_cast<uint8_t>(scale);
         const uint8_t sy = static_cast<uint8_t>((scale >> 1) ? (scale >> 1) : 1);
 

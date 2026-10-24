@@ -5,7 +5,7 @@
 **License:** GNU GPL v3.0  
 **Author:** Erkan Çolak
 
-A high-performance, hardware-optimized LED control library for addressable RGB/RGBW/RGBCCT strips on OpenKNX devices with **self-describing effects**, **stateless architecture**, **2D/3D matrix geometry**, an **Effektmanager cue sequencer**, **distributed cross-device rendering (Effektkette)**, **per-strip power management**, and **Human Centric Lighting (HCL)**.
+A high-performance, hardware-optimized LED control library for addressable RGB/RGBW/RGBCCT strips on OpenKNX devices with **self-describing effects**, **pooled effects with per-segment state**, **2D/3D matrix geometry**, an **Effektmanager cue sequencer**, **distributed cross-device rendering (Effektkette)**, **per-strip power management**, and **Human Centric Lighting (HCL)**.
 
 ---
 
@@ -91,7 +91,7 @@ This design enables complex LED configurations with minimal CPU overhead through
 ### What Makes This Library Different?
 
 - **Hardware Accelerated**: Zero CPU overhead during LED updates (DMA/PIO/RMT)
-- **Stateless Effects**: 96% memory savings - single effect instance for all segments
+- **Pooled Effects**: one effect instance for all segments, runtime state per segment (a buffer effect gets its own instance on a segment when the pool instance already renders another one)
 - **Self-Describing Effects**: Auto-generated UI, console commands, and documentation
 - **Multi-Strip Composition**: Combine multiple physical strips into one logical strip
 - **Platform Optimized**: RP2040 (PIO/DMA), RP2350 (PIO/DMA), ESP32-S3 (RMT)
@@ -502,8 +502,8 @@ neo phys config 0 skipmask clear
 └────┬───────┘  └──────────┘  └─────┬────┘
      |                              |
 ┌────▼───────────────┐        ┌─────▼─────────────────┐
-│ IHardwareDriver    │        │  Effect (Singleton)   │
-│  - PIO (RP2040)    │        │  - Stateless          │
+│ IHardwareDriver    │        │  Effect (Pool)        │
+│  - PIO (RP2040)    │        │  - State in segment   │
 │    + 11 Timings    │        │  - Parameter API      │
 │  - RMT (ESP32)     │        │  - Self-describing    │
 │  - SPI (All)       │        │                       │
@@ -513,7 +513,7 @@ neo phys config 0 skipmask clear
 **Effect System (NEW):**
 ```
 ┌──────────────────────────────────────────────────────┐
-│          Effect Pool (Singletons, ~80 bytes)         │
+│          Effect Pool (one instance per type)         │
 │  Solid │ Rainbow │ BPM │ Pride │ ... (33 effects)    │
 └────┬─────────┬──────┬─────┬──────────────────────────┘
      │         │      │     │
@@ -1878,7 +1878,8 @@ public:
     virtual bool isDone(const Segment* segment) const;
 };
 
-// Built-in effects are pooled singletons accessed via EffectPool getters.
+// Built-in effects are pool instances accessed via EffectPool getters; segments keep
+// the runtime state (buffer effects: own instance when the pool instance renders another segment).
 namespace EffectPool {
     Effect*  getEffectByIndex(uint8_t id); // id 0..32 (see `neo effects` for the full map)
     uint8_t  getEffectCount();             // 33

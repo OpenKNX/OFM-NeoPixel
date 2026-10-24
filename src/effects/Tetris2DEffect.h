@@ -350,6 +350,9 @@ class Tetris2DEffect : public Effect
     }
 
   public:
+    // Members are per-segment state: a second segment gets its own instance
+    EFFECT_PER_SEGMENT_INSTANCE(Tetris2DEffect)
+
     Tetris2DEffect()
         : _type(0), _rot(0), _px(0), _py(0),
           _elapsed(0), _flashTimer(0), _flashing(false),

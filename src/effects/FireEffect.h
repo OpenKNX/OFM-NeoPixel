@@ -50,6 +50,9 @@ class FireEffect : public Effect
     uint8_t _lastHeight2D = 0;
 
   public:
+    // Members are per-segment state: a second segment gets its own instance
+    EFFECT_PER_SEGMENT_INSTANCE(FireEffect)
+
     FireEffect() : _numCells(0), _cooling(55), _sparking(120), _reverseDirection(false)
     {
         // Initialize heat array to zero

@@ -33,10 +33,14 @@
 class RGBWTestEffect : public Effect
 {
   private:
-    uint32_t _stateTime;
-    uint8_t _testPhase;
-    uint8_t _fadeValue;
-    bool _fadeUp;
+    /// Per-segment state in Segment::effectScratch(); all-zero is the start state
+    struct State
+    {
+        uint32_t stateTime; // ms in the current phase
+        uint8_t testPhase;
+        uint8_t fadeValue;
+        bool fadeDown;
+    };
 
     // RGBW (4-channel) phases
     enum TestPhase4 : uint8_t
@@ -69,8 +73,6 @@ class RGBWTestEffect : public Effect
     };
 
   public:
-    RGBWTestEffect() : _stateTime(0), _testPhase(0), _fadeValue(0), _fadeUp(true) {}
-
     const char* getName(const char* lang = nullptr) override { return "Test"; }
     const char* getDescription(const char* lang = nullptr) override
     {
@@ -201,44 +203,37 @@ class RGBWTestEffect : public Effect
         uint8_t phaseDurationSec = config.speed > 0 ? config.speed : 5;
         uint32_t phaseDurationMs = phaseDurationSec * 1000;
 
-        _stateTime += deltaTime;
+        State& s = segment->effectScratch<State>();
+        s.stateTime += deltaTime;
 
         // Switch phase when duration expires
-        if (_stateTime >= phaseDurationMs)
+        if (s.stateTime >= phaseDurationMs)
         {
-            _stateTime = 0;
-            _testPhase = (_testPhase + 1) % phaseCount;
-            _fadeValue = 0;
-            _fadeUp = true;
+            s.stateTime = 0;
+            s.testPhase = (s.testPhase + 1) % phaseCount;
+            s.fadeValue = 0;
+            s.fadeDown = false;
 
             openknx.logger.logWithPrefixAndValues(
-                "Channel Test", "Phase %u - %s", _testPhase, getPhaseName(cctMode));
+                "Channel Test", "Phase %u - %s", s.testPhase, getPhaseName(cctMode, s.testPhase));
         }
 
-        if (_testPhase >= phaseCount) _testPhase = 0;
+        if (s.testPhase >= phaseCount) s.testPhase = 0;
 
         if (cctMode)
         {
-            updateRGBCCT(segment, length, deltaTime);
+            updateRGBCCT(segment, s, length, deltaTime);
         }
         else
         {
-            updateRGBW(segment, length, deltaTime);
+            updateRGBW(segment, s, length, deltaTime);
         }
     }
 
-    void reset() override
-    {
-        _stateTime = 0;
-        _testPhase = 0;
-        _fadeValue = 0;
-        _fadeUp = true;
-    }
-
   private:
-    void updateRGBW(Segment* segment, uint16_t length, uint32_t deltaTime)
+    void updateRGBW(Segment* segment, State& s, uint16_t length, uint32_t deltaTime)
     {
-        switch (_testPhase)
+        switch (s.testPhase)
         {
             case P4_RED:          testPureColor(segment, length, 255, 0, 0, 0); break;
             case P4_GREEN:        testPureColor(segment, length, 0, 255, 0, 0); break;
@@ -246,14 +241,14 @@ class RGBWTestEffect : public Effect
             case P4_WHITE:        testPureColor(segment, length, 0, 0, 0, 255); break;
             case P4_RGB_MIX:      testPureColor(segment, length, 255, 255, 255, 0); break;
             case P4_RGBW_MIX:     testPureColor(segment, length, 128, 128, 128, 128); break;
-            case P4_WHITE_FADE:   testWhiteFade(segment, length, deltaTime); break;
-            case P4_RAINBOW_WHITE:testRainbowWithWhite(segment, length); break;
+            case P4_WHITE_FADE:   testWhiteFade(segment, s, length, deltaTime); break;
+            case P4_RAINBOW_WHITE:testRainbowWithWhite(segment, s, length); break;
         }
     }
 
-    void updateRGBCCT(Segment* segment, uint16_t length, uint32_t deltaTime)
+    void updateRGBCCT(Segment* segment, State& s, uint16_t length, uint32_t deltaTime)
     {
-        switch (_testPhase)
+        switch (s.testPhase)
         {
             case P5_RED:          testPureColor5(segment, length, 255, 0, 0, 0, 0); break;
             case P5_GREEN:        testPureColor5(segment, length, 0, 255, 0, 0, 0); break;
@@ -263,8 +258,8 @@ class RGBWTestEffect : public Effect
             case P5_RGB_MIX:      testPureColor5(segment, length, 255, 255, 255, 0, 0); break;
             case P5_WHITES_MIX:   testPureColor5(segment, length, 0, 0, 0, 128, 128); break;
             case P5_RGBCCT_FULL:  testPureColor5(segment, length, 51, 51, 51, 51, 51); break;
-            case P5_CCT_GRADIENT: testCCTGradient(segment, length); break;
-            case P5_ALL_FADE:     testAllFade(segment, length, deltaTime); break;
+            case P5_CCT_GRADIENT: testCCTGradient(segment, s, length); break;
+            case P5_ALL_FADE:     testAllFade(segment, s, length, deltaTime); break;
         }
     }
 
@@ -302,11 +297,11 @@ class RGBWTestEffect : public Effect
     /**
      * @brief Test white channel with fade
      */
-    void testWhiteFade(Segment* segment, uint16_t length, uint32_t deltaTime)
+    void testWhiteFade(Segment* segment, State& s, uint16_t length, uint32_t deltaTime)
     {
         auto& config = segment->getConfig();
-        advanceFade(deltaTime);
-        uint8_t white = FastLEDMath::scale8(_fadeValue, config.intensity);
+        advanceFade(s, deltaTime);
+        uint8_t white = FastLEDMath::scale8(s.fadeValue, config.intensity);
         for (uint16_t i = 0; i < length; i++)
             segment->setPixel(i, 0, 0, 0, white);
     }
@@ -314,10 +309,10 @@ class RGBWTestEffect : public Effect
     /**
      * @brief Test rainbow with white background
      */
-    void testRainbowWithWhite(Segment* segment, uint16_t length)
+    void testRainbowWithWhite(Segment* segment, const State& s, uint16_t length)
     {
         auto& config = segment->getConfig();
-        uint8_t hueOffset = (_stateTime / 20) % 256;
+        uint8_t hueOffset = (s.stateTime / 20) % 256;
         for (uint16_t i = 0; i < length; i++)
         {
             uint8_t hue = hueOffset + (i * 255 / (length > 0 ? length : 1));
@@ -333,10 +328,10 @@ class RGBWTestEffect : public Effect
     /**
      * @brief Test CCT gradient - Warm to Cool across the strip
      */
-    void testCCTGradient(Segment* segment, uint16_t length)
+    void testCCTGradient(Segment* segment, const State& s, uint16_t length)
     {
         auto& config = segment->getConfig();
-        uint8_t offset = (_stateTime / 50) % 256;
+        uint8_t offset = (s.stateTime / 50) % 256;
         for (uint16_t i = 0; i < length; i++)
         {
             uint8_t pos = ((i * 255) / (length > 1 ? length - 1 : 1) + offset) % 256;
@@ -351,36 +346,36 @@ class RGBWTestEffect : public Effect
     /**
      * @brief Test all channels with fade - All 5 channels fade in/out
      */
-    void testAllFade(Segment* segment, uint16_t length, uint32_t deltaTime)
+    void testAllFade(Segment* segment, State& s, uint16_t length, uint32_t deltaTime)
     {
         auto& config = segment->getConfig();
-        advanceFade(deltaTime);
-        uint8_t value = FastLEDMath::scale8(_fadeValue, config.intensity);
+        advanceFade(s, deltaTime);
+        uint8_t value = FastLEDMath::scale8(s.fadeValue, config.intensity);
         for (uint16_t i = 0; i < length; i++)
             segment->setPixel(i, value, value, value, value, value);
     }
 
-    void advanceFade(uint32_t deltaTime)
+    static void advanceFade(State& s, uint32_t deltaTime)
     {
-        if (_fadeUp)
+        if (!s.fadeDown)
         {
-            _fadeValue += (deltaTime * 2 > 255) ? 255 : deltaTime * 2;
-            if (_fadeValue >= 250)
+            s.fadeValue += (deltaTime * 2 > 255) ? 255 : deltaTime * 2;
+            if (s.fadeValue >= 250)
             {
-                _fadeValue = 255;
-                _fadeUp = false;
+                s.fadeValue = 255;
+                s.fadeDown = true;
             }
         }
         else
         {
-            if (_fadeValue < deltaTime * 2)
+            if (s.fadeValue < deltaTime * 2)
             {
-                _fadeValue = 0;
-                _fadeUp = true;
+                s.fadeValue = 0;
+                s.fadeDown = false;
             }
             else
             {
-                _fadeValue -= deltaTime * 2;
+                s.fadeValue -= deltaTime * 2;
             }
         }
     }
@@ -388,11 +383,11 @@ class RGBWTestEffect : public Effect
     /**
      * @brief Get human-readable phase name
      */
-    const char* getPhaseName(bool cctMode)
+    static const char* getPhaseName(bool cctMode, uint8_t testPhase)
     {
         if (cctMode)
         {
-            switch (_testPhase)
+            switch (testPhase)
             {
                 case P5_RED: return "Pure Red (R channel)";
                 case P5_GREEN: return "Pure Green (G channel)";
@@ -407,7 +402,7 @@ class RGBWTestEffect : public Effect
                 default: return "Unknown";
             }
         }
-        switch (_testPhase)
+        switch (testPhase)
         {
             case P4_RED: return "Pure Red (R channel)";
             case P4_GREEN: return "Pure Green (G channel)";

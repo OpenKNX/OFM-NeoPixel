@@ -913,72 +913,134 @@ class Effect
 {
   public:
     virtual ~Effect() = default;
-    
-    // Main update function (REQUIRED)
-    virtual void update(Segment* segment, EffectConfig& config, 
-                       EffectState& state, uint32_t deltaTime) = 0;
-    
-    // Effect metadata
-    virtual const char* getName() const = 0;
-    virtual uint8_t getEffectId() const = 0;
-    
-    // Optional: initialization/cleanup
-    virtual void init(Segment* segment, EffectConfig& config, EffectState& state) {}
-    virtual void cleanup(Segment* segment, EffectState& state) {}
+
+    // Main update function (REQUIRED); update2D() defaults to update(), update3D() to update2D()
+    virtual void update(Segment* segment, uint32_t deltaTime) = 0;
+    virtual void update2D(Segment* segment, uint32_t deltaTime);
+    virtual void update3D(Segment* segment, uint32_t deltaTime);
+
+    // Metadata and parameter introspection
+    virtual const char* getName(const char* lang = nullptr);
+    virtual uint8_t getParameterCount() const;
+    virtual void setParameter(Segment* segment, uint8_t index, uint32_t value);
+    // ... getParameterName/Type/Default/Min/Max, getParameter
+
+    // Lifecycle hooks and completion
+    virtual void onEnter(Segment* segment);
+    virtual void onExit(Segment* segment);
+    virtual void onResume(Segment* segment);
+    virtual bool isDone(const Segment* segment) const;
+
+    // Per-segment instance support (see "Runtime State")
+    virtual size_t instanceSize() const;      // 0 = member-free, one pool instance for all segments
+    virtual Effect* constructAt(void* mem) const; // placement-new a fresh copy into mem
+    virtual void reconstruct();                   // destroy + construct in place (fresh state)
 };
 ```
+
+Configuration is read from `segment->getConfig()`. Effects come from `EffectPool`; the same effect
+can run on several segments in the same frame.
+
+#### Runtime State
+
+Choose one of three places, by size:
+
+| State | Where | Example |
+|-------|-------|---------|
+| none (pure function of config + time) | nothing | Rainbow, Pride, Solid |
+| a few scalars (timers, position, hue, flags) | `segment->effectScratch<T>()`, 16 bytes per segment | Comet, TheaterChase, Breathing |
+| buffers | members + `EFFECT_PER_SEGMENT_INSTANCE(Type)` | Fire, GameOfLife2D, Snake2D |
+
+Rules:
+
+- `T` for `effectScratch<T>()` is a plain struct without default member initializers (trivially
+  copyable, at most `EFFECT_SCRATCH_SIZE` bytes, at most 4-byte alignment; a `static_assert` checks
+  it). All-zero is its start state: the scratch is zeroed by `resetEffectState()` (fresh effect or
+  cue start) and when the segment switches to a different effect. Pause/resume and
+  `setEffect(sameEffect, false)` keep it; `setEffect(sameEffect, true)` resets it.
+- An effect with `EFFECT_PER_SEGMENT_INSTANCE(Type)` renders from the pool instance while no other
+  segment does. A segment that selects it while the pool instance renders another segment gets its
+  own instance (`malloc` + placement new, at effect selection only, never per frame), owned by that
+  segment and destroyed + freed when the segment changes or clears its effect or is destroyed.
+  When the free heap is below instance size + `NEOPIXEL_EFFECT_INSTANCE_HEAP_RESERVE` (48 KiB), or
+  `malloc` returns nullptr, the segment shares the pool instance (one warning is logged) and
+  retries the allocation when the same effect is selected again. `freeMemory()` is the total free
+  heap, not the largest free block.
+- Fresh start: taking over a free pool instance, a new own instance and `resetEffectState()` (fresh
+  effect or cue start) all start the members from the constructor state; `resetEffectState()`
+  reconstructs the rendering instance in place (`reconstruct()`, no heap). A pool instance shared
+  for lack of heap is not reconstructed, because another segment renders with it. Pause/resume and
+  `setEffect(sameEffect, false)` keep the members. Every re-enter of the product (`resetEffectState()`
+  + `enterEffect()`, e.g. ON after OFF, scene recall, EM stop) is a fresh start.
+- `getEffect()` always returns the pool instance (type identity for `EffectPool` comparisons).
+  `isDone()` and the parameter API can be called on the pool instance: they must not use members.
+  Code outside the Segment runs `onEnter()` via `Segment::enterEffect()`, which calls it on the
+  rendering instance; `Segment::isEffectDone()` does the same for `isDone()`.
 
 #### Creating Custom Effects
 
-**Example: Solid Color Effect**
+**Example: member-free effect**
 
 ```cpp
-class EffectSolid : public Effect
+class EffectSolidExample : public Effect
 {
   public:
-    EffectSolid(uint8_t r, uint8_t g, uint8_t b)
-        : _r(r), _g(g), _b(b) {}
-    
-    void update(Segment* segment, EffectConfig& config, 
-               EffectState& state, uint32_t deltaTime) override
+    void update(Segment* segment, uint32_t deltaTime) override
     {
-        // Fill segment with solid color
-        segment->fill(_r, _g, _b);
+        const auto& config = segment->getConfig();
+        segment->setAll(config.r(), config.g(), config.b());
     }
-    
-    const char* getName() const override { return "Solid"; }
-    uint8_t getEffectId() const override { return 0; }
-    
-  private:
-    uint8_t _r, _g, _b;
+
+    const char* getName(const char* lang = nullptr) override { return "Solid"; }
 };
 ```
 
-**Example: Animation Effect**
+**Example: animation with per-segment scratch state**
 
 ```cpp
-class EffectChase : public Effect
+class EffectChaseExample : public Effect
 {
-  public:
-    void update(Segment* segment, EffectConfig& config, 
-               EffectState& state, uint32_t deltaTime) override
+  private:
+    struct State
     {
-        // Clear segment
+        uint32_t timeAcc; // all-zero = start state
+        uint16_t position;
+    };
+
+  public:
+    void update(Segment* segment, uint32_t deltaTime) override
+    {
+        const uint16_t length = segment->getLength();
+        if (length == 0) return;
+        State& s = segment->effectScratch<State>();
+
+        s.timeAcc += deltaTime;
+        if (s.timeAcc < 50) return;
+        s.timeAcc = 0;
+
+        const auto& config = segment->getConfig();
         segment->clear();
-        
-        // Update position
-        state.position = (state.position + config.speed / 50) % segment->getLength();
-        
-        // Set moving pixel
-        uint8_t r = (config.primaryRGBW >> 24) & 0xFF;
-        uint8_t g = (config.primaryRGBW >> 16) & 0xFF;
-        uint8_t b = (config.primaryRGBW >> 8) & 0xFF;
-        
-        segment->setPixel(state.position, r, g, b);
+        s.position = (s.position + 1) % length;
+        segment->setPixel(s.position, config.r(), config.g(), config.b());
     }
-    
-    const char* getName() const override { return "Chase"; }
-    uint8_t getEffectId() const override { return 10; }
+
+    const char* getName(const char* lang = nullptr) override { return "Chase"; }
+};
+```
+
+**Example: buffer effect with its own instance per segment**
+
+```cpp
+class EffectTrailExample : public Effect
+{
+  private:
+    uint8_t _trail[256] = {0};
+
+  public:
+    EFFECT_PER_SEGMENT_INSTANCE(EffectTrailExample)
+
+    void update(Segment* segment, uint32_t deltaTime) override { /* reads/writes _trail */ }
+    const char* getName(const char* lang = nullptr) override { return "Trail"; }
 };
 ```
 
@@ -990,7 +1052,7 @@ Pre-registered effects accessible by ID.
 #include "effects/EffectPool.h"
 
 // Get effect by ID
-Effect* effect = EffectPool::getEffect(2);  // Rainbow
+Effect* effect = EffectPool::getEffectByIndex(2);  // Rainbow
 
 // First eight of 33 effects (IDs 0-32, see doc/Effects.md):
 // 0 = Solid
@@ -1098,6 +1160,7 @@ class EffektManagerController
 - If the segment is part of an Effektkette, the chain is paused while the EM runs and resumes on `stop()`.
 - When a cue's `durationSec` elapses, the controller fades out (`fadeMs`) and advances; on the last cue it loops, chains to `nextEmId`, or stops.
 - `saveState()` / `restoreState()` persist and restart the active EM (from cue 1) across reboots.
+- Every cue start is a fresh effect start: `resetEffectState()` zeroes the effect state and, for a buffer effect, reconstructs its rendering instance, also when consecutive cues use the same effect. `pause()`/`resume()` keep the state.
 
 ---
 

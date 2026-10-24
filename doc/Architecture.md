@@ -79,9 +79,9 @@ Detailed architecture diagrams and data flow visualizations for the OFM-NeoPixel
 │ PhysicalStrip │ │VirtualStrip │ │   Segment     │ │   Effect   │
 │               │ │             │ │               │ │   System   │
 │ - HW control  │ │ - Multi-    │ │ - LED ranges  │ │            │
-│ - Buffer mgmt │ │   strip     │ │ - Effect      │ │ - Stateless│
-│ - Driver      │ │   compose   │ │   zones       │ │ - Pooled   │
-│   wrapper     │ │ - Mapping   │ │ - State mgmt  │ │ - Shared   │
+│ - Buffer mgmt │ │   strip     │ │ - Effect      │ │ - State in │
+│ - Driver      │ │   compose   │ │   zones       │ │   segment  │
+│   wrapper     │ │ - Mapping   │ │ - State mgmt  │ │ - Pooled   │
 └───────┬───────┘ └─────────────┘ └───────────────┘ └────────────┘
         │
 ┌───────▼─────────────────────────────────────────────────────────┐
@@ -548,30 +548,24 @@ Example: 72 RGB LEDs, 2 physical strips attached
 ### Segment Memory
 
 ```
-Segment Object
-├─ _virtualStrip        (pointer, 4 bytes)
-├─ _startLed            (uint16_t, 2 bytes)
-├─ _endLed              (uint16_t, 2 bytes)
-├─ _effect              (pointer, 4 bytes)
-├─ _state               (LedState, 48 bytes)
-│  ├─ r, g, b, w        (4 × 1 byte)
-│  ├─ brightness        (uint8_t, 1 byte)
-│  ├─ speed             (uint8_t, 1 byte)
-│  ├─ direction         (int8_t, 1 byte)
-│  ├─ position          (uint16_t, 2 bytes)
-│  ├─ hue               (uint8_t, 1 byte)
-│  ├─ saturation        (uint8_t, 1 byte)
-│  ├─ effectState       (uint32_t, 4 bytes)
-│  ├─ lastUpdate        (uint32_t, 4 bytes)
-│  └─ padding           (~28 bytes)
-├─ padding              (~8 bytes)
-└─ Total: ~72 bytes
+Segment Object (sizeof 652 bytes on RP2040)
+├─ _virtualStrip, _effect, _render, _renderMem, _savedEffect   (pointers)
+├─ _startLed, _endLed, lengths, grouping, spacing, offset
+├─ _config              (EffectConfig, incl. effect text)
+├─ _savedConfig         (EffectConfig snapshot taken before an EM)
+├─ _state               (EffectState, 32 bytes)
+│  ├─ position, phase, lastUpdate, counter, aux1, aux2   (16 bytes incl. padding)
+│  └─ scratch           (16 bytes, effect-typed per-segment state)
+├─ _ledState            (LedState)
+├─ flags                (dirty, paused, reverse, mirror, owned/shared instance, ...)
+├─ _geo                 (LedGeometry)
+└─ Effektkette band     (total length, offset)
 ```
 
 ### Effect System Memory
 
 ```
-Effect Objects (Stateless Singletons)
+Effect Objects (pool instances, EffectPool)
 ├─ EffectSolid          (~8 bytes)
 ├─ EffectWipe           (~8 bytes)
 ├─ RainbowEffect        (~8 bytes)
@@ -579,17 +573,19 @@ Effect Objects (Stateless Singletons)
 ├─ JuggleEffect         (~8 bytes)
 ├─ BPMEffect            (~8 bytes)
 ├─ CylonEffect          (~8 bytes)
-├─ ... (33 effects total)
-└─ Total: ~264 bytes
+├─ ... (33 effects total, member-free ones ~8 bytes each)
+└─ Buffer effects: Fire 4624, GameOfLife2D ~2076, Snake2D 1560, Tetris2D 1104,
+   Lissajous2D 1040, Matrix2D 1036, StarfieldWarp2D 344, UfoSwarm2D 32 bytes
 
 EffectPool
-├─ Static effect instances (64 bytes)
-├─ Lookup table            (~32 bytes)
-└─ Total: ~96 bytes
+└─ One static pointer per effect type; the instance is created on first use
 
-Note: Effects are SHARED by all segments!
-      Single instance per effect type.
-      Segment state stored in segment, not effect.
+Note: One pool instance per effect type, shared by the segments.
+      Runtime state lives in the segment (EffectState + 16-byte scratch).
+      Buffer effects (Fire, GameOfLife2D, Snake2D, Lissajous2D, Tetris2D,
+      Matrix2D, StarfieldWarp2D, UfoSwarm2D): a segment gets its own heap
+      instance (e.g. Fire 4624 B) when the pool instance already renders
+      another segment.
 ```
 
 ### Total System Memory Example
@@ -629,11 +625,11 @@ Without DMA (LED buffer only):
 
 ## Effect System
 
-### Stateless Design Pattern
+### Shared Effect Pattern
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     EffectPool (Singleton)                  │
+│                  EffectPool (one per effect)                │
 │                                                             │
 │  static EffectSolid      solidEffect;     // ONE instance   │
 │  static RainbowEffect    rainbowEffect;   // ONE instance   │
@@ -666,22 +662,19 @@ Without DMA (LED buffer only):
                  └────────────────┘
                    SAME INSTANCE!
 
-Benefits:
-1. Memory efficient: ONE effect object shared by ALL segments
-2. Zero allocation during runtime
-3. Cache-friendly (hot effect code stays in cache)
-4. Easy to add new effects (just add to pool)
-
-Traditional (stateful) design would require:
-  Effect object PER segment = N × sizeof(Effect)
-  
-Stateless design:
-  Effect object SHARED = 1 × sizeof(Effect)
-  
-For 10 segments with Rainbow effect:
-  Traditional: 10 × ~100 bytes = 1000 bytes
-  Stateless:    1 × ~8 bytes   = 8 bytes
-  Savings: 992 bytes (99% reduction!)
+Properties:
+1. Member-free effects: ONE effect object serves ALL segments
+2. Small runtime state per segment: EffectState + effectScratch<T>() (16 bytes)
+3. Buffer effects (EFFECT_PER_SEGMENT_INSTANCE): a segment renders from the pool
+   instance while no other segment does; otherwise it gets its own instance,
+   allocated (malloc + placement new) at effect selection, never per frame, and
+   freed when the segment changes/clears its effect or is destroyed. With free
+   heap below instance size + 48 KiB, or a failed malloc, the segment shares the
+   pool instance and one warning is logged.
+4. resetEffectState() (fresh effect/cue start) zeroes the scratch and reconstructs
+   the rendering instance of a buffer effect in place, except a pool instance shared
+   for lack of heap; pause/resume keeps both.
+5. getEffect() always returns the pool instance (type identity)
 ```
 
 ### Effect Update Flow
@@ -1269,7 +1262,7 @@ This architecture provides:
 1. **Clean Separation**: Hardware, logic, and effects are independent
 2. **Efficiency**: Zero-CPU LED updates with DMA/RMT
 3. **Flexibility**: Virtual strips enable complex compositions
-4. **Scalability**: Stateless effects use minimal memory
+4. **Scalability**: Pooled effects with per-segment state use minimal memory
 5. **Extensibility**: Easy to add new effects and protocols
 
 The design balances performance, memory usage, and code maintainability.

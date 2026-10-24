@@ -1,6 +1,6 @@
 /**
  * @file EffectPool.h
- * @brief Singleton Pool für alle Effect-Instanzen
+ * @brief Pool with one instance per effect type
  *
  * @copyright Copyright (c) 2025 Erkan Çolak - OpenKNX (Licensed under GNU GPL v3.0)
  */
@@ -56,15 +56,17 @@
 #endif
 
 /**
- * Memory Optimization:
- * - Without Pool: 10 Segments × 500 bytes = 5000 bytes
- * - With Pool: 5 Singletons × 32 bytes + 10 × 52 bytes = 680 bytes
- * - Savings: 86% (4320 bytes)
+ * Memory: one pool instance per effect type (member-free effects: 8 bytes on RP2040);
+ * each Segment carries its own EffectState (32 bytes incl. the 16-byte scratch area).
  *
  * Usage:
  *   segment1->setEffect(EffectPool::getSolid());
  *   segment2->setEffect(EffectPool::getSolid());  // Same instance as segment1!
  *   segment3->setEffect(EffectPool::getWipe()); // Different instance
+ *
+ * Runtime state lives in the segment. Buffer effects (EFFECT_PER_SEGMENT_INSTANCE, see Effect.h)
+ * give a segment its own instance when the pool instance already renders another segment;
+ * getEffect() still returns the pool instance.
  */
 
 #include "Effect.h"
@@ -106,13 +108,13 @@ class Lissajous2DEffect;
 class Metaballs2DEffect;
 
 /**
- * EffectPool - Singleton Pool for all Effect Instances
+ * EffectPool - one pool instance per effect type
  */
 class EffectPool
 {
   public:
     // -----------------------------------------------------------
-    // Getters for each Effect singleton
+    // Getters for each effect's pool instance
     static Effect* getSolid();
     static Effect* getWipe();
     static Effect* getRainbow();

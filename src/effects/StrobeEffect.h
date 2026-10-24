@@ -31,20 +31,21 @@
 class StrobeEffect : public Effect
 {
   private:
-    uint32_t _lastUpdate;
-    bool _isOn;
+    /// Per-segment state in Segment::effectScratch(); all-zero is the start state
+    struct State
+    {
+        uint32_t lastUpdate;
+        bool isOn;
+    };
 
   public:
-    StrobeEffect() : _lastUpdate(0), _isOn(false)
-    {
-    }
-
     void update(Segment* segment, uint32_t deltaTime) override
     {
         if (!segment) return;
 
         auto& config = segment->getConfig();
         uint16_t length = segment->getLength();
+        State& s = segment->effectScratch<State>();
 
         // Use option1 for on duration ratio (10-200, default 50/50)
         uint8_t onRatio = config.option1 > 0 ? config.option1 : 100; // Percentage on time
@@ -65,19 +66,19 @@ class StrobeEffect : public Effect
         uint32_t interval = randomTiming ? (baseInterval / 2 + FastLEDMath::random16(baseInterval)) : baseInterval;
 
         uint32_t now = millis();
-        if (now - _lastUpdate >= interval)
+        if (now - s.lastUpdate >= interval)
         {
-            _lastUpdate = now;
-            _isOn = !_isOn;
+            s.lastUpdate = now;
+            s.isOn = !s.isOn;
         }
 
         // Calculate on/off durations based on ratio
-        uint32_t currentPhase = (now - _lastUpdate);
+        uint32_t currentPhase = (now - s.lastUpdate);
         uint32_t onDuration = (interval * onRatio) / 200; // Convert percentage to duration
         bool shouldBeOn = currentPhase < onDuration;
 
         uint8_t r, g, b, ww, cw;
-        if (_isOn && shouldBeOn)
+        if (s.isOn && shouldBeOn)
         {
             // Full brightness when on
             if (rainbowStrobe)
@@ -128,12 +129,6 @@ class StrobeEffect : public Effect
         {
             segment->setPixel(i, r, g, b, ww, cw);
         }
-    }
-
-    void reset() override
-    {
-        _lastUpdate = 0;
-        _isOn = false;
     }
 
     const char* getName(const char* lang = nullptr) override

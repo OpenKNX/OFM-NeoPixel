@@ -2,6 +2,7 @@
 #include "OpenKNX.h"
 #include "effects/Effect.h"
 #include <Arduino.h>
+#include <stdlib.h>
 
 // ============================================================================
 // Effektkette helpers
@@ -104,19 +105,138 @@ Segment::Segment(VirtualStrip* virtualStrip, uint16_t startLed, uint16_t endLed)
  */
 Segment::~Segment()
 {
-    if (_effect) _effect->onExit(this);
-    // Effect is NOT deleted - user is responsible for cleanup!
+    if (_render) _render->onExit(this);
+    // The pool instance stays alive; only an owned copy is destroyed and freed.
+    releaseRenderEffect();
     _effect = nullptr;
 }
 
+// Heap left free when a segment allocates its own effect instance. OFM-FileTransferModule allocates
+// at runtime ~43.7 KiB for the ESP gzip OTA unpack (32 KiB window + 10.7 KiB tinfl + 1 KiB input)
+// and ~38 KiB for the delta update (32 KiB window + 1 KiB input + 1.3 KiB uzlib + 4 KiB slice).
+// freeMemory() reports the total free heap, not the largest free block.
+#ifndef NEOPIXEL_EFFECT_INSTANCE_HEAP_RESERVE
+    #define NEOPIXEL_EFFECT_INSTANCE_HEAP_RESERVE (48u * 1024u)
+#endif
+
+// One warning until the next successful allocation, not one per effect selection.
+static bool s_instanceFallbackLogged = false;
+
+void Segment::clearScratch()
+{
+    static const unsigned char zero[EFFECT_SCRATCH_SIZE] = {};
+    memcpy(_state.scratch, zero, sizeof(zero));
+}
+
+void Segment::reconstructInstance(Effect* effect)
+{
+    const uint8_t users = effect->_poolUsers;
+    effect->reconstruct(); // same type in place: existing pointers refer to the new object
+    std::launder(effect)->_poolUsers = users;
+}
+
+void Segment::resetEffectState()
+{
+    _state = EffectState{};
+    clearScratch();
+
+    // Per-instance effect: fresh members too, unless another segment renders with the same instance.
+    if (!_render || _render->instanceSize() == 0) return;
+    if (!_renderMem && _render->_poolUsers > 1) return;
+    reconstructInstance(_render);
+}
+
+void Segment::enterEffect()
+{
+    if (_render) _render->onEnter(this);
+}
+
+void Segment::assignEffect(Effect* effect)
+{
+    if (effect == _effect)
+    {
+        // A segment that shares for lack of heap retries its own instance on re-selection.
+        if (_sharedFallback && allocateOwnInstance())
+        {
+            _effect->_poolUsers--;
+            _sharedFallback = false;
+        }
+        return;
+    }
+    releaseRenderEffect();
+    _effect = effect;
+    clearScratch();
+    acquireRenderEffect();
+}
+
+bool Segment::allocateOwnInstance()
+{
+    const size_t size = _effect->instanceSize();
+    const int freeHeap = freeMemory();
+    void* mem = nullptr;
+    if (freeHeap > 0 && (size_t)freeHeap >= size + NEOPIXEL_EFFECT_INSTANCE_HEAP_RESERVE)
+        mem = malloc(size); // malloc returns nullptr on all targets; nothrow new aborts on arduino-pico
+    if (!mem)
+    {
+        if (!s_instanceFallbackLogged)
+            logWarningP("Effect '%s': no own instance (%u B, free heap %d B), shares the instance of another segment",
+                        _effect->getName(), (unsigned)size, freeHeap);
+        s_instanceFallbackLogged = true;
+        return false;
+    }
+    s_instanceFallbackLogged = false;
+    _render = _effect->constructAt(mem);
+    _renderMem = mem;
+    return true;
+}
+
+void Segment::acquireRenderEffect()
+{
+    _render = _effect;
+    _renderMem = nullptr;
+    _sharedFallback = false;
+    if (!_effect) return;
+    if (_effect->instanceSize() == 0) return; // member-free effect: one instance serves all segments
+
+    if (_effect->_poolUsers == 0)
+    {
+        // Free pool instance: this segment renders with it, from a fresh state.
+        reconstructInstance(_effect);
+        _effect->_poolUsers = 1;
+        return;
+    }
+
+    // The pool instance renders another segment: own instance, allocated at selection, never per frame.
+    if (allocateOwnInstance()) return;
+    _effect->_poolUsers++;
+    _sharedFallback = true;
+}
+
+void Segment::releaseRenderEffect()
+{
+    if (_renderMem)
+    {
+        _render->~Effect(); // virtual destructor of the most-derived type
+        free(_renderMem);
+    }
+    else if (_render && _render->instanceSize() > 0 && _render->_poolUsers > 0)
+    {
+        _render->_poolUsers--;
+    }
+    _render = nullptr;
+    _renderMem = nullptr;
+    _sharedFallback = false;
+}
+
 /**
- * @brief Set effect (Stateless - no init()!)
- * @param effect Pointer to the effect
+ * @brief Set effect
+ * @param effect Pool instance of the effect (EffectPool)
+ * @note Re-selecting the current effect keeps its scratch state and instance; initializeDefaults resets them, except the members of a pool instance shared for lack of heap. A segment sharing for lack of heap gets a fresh own instance if the heap allows it now.
  */
 void Segment::setEffect(Effect* effect, bool initializeDefaults)
 {
-    if (_effect) _effect->onExit(this);
-    _effect = effect;
+    if (_render) _render->onExit(this);
+    assignEffect(effect);
 
     // Initialize parameters and state only for callers explicitly requesting a
     // brand-new default configuration. Cue starts reset state before setEffect().
@@ -126,20 +246,25 @@ void Segment::setEffect(Effect* effect, bool initializeDefaults)
         resetEffectState();
     }
 
-    if (_effect) _effect->onEnter(this);
+    if (_render) _render->onEnter(this);
 }
 
 void Segment::clearEffect()
 {
-    if (_effect) _effect->onExit(this);
-    _effect = nullptr;
+    if (_render) _render->onExit(this);
+    assignEffect(nullptr);
+}
+
+bool Segment::isEffectDone() const
+{
+    return _render && _render->isDone(this);
 }
 
 void Segment::resume()
 {
     const bool wasPaused = _paused;
     _paused = false;
-    if (wasPaused && _effect) _effect->onResume(this);
+    if (wasPaused && _render) _render->onResume(this);
 }
 
 /**
@@ -501,7 +626,7 @@ bool Segment::getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b, uint8
 }
 
 /**
- * @brief Update Segment (calls effect ) - STATELESS
+ * @brief Update Segment (calls the rendering effect instance)
  * @param deltaTime Time difference since last update in ms
  */
 void Segment::update(uint32_t deltaTime)
@@ -512,7 +637,7 @@ void Segment::update(uint32_t deltaTime)
         return;
     }
 
-    if (!_effect || !_virtualStrip)
+    if (!_render || !_virtualStrip)
     {
         return; // No effect or no virtual strip
     }
@@ -522,12 +647,12 @@ void Segment::update(uint32_t deltaTime)
     // - 2D segment + effect supports 2D → update2D()
     // - All others (1D, or effect doesn't support higher dim) → update()
     //   update2D/3D default to update() so 1D effects still work on 2D segments.
-    if (_geo.is3D() && _effect->supports3D())
-        _effect->update3D(this, deltaTime);
-    else if (_geo.is2D() && _effect->supports2D())
-        _effect->update2D(this, deltaTime);
+    if (_geo.is3D() && _render->supports3D())
+        _render->update3D(this, deltaTime);
+    else if (_geo.is2D() && _render->supports2D())
+        _render->update2D(this, deltaTime);
     else
-        _effect->update(this, deltaTime);
+        _render->update(this, deltaTime);
 
     // Virtual strip is marked as dirty by setPixel() calls
 }

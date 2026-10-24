@@ -25,7 +25,11 @@
 class NoiseEffect : public Effect
 {
   private:
-    uint32_t _timeAcc = 0; // for 2D timing
+    /// Per-segment state in Segment::effectScratch(); all-zero is the start state
+    struct State
+    {
+        uint32_t timeAcc; // accumulated ms
+    };
 
   public:
     const char* getName(const char* lang = nullptr) override { return "Noise"; }
@@ -281,14 +285,15 @@ class NoiseEffect : public Effect
         uint16_t renderH = segment->getRenderHeight();
         if (renderW == 0 || renderH == 0) return;
 
-        _timeAcc += deltaTime;
+        State& s = segment->effectScratch<State>();
+        s.timeAcc += deltaTime;
         auto& cfg = segment->getConfig();
         uint8_t scale = cfg.option1 ? cfg.option1 : 64;
         uint8_t sat = cfg.option2 ? cfg.option2 : 240;
         uint8_t hueOff = cfg.option3;
         uint16_t speed = (uint16_t)cfg.speed;
-        uint16_t tx = (uint16_t)((_timeAcc * speed) >> 7);
-        uint16_t ty = (uint16_t)((_timeAcc * speed) >> 9);
+        uint16_t tx = (uint16_t)((s.timeAcc * speed) >> 7);
+        uint16_t ty = (uint16_t)((s.timeAcc * speed) >> 9);
         bool palMode = cfg.feature1;
 
         for (uint16_t y = 0; y < renderH; y++)

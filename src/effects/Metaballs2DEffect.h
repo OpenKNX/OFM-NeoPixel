@@ -22,7 +22,11 @@
 class Metaballs2DEffect : public Effect
 {
   private:
-    uint32_t _timebase = 0;
+    /// Per-segment state in Segment::effectScratch(); all-zero is the start state
+    struct State
+    {
+        uint32_t timebase; // accumulated ms
+    };
 
     static constexpr uint8_t MAX_BLOBS = 6;
 
@@ -161,7 +165,8 @@ class Metaballs2DEffect : public Effect
         const auto& geo = segment->getGeometry();
         if (geo.is1D() || geo.width < 2 || geo.height < 2) return;
 
-        _timebase += deltaTime;
+        State& s = segment->effectScratch<State>();
+        s.timebase += deltaTime;
 
         const auto& cfg = segment->getConfig();
         const uint8_t baseHue = cfg.option1;
@@ -173,7 +178,7 @@ class Metaballs2DEffect : public Effect
         const uint16_t h = geo.height;
 
         const uint32_t spd = mapLinear(cfg.speed, 1, 255, 2, 50);
-        const uint8_t phase = static_cast<uint8_t>((_timebase * spd) >> 11);
+        const uint8_t phase = static_cast<uint8_t>((s.timebase * spd) >> 11);
 
         // Blob centres derived from sine waves at distinct rates/offsets.
         uint8_t bx[MAX_BLOBS];

@@ -45,6 +45,9 @@ class Matrix2DEffect : public Effect
     }
 
   public:
+    // Members are per-segment state: a second segment gets its own instance
+    EFFECT_PER_SEGMENT_INSTANCE(Matrix2DEffect)
+
     const char* getName(const char* lang = nullptr) override
     {
         return EFFECT_NAME_DE_EN("Matrix 2D", "Matrix 2D");

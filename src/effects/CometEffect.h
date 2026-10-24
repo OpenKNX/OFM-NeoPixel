@@ -31,40 +31,36 @@
 class CometEffect : public Effect
 {
   private:
-    int16_t _position;
-    int8_t _direction;
-    uint32_t _lastUpdate;
-    uint8_t _hue;
-    uint8_t _tailLength;
-    // Meteor-specific state
-    uint8_t _meteorSize;
-    uint32_t _nextMeteor;
-    // Sinelon-specific state
-    int16_t _sinePosition;
-    bool _sineDirection;
+    /// Per-segment state in Segment::effectScratch(); all-zero is the start state
+    struct State
+    {
+        uint32_t lastUpdate;
+        uint32_t nextMeteor;   // Meteor: earliest spawn time
+        int16_t position;
+        int16_t sinePosition;  // Sinelon bounce position (1/16 pixel)
+        uint8_t hue;
+        uint8_t meteorSize;    // Meteor: 0 = fresh start, drawn as 5
+        bool reverse;          // Comet moves towards index 0
+        bool sineDown;         // Sinelon bounce moves towards index 0
+    };
 
   public:
-    CometEffect()
-        : _position(0), _direction(1), _lastUpdate(0), _hue(0), _tailLength(10),
-          _meteorSize(5), _nextMeteor(0), _sinePosition(0), _sineDirection(true)
-    {
-    }
-
     void update(Segment* segment, uint32_t deltaTime) override
     {
         if (!segment) return;
         if (segment->getLength() == 0) return;
 
+        State& s = segment->effectScratch<State>();
         switch (segment->getConfig().mode)
         {
-            case 1: updateMeteor(segment, deltaTime); break;
-            case 2: updateSinelon(segment, deltaTime); break;
-            default: updateComet(segment, deltaTime); break;
+            case 1: updateMeteor(segment, s); break;
+            case 2: updateSinelon(segment, s); break;
+            default: updateComet(segment, s); break;
         }
     }
 
     // ── Mode 0: Comet ────────────────────────────────────────────────────
-    void updateComet(Segment* segment, uint32_t deltaTime)
+    void updateComet(Segment* segment, State& s)
     {
         auto& config = segment->getConfig();
         uint16_t length = segment->getLength();
@@ -72,16 +68,16 @@ class CometEffect : public Effect
         uint8_t fadeRate = config.option1 > 0 ? (200 + config.option1 / 5) : 230;
         fadeRate = fadeRate > 250 ? 250 : fadeRate;
 
-        _tailLength = config.option2 > 0 ? config.option2 : 10;
-        _tailLength = _tailLength < 5 ? 5 : (_tailLength > 30 ? 30 : _tailLength);
+        uint8_t tailLength = config.option2 > 0 ? config.option2 : 10;
+        tailLength = tailLength < 5 ? 5 : (tailLength > 30 ? 30 : tailLength);
 
         bool bounceMode = config.feature1;
         bool rainbowMode = config.feature2;
 
         uint32_t interval = 10 + ((255 - config.speed) * 90) / 255;
         uint32_t now = millis();
-        if (now - _lastUpdate < interval) return;
-        _lastUpdate = now;
+        if (now - s.lastUpdate < interval) return;
+        s.lastUpdate = now;
 
         for (uint16_t i = 0; i < length; i++)
         {
@@ -93,21 +89,22 @@ class CometEffect : public Effect
             segment->setPixel(i, r, g, b);
         }
 
-        for (uint8_t t = 1; t <= _tailLength; t++)
+        const int8_t direction = s.reverse ? -1 : 1;
+        for (uint8_t t = 1; t <= tailLength; t++)
         {
-            int16_t tailPos = _position - (_direction * t);
+            int16_t tailPos = s.position - (direction * t);
             if (tailPos >= 0 && tailPos < length)
             {
                 uint8_t brightness = 255 / (t + 1);
                 uint8_t r, g, b;
                 if (rainbowMode)
                 {
-                    uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue - (t * 10), 255, FastLEDMath::scale8(brightness, config.intensity));
+                    uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(s.hue - (t * 10), 255, FastLEDMath::scale8(brightness, config.intensity));
                     r = (rgb >> 16) & 0xFF; g = (rgb >> 8) & 0xFF; b = rgb & 0xFF;
                 }
                 else if (config.r() == 0 && config.g() == 0 && config.b() == 0)
                 {
-                    uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, FastLEDMath::scale8(brightness, config.intensity));
+                    uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(s.hue, 255, FastLEDMath::scale8(brightness, config.intensity));
                     r = (rgb >> 16) & 0xFF; g = (rgb >> 8) & 0xFF; b = rgb & 0xFF;
                 }
                 else
@@ -121,14 +118,14 @@ class CometEffect : public Effect
             }
         }
 
-        if (_position >= 0 && _position < length)
+        if (s.position >= 0 && s.position < length)
         {
             uint8_t r, g, b;
             if (rainbowMode || (config.r() == 0 && config.g() == 0 && config.b() == 0))
             {
-                uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, config.intensity);
+                uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(s.hue, 255, config.intensity);
                 r = (rgb >> 16) & 0xFF; g = (rgb >> 8) & 0xFF; b = rgb & 0xFF;
-                _hue += 2;
+                s.hue += 2;
             }
             else
             {
@@ -136,27 +133,28 @@ class CometEffect : public Effect
                 g = FastLEDMath::scale8(config.g(), config.intensity);
                 b = FastLEDMath::scale8(config.b(), config.intensity);
             }
-            segment->setPixel(_position, r, g, b);
+            segment->setPixel(s.position, r, g, b);
         }
 
-        _position += _direction;
+        s.position += direction;
         if (bounceMode)
         {
-            if (_position >= length) { _position = length - 1; _direction = -1; }
-            else if (_position < 0) { _position = 0; _direction = 1; }
+            if (s.position >= length) { s.position = length - 1; s.reverse = true; }
+            else if (s.position < 0) { s.position = 0; s.reverse = false; }
         }
         else
         {
-            if (_position >= length) _position = 0;
-            else if (_position < 0) _position = length - 1;
+            if (s.position >= length) s.position = 0;
+            else if (s.position < 0) s.position = length - 1;
         }
     }
 
     // ── Mode 1: Meteor ───────────────────────────────────────────────────
-    void updateMeteor(Segment* segment, uint32_t deltaTime)
+    void updateMeteor(Segment* segment, State& s)
     {
         auto& config = segment->getConfig();
         uint16_t length = segment->getLength();
+        if (s.meteorSize == 0) s.meteorSize = 5; // size of the first meteor before any spawn
 
         uint8_t minSize = config.option1 > 0 ? (2 + config.option1 / 20) : 3;
         uint8_t maxSize = minSize + 5;
@@ -169,26 +167,26 @@ class CometEffect : public Effect
 
         uint32_t now = millis();
 
-        if (_position < 0 && now >= _nextMeteor)
+        if (s.position < 0 && now >= s.nextMeteor)
         {
-            _position = length - 1;
-            _meteorSize = FastLEDMath::random8(minSize, maxSize);
+            s.position = length - 1;
+            s.meteorSize = FastLEDMath::random8(minSize, maxSize);
 
             if (randomColors)
-                _hue = FastLEDMath::random8();
+                s.hue = FastLEDMath::random8();
             else if (config.r() == 0 && config.g() == 0 && config.b() == 0)
-                _hue = FastLEDMath::random8();
+                s.hue = FastLEDMath::random8();
 
             uint32_t interval = baseInterval;
             if (multiMeteor) interval /= 3;
             interval += FastLEDMath::random16(interval);
-            _nextMeteor = now + interval;
+            s.nextMeteor = now + interval;
         }
 
         uint32_t moveInterval = 20 + ((255 - config.speed) * 80) / 255;
-        if (now - _lastUpdate >= moveInterval && _position >= 0)
+        if (now - s.lastUpdate >= moveInterval && s.position >= 0)
         {
-            _lastUpdate = now;
+            s.lastUpdate = now;
 
             for (uint16_t i = 0; i < length; i++)
             {
@@ -204,16 +202,16 @@ class CometEffect : public Effect
                 }
             }
 
-            for (uint8_t i = 0; i < _meteorSize; i++)
+            for (uint8_t i = 0; i < s.meteorSize; i++)
             {
-                int16_t pos = _position + i;
+                int16_t pos = s.position + i;
                 if (pos >= 0 && pos < length)
                 {
-                    uint8_t brightness = 255 - (i * 255 / _meteorSize);
+                    uint8_t brightness = 255 - (i * 255 / s.meteorSize);
                     uint8_t r, g, b;
                     if (randomColors || (config.r() == 0 && config.g() == 0 && config.b() == 0))
                     {
-                        uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, FastLEDMath::scale8(brightness, config.intensity));
+                        uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(s.hue, 255, FastLEDMath::scale8(brightness, config.intensity));
                         r = (rgb >> 16) & 0xFF; g = (rgb >> 8) & 0xFF; b = rgb & 0xFF;
                     }
                     else
@@ -227,13 +225,13 @@ class CometEffect : public Effect
                 }
             }
 
-            _position--;
-            if (_position + _meteorSize < 0) _position = -1;
+            s.position--;
+            if (s.position + s.meteorSize < 0) s.position = -1;
         }
     }
 
     // ── Mode 2: Sinelon ──────────────────────────────────────────────────
-    void updateSinelon(Segment* segment, uint32_t deltaTime)
+    void updateSinelon(Segment* segment, State& s)
     {
         auto& config = segment->getConfig();
         uint16_t length = segment->getLength();
@@ -261,10 +259,10 @@ class CometEffect : public Effect
         if (bounceMode)
         {
             uint16_t bpm = 5 + ((config.speed * 45) / 255);
-            _sinePosition += _sineDirection ? bpm / 10 : -(bpm / 10);
-            if (_sinePosition >= (length - 1) * 16) { _sinePosition = (length - 1) * 16; _sineDirection = false; }
-            else if (_sinePosition <= 0) { _sinePosition = 0; _sineDirection = true; }
-            pos = _sinePosition / 16;
+            s.sinePosition += !s.sineDown ? bpm / 10 : -(bpm / 10);
+            if (s.sinePosition >= (length - 1) * 16) { s.sinePosition = (length - 1) * 16; s.sineDown = true; }
+            else if (s.sinePosition <= 0) { s.sinePosition = 0; s.sineDown = false; }
+            pos = s.sinePosition / 16;
         }
         else
         {
@@ -275,9 +273,9 @@ class CometEffect : public Effect
         uint8_t r, g, b;
         if (rainbowMode || (config.r() == 0 && config.g() == 0 && config.b() == 0))
         {
-            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(_hue, 255, config.intensity);
+            uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(s.hue, 255, config.intensity);
             r = (rgb >> 16) & 0xFF; g = (rgb >> 8) & 0xFF; b = rgb & 0xFF;
-            _hue++;
+            s.hue++;
         }
         else
         {
@@ -288,17 +286,6 @@ class CometEffect : public Effect
 
         for (uint8_t d = 0; d < dotSize && (pos + d) < length; d++)
             segment->setPixel(pos + d, r, g, b);
-    }
-
-    void reset() override
-    {
-        _position = 0;
-        _direction = 1;
-        _lastUpdate = 0;
-        _hue = 0;
-        _nextMeteor = 0;
-        _sinePosition = 0;
-        _sineDirection = true;
     }
 
     const char* getName(const char* lang = nullptr) override

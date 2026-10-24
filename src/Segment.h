@@ -29,8 +29,11 @@
 
 #include "LedState.h"
 #include "VirtualStrip.h"
+#include <new>
 #include <stdint.h>
+#include <string.h>
 #include <string>
+#include <type_traits>
 
 class Effect; // Forward declaration
 
@@ -150,9 +153,12 @@ struct EffectConfig
           legacyOption1(0), legacyOption2(0) { effectText[0] = '\0'; }
 };
 
+/// Bytes of effect-typed per-segment state in EffectState::scratch (see Segment::effectScratch()).
+static constexpr uint8_t EFFECT_SCRATCH_SIZE = 16;
+
 /**
  * Effect State - Effect runtime variables
- * ~12 bytes per Segment
+ * 32 bytes per Segment
  */
 struct EffectState
 {
@@ -162,11 +168,12 @@ struct EffectState
     uint16_t counter;    // General counter
     uint16_t aux1;       // Auxiliary variable 1
     uint16_t aux2;       // Auxiliary variable 2
+    alignas(uint32_t) unsigned char scratch[EFFECT_SCRATCH_SIZE]; // Effect-typed state, see Segment::effectScratch()
 
     // Default Constructor
     EffectState()
         : position(0), phase(0), lastUpdate(0),
-          counter(0), aux1(0), aux2(0) {}
+          counter(0), aux1(0), aux2(0) { memset(scratch, 0, sizeof(scratch)); }
 };
 
 /**
@@ -179,6 +186,8 @@ class Segment
 
     Segment(VirtualStrip* virtualStrip, uint16_t startLed, uint16_t endLed);
     ~Segment();
+    Segment(const Segment&) = delete;            // owns its effect instance
+    Segment& operator=(const Segment&) = delete;
 
     // ====================================================================
     // Properties
@@ -349,11 +358,28 @@ class Segment
     // ====================================================================
     // Effect Management
     // ====================================================================
-    void setEffect(Effect* effect, bool initializeDefaults = false); // Set effect (Stateless - no init!)
-    Effect* getEffect() { return _effect; }                          // Get current effect
+    void setEffect(Effect* effect, bool initializeDefaults = false); // Set effect (pool instance from EffectPool)
+    Effect* getEffect() { return _effect; }                          // Get current effect (pool instance, identifies the type)
     const Effect* getEffect() const { return _effect; }              // Get current effect (const)
     bool hasEffect() const { return _effect != nullptr; }            // Check if effect is set
     void clearEffect();                                              // Remove effect and run its exit lifecycle
+    bool isEffectDone() const;                                       // isDone() of the instance rendering this segment
+    void enterEffect();                                              // onEnter() of the instance rendering this segment
+
+    /**
+     * @brief Effect-typed per-segment state in the scratch area of EffectState.
+     * @note Zeroed by resetEffectState() and when a different effect is assigned: T must treat all-zero as its start state.
+     *       The zeroing memcpy() implicitly creates the T object the reference names.
+     */
+    template <typename T>
+    T& effectScratch()
+    {
+        static_assert(sizeof(T) <= EFFECT_SCRATCH_SIZE, "effect state exceeds the scratch area: keep it as members and use EFFECT_PER_SEGMENT_INSTANCE");
+        static_assert(alignof(T) <= alignof(uint32_t), "effect state alignment exceeds the scratch area");
+        static_assert(std::is_trivially_copyable<T>::value && std::is_trivially_default_constructible<T>::value,
+                      "effect state must be a plain struct without initializers");
+        return *std::launder(reinterpret_cast<T*>(_state.scratch));
+    }
 
     // ====================================================================
     // Pixel Control
@@ -400,7 +426,7 @@ class Segment
     // ====================================================================
     // Update & Control
     // ====================================================================
-    void update(uint32_t deltaTime);   // Update Segment (calls effect) - STATELESS
+    void update(uint32_t deltaTime);   // Update Segment (calls the rendering effect instance)
     void pause() { _paused = true; }   // Pause effect
     void resume();                    // Resume effect without resetting runtime state
     void stop();
@@ -424,7 +450,7 @@ class Segment
         _config = _savedConfig;
         _config.masterBrightness = liveMaster;
         _config.brightness = liveMaster;
-        _effect = _savedEffect;
+        assignEffect(_savedEffect);
         _paused = false;
         return true;
     }
@@ -442,7 +468,7 @@ class Segment
     const EffectConfig& getConfig() const { return _config; } // Get effect configuration (read-only)
     EffectState& getState() { return _state; }                // Get effect state (read/write)
     const EffectState& getState() const { return _state; }    // Get effect state (read-only)
-    void resetEffectState() { _state = EffectState{}; }       // Fresh effect/cue start only; pause/resume preserves state
+    void resetEffectState();                                  // Fresh effect/cue start only; pause/resume preserves state
 
     /**
      * @brief Set software brightness (0-255, default 255 = no dimming)
@@ -479,7 +505,10 @@ class Segment
     uint16_t _offset;                 // Offset for effect start position (0 = no offset)
     bool _reverse;                    // Reverse effect direction
     bool _mirror;                     // Mirror effect from center
-    Effect* _effect;                  // Current effect (nullptr = none)
+    Effect* _effect;                  // Current effect: pool instance (nullptr = none)
+    Effect* _render = nullptr;        // Instance that renders this segment: _effect or an owned copy
+    void* _renderMem = nullptr;       // Heap storage of an owned copy (nullptr = _render is the pool instance)
+    bool _sharedFallback = false;     // Shares the pool instance with another segment for lack of heap
     bool _dirty;                      // Pixels changed?
     bool _paused;                     // Effect paused?
     LedState _ledState;               // State machine (IDLE, RUNNING, etc)
@@ -487,13 +516,26 @@ class Segment
     EffectConfig _savedConfig;        // DIRECT-state snapshot taken before an EM started
     Effect* _savedEffect = nullptr;   // DIRECT effect pointer before the EM took over
     bool _hasSavedState = false;      // true once a direct snapshot exists
-    EffectState _state;               // Effect runtime variables (~12 bytes)
+    EffectState _state;               // Effect runtime variables (32 bytes)
     LedGeometry _geo;                 // 2D/3D matrix geometry (5 bytes, default = 1D)
     uint16_t _virtualTotalLength = 0; ///< Effektkette: total band length (0 = standalone)
     uint16_t _virtualOffset = 0;      ///< Effektkette: this segment's start in the band
 
     // Helper: Recalculate virtual length based on grouping/spacing
     void recalculateVirtualLength();
+
+    /** @brief Switch _effect without lifecycle hooks; same effect keeps its instance and scratch state. */
+    void assignEffect(Effect* effect);
+    /** @brief Pick the rendering instance for _effect: the pool instance, or an own copy when another segment renders with it. */
+    void acquireRenderEffect();
+    /** @brief Destroy and free an owned copy or hand the pool instance back. */
+    void releaseRenderEffect();
+    /** @brief Allocate and construct an own copy of _effect; false when the heap is too low. */
+    bool allocateOwnInstance();
+    /** @brief Zero the scratch area with memcpy(), which starts the lifetime of the effect's state struct. */
+    void clearScratch();
+    /** @brief Reconstruct a per-instance effect in place, keeping its pool user count. */
+    static void reconstructInstance(Effect* effect);
 
     // Helper: Map virtual index to physical LED indices
     // Returns start index in physical strip; groupSize LEDs starting from there get the color

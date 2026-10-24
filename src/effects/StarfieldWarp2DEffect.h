@@ -25,6 +25,9 @@ class StarfieldWarp2DEffect : public Effect
     }
 
   public:
+    // Members are per-segment state: a second segment gets its own instance
+    EFFECT_PER_SEGMENT_INSTANCE(StarfieldWarp2DEffect)
+
     const char* getName(const char* lang = nullptr) override
     {
         return EFFECT_NAME_DE_EN("Starfield Warp", "Starfield Warp");

@@ -1,6 +1,6 @@
 /**
  * @file CylonEffect.h
- * @brief Cylon/Knight Rider effect - STATELESS, 1D + 2D
+ * @brief Cylon/Knight Rider effect - 1D + 2D, state in the segment
  *
  * A single LED eye bouncing back and forth with a trailing fade.
  * Classic "KITT" effect from Knight Rider / Cylon from Battlestar Galactica.
@@ -40,7 +40,11 @@
 class CylonEffect : public Effect
 {
   private:
-    uint32_t _timeAcc = 0; // for 2D timing
+    /// Per-segment state in Segment::effectScratch(); all-zero is the start state
+    struct State
+    {
+        uint32_t timeAcc; // accumulated ms
+    };
 
   public:
     CylonEffect() = default;
@@ -346,7 +350,8 @@ class CylonEffect : public Effect
         uint16_t renderH = segment->getRenderHeight();
         if (renderW == 0 || renderH == 0) return;
 
-        _timeAcc += deltaTime;
+        State& s = segment->effectScratch<State>();
+        s.timeAcc += deltaTime;
         auto& cfg = segment->getConfig();
         uint8_t hue = cfg.option1;
         uint8_t eyeSize = cfg.option2 ? cfg.option2 : 1;
@@ -359,7 +364,7 @@ class CylonEffect : public Effect
 
         uint16_t stepMs = (uint16_t)(256 - (speed > 255 ? 255 : speed));
         if (stepMs == 0) stepMs = 1;
-        uint32_t step = (_timeAcc / stepMs) % ((uint32_t)(dim - 1) * 2);
+        uint32_t step = (s.timeAcc / stepMs) % ((uint32_t)(dim - 1) * 2);
         uint16_t pos;
         if (step < dim)
             pos = (uint16_t)step;

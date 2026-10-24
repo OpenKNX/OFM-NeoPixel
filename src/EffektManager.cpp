@@ -29,9 +29,9 @@ void EffektManagerController::restart(uint8_t emId, Segment* segment, const Effe
     uint8_t emIdx = emId - 1; // 0-based index
     if (emIdx >= EM_COUNT) return;
 
-    // Guard the EM data pointer. _emData is new(nothrow) in OAM and may be null on a
-    // low-memory boot; the flash-restore path (restoreState→start) is the one caller
-    // that doesn't pre-check it, so guard here to cover every caller (incl. chain start).
+    // Guard the EM data pointer. The OAM allocates _emData with new(nothrow): null on a
+    // low-memory boot on ESP32, while arduino-pico (RP2040/RP2350) aborts in new instead.
+    // The flash-restore path (restoreState→start) does not pre-check it, so guard every caller.
     if (!emData) return;
 
     const EffektManagerData& em = emData[emIdx];
@@ -160,8 +160,7 @@ void EffektManagerController::tick(Segment* segment, const EffektManagerData* em
     // ── Duration / finite-effect completion check ─────────────────────────
     if (cue.durationSec == EM_DURATION_UNTIL_EFFECT_DONE)
     {
-        Effect* effect = segment->getEffect();
-        if (!effect || !effect->isDone(segment)) return;
+        if (!segment->isEffectDone()) return;
 
         if (cue.fadeMs > 0)
             startFade(segment, cue.fadeMs);

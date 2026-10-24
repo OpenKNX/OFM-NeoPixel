@@ -1,6 +1,6 @@
 /**
  * @file Effect.h
- * @brief Base Effect Interface - STATELESS Design
+ * @brief Base Effect Interface
  *
  * This is the base class for all effects.
  *
@@ -8,17 +8,23 @@
  */
 
 /*
- * IMPORTANT: Effects are STATELESS!
- * - No member variables for state
- * - All config in segment->getConfig()
- * - All state in segment->getState()
- * - One singleton instance per effect type
- * - Multiple segments can share the same effect
+ * Effect state rules - several segments can run the same effect in one frame:
+ * - Config lives in segment->getConfig(), runtime state in segment->getState().
+ * - Small effect-typed state (timers, positions, hue, flags): a plain struct in
+ *   segment->effectScratch<T>() (EFFECT_SCRATCH_SIZE bytes, all-zero on a fresh start).
+ * - State that does not fit (buffers): members plus EFFECT_PER_SEGMENT_INSTANCE(Type);
+ *   a segment gets its own instance when the pool instance already renders another segment.
+ *   The rendering instance is reconstructed (fresh state) on Segment::resetEffectState().
+ * - Everything else is member-free: one pool instance (EffectPool) serves all segments.
+ * - isDone() and the parameter API can be called on the pool instance: they must not use
+ *   members. Callers outside the Segment run onEnter() via Segment::enterEffect().
  */
 
 #pragma once
 
 #include "ParameterType.h"
+#include <new>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -87,7 +93,24 @@
 class Segment;
 
 /**
- * Effect - Stateless Base class for NeoPixel Effects
+ * @brief Mark an effect whose members hold per-segment state (buffers).
+ * @note Use inside the public section; storage is allocated by the Segment at effect selection, never per frame.
+ */
+#define EFFECT_PER_SEGMENT_INSTANCE(Type)                                                          \
+    size_t instanceSize() const override                                                           \
+    {                                                                                              \
+        static_assert(alignof(Type) <= 4, "per-segment effect storage is 4-byte aligned");         \
+        return sizeof(Type);                                                                       \
+    }                                                                                              \
+    Effect* constructAt(void* mem) const override { return new (mem) Type(); }                     \
+    void reconstruct() override                                                                    \
+    {                                                                                              \
+        this->~Type();                                                                             \
+        new (this) Type();                                                                         \
+    }
+
+/**
+ * Effect - Base class for NeoPixel Effects (state rules: see top of file)
  */
 class Effect
 {
@@ -130,7 +153,7 @@ class Effect
      */
     virtual void reset() {}
 
-    /** Called when this effect is freshly assigned to a segment. */
+    /** Called when this effect is freshly assigned to a segment; from outside the Segment use Segment::enterEffect(). */
     virtual void onEnter(Segment* segment) {}
 
     /** Called before this effect is replaced or removed from a segment. */
@@ -267,7 +290,16 @@ class Effect
         }
     }
 
-    // NO MEMBER VARIABLES - Stateless!
+    // Runtime state: segment->getState() / effectScratch<T>(), or members with EFFECT_PER_SEGMENT_INSTANCE.
+
+    /** @brief sizeof the effect when its members hold per-segment state, 0 for a member-free effect. */
+    virtual size_t instanceSize() const { return 0; }
+
+    /** @brief Construct a fresh instance of the same type in mem (instanceSize() bytes), only with instanceSize() > 0. */
+    virtual Effect* constructAt(void* /*mem*/) const { return nullptr; }
+
+    /** @brief Destroy and construct this instance in place (fresh state), only with instanceSize() > 0. */
+    virtual void reconstruct() {}
 
     // ====================================================================
     // 2D / 3D Capability Extension
@@ -317,4 +349,8 @@ class Effect
      * @brief Helper: does this effect support 3D rendering?
      */
     bool supports3D() const { return (getCapabilities() & DIM_3D) != 0; }
+
+  private:
+    friend class Segment;
+    uint8_t _poolUsers = 0; ///< Segments rendering with this pool instance (per-instance effects only)
 };

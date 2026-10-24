@@ -26,7 +26,7 @@
 
 ## Overview
 
-OFM-NeoPixel includes a **stateless effect system** inspired by FastLED but optimized for OpenKNX devices. This guide explains how to port FastLED effects and understand the architectural differences.
+OFM-NeoPixel includes a **pooled effect system with per-segment state** inspired by FastLED but optimized for OpenKNX devices. This guide explains how to port FastLED effects and understand the architectural differences.
 
 ### Why Port FastLED Effects?
 
@@ -37,7 +37,7 @@ OFM-NeoPixel includes a **stateless effect system** inspired by FastLED but opti
 - Active community
 
 **OFM-NeoPixel Advantages:**
-- Stateless design (96% memory savings)
+- Pooled effects with per-segment state (one instance per effect type)
 - Self-describing parameter API
 - Hardware acceleration (PIO/DMA/RMT)
 - Segment-based architecture
@@ -66,7 +66,7 @@ void loop() {
 }
 ```
 
-### OFM-NeoPixel (Stateless Singleton)
+### OFM-NeoPixel (Pool instance, state in the segment)
 
 ```cpp
 class RainbowEffect : public Effect {
@@ -198,8 +198,8 @@ RainbowEffect rainbowEffect;
 
 **Characteristics:**
 - Segment-based (multiple zones)
-- Stateless effects (singleton instances)
-- Effect state in effect class
+- Effects from a pool, shared by segments (buffer effects: own instance per segment)
+- Effect state in the segment (scratch area) or in a per-segment instance
 - Config state in segment
 - Multi-strip support
 
@@ -857,7 +857,7 @@ uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, brightness);
 
 **Problem:**
 ```cpp
-// This breaks stateless design!
+// Shared by every segment that runs this effect!
 static uint8_t gHue = 0;
 
 void update(Segment* segment, uint32_t deltaTime) override {
@@ -866,34 +866,26 @@ void update(Segment* segment, uint32_t deltaTime) override {
 ```
 
 **Solution:**
+
+The same effect object runs on several segments in one frame, so neither a static nor a plain
+member holds per-segment state. Keep small state in the segment scratch area:
+
 ```cpp
-// State in class member (one per effect instance)
 class MyEffect : public Effect {
 private:
-    uint8_t _hue;  // Each instance has its own
-    
+    struct State { uint8_t hue; }; // plain struct, all-zero = start state
+
 public:
     void update(Segment* segment, uint32_t deltaTime) override {
-        _hue++;
+        State& s = segment->effectScratch<State>(); // per segment, 16 bytes max
+        s.hue++;
     }
 };
 ```
 
-**Wait, but effects are singletons?**
-
-Yes! But each effect type is a singleton. If you need per-segment state, store it in `segment->getState().effectState`:
-
-```cpp
-void update(Segment* segment, uint32_t deltaTime) override {
-    auto& state = segment->getState();
-    
-    // Per-segment state stored here
-    uint8_t& hue = state.effectState;  // uint32_t field
-    hue++;
-    
-    // ...
-}
-```
+Buffers that do not fit stay members, and the effect declares
+`EFFECT_PER_SEGMENT_INSTANCE(MyEffect)`: a second segment then gets its own instance.
+See `doc/Developer.md`, section "Runtime State".
 
 ---
 
@@ -1078,18 +1070,16 @@ _hue += (deltaTime * 256) / 1000;  // 256 steps per second
 
 ### Q: Can multiple segments use the same effect?
 
-**A:** Yes! That's the whole point of stateless design:
+**A:** Yes. Assign the pool instance to each segment:
 
 ```cpp
-// One instance, multiple segments
-RainbowEffect rainbowEffect;
-
-mgr->attachEffect(segment0, &rainbowEffect);
-mgr->attachEffect(segment1, &rainbowEffect);
-mgr->attachEffect(segment2, &rainbowEffect);
-
-// Each segment gets different part of the effect
+mgr->attachEffect(segment0, EffectPool::getRainbow());
+mgr->attachEffect(segment1, EffectPool::getRainbow());
+mgr->attachEffect(segment2, EffectPool::getRainbow());
 ```
+
+Each segment keeps its own runtime state (scratch area); a buffer effect such as Fire gets its own
+instance on a segment when the pool instance already renders another segment.
 
 ---
 

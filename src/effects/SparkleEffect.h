@@ -33,14 +33,7 @@
  */
 class SparkleEffect : public Effect
 {
-  private:
-    uint8_t _hue;
-
   public:
-    SparkleEffect() : _hue(0)
-    {
-    }
-
     void update(Segment* segment, uint32_t deltaTime) override
     {
         if (!segment) return;
@@ -221,11 +214,6 @@ class SparkleEffect : public Effect
 
         if (deltaTime > 0) gHue++;
         state.position = (state.position & 0xFF00) | gHue;
-    }
-
-    void reset() override
-    {
-        _hue = 0;
     }
 
     const char* getName(const char* lang = nullptr) override

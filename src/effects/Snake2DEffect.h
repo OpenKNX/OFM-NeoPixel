@@ -331,6 +331,9 @@ class Snake2DEffect : public Effect
     }
 
   public:
+    // Members are per-segment state: a second segment gets its own instance
+    EFFECT_PER_SEGMENT_INSTANCE(Snake2DEffect)
+
     const char* getName(const char* lang = nullptr) override
     {
         return EFFECT_NAME_DE_EN("Snake 2D", "Snake 2D");

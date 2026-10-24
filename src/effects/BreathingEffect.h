@@ -34,13 +34,13 @@
 class BreathingEffect : public Effect
 {
   private:
-    uint32_t _time;
+    /// Per-segment state in Segment::effectScratch(); all-zero is the start state
+    struct State
+    {
+        uint32_t time; // accumulated ms, drives the rainbow hue
+    };
 
   public:
-    BreathingEffect() : _time(0)
-    {
-    }
-
     void update(Segment* segment, uint32_t deltaTime) override
     {
         if (!segment) return;
@@ -48,7 +48,8 @@ class BreathingEffect : public Effect
         auto& config = segment->getConfig();
         uint16_t length = segment->getLength();
 
-        _time += deltaTime;
+        State& s = segment->effectScratch<State>();
+        s.time += deltaTime;
 
         const uint8_t waveform = config.mode; // 0=Soft,1=HoldAtPeak,2=Pulse,3=SharpPulse
         const bool pulseStyle = (waveform >= 2);
@@ -117,7 +118,7 @@ class BreathingEffect : public Effect
         if (rainbowMode)
         {
             uint8_t hueDiv = pulseStyle ? 30 : 50;
-            uint8_t hue = (_time / hueDiv) % 256;
+            uint8_t hue = (s.time / hueDiv) % 256;
             uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, currentBrightness);
             r = (rgb >> 16) & 0xFF;
             g = (rgb >> 8) & 0xFF;
@@ -138,11 +139,6 @@ class BreathingEffect : public Effect
         {
             segment->setPixel(i, r, g, b, ww, cw);
         }
-    }
-
-    void reset() override
-    {
-        _time = 0;
     }
 
     const char* getName(const char* lang = nullptr) override

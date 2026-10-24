@@ -43,6 +43,9 @@ class Lissajous2DEffect : public Effect
     }
 
   public:
+    // Members are per-segment state: a second segment gets its own instance
+    EFFECT_PER_SEGMENT_INSTANCE(Lissajous2DEffect)
+
     const char* getName(const char* lang = nullptr) override
     {
         return EFFECT_NAME_DE_EN("Lissajous 2D", "Lissajous 2D");
