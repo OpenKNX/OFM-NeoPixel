@@ -1847,6 +1847,7 @@ bool NeoPixel::processPinCheckCommand(const std::string& args)
         const esp_err_t pullResult = gpio_set_pull_mode(gpio, GPIO_FLOATING);
 
         const uint32_t port = digitalPinToPort(pin);
+        (void)port; // the port macros ignore it on chips with up to 32 GPIOs (C3/C5/C6)
         const uint32_t mask = digitalPinToBitMask(pin);
         auto readLatch = [&]() { return ((*portOutputRegister(port) & mask) != 0U) ? 1 : 0; };
         auto readOutputEnable = [&]() { return ((*portModeRegister(port) & mask) != 0U) ? 1 : 0; };
