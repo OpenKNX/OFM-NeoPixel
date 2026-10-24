@@ -365,5 +365,6 @@ class NeoPixelManager
     void rebuildPhysToVirtualMapping();                                               // Rebuild Physical→Virtual mapping table
     void applyPowerLimitToStrip(PhysicalStrip* phys, uint32_t stripLimit);            // Apply power limit to a specific PhysicalStrip
     bool applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scale);                // Scale a PhysicalStrip buffer; false for SPI strips (left unscaled)
+    bool applyOwnStripLimits();                                                       // Limit strips with their own limit, any global mode
     float slewGlobalScale(float target);                                              // ABL slew for the GLOBAL budget scale
 };

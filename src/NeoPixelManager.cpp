@@ -604,8 +604,8 @@ void NeoPixelManager::reset()
 /**
  * @brief Sum the current across all strips without changing a single pixel
  *
- * Used while limiting is switched off, so the console and the power KO keep a live
- * value without paying for it on every frame.
+ * Used while global limiting is switched off, so the console keeps a live total
+ * without paying for it on every frame.
  */
 void NeoPixelManager::measureCurrentOnly()
 {
@@ -625,6 +625,79 @@ void NeoPixelManager::measureCurrentOnly()
     _globalCurrentMa = total;
     _globalLimitMa = limit;
     _globalLoadPercent = loadPercentOf(total, limit);
+}
+
+/**
+ * @brief Limit the strips with their own limit ("Fester Wert" / "Pro LED") and cache their stats.
+ * @return true if at least one strip was dimmed
+ */
+bool NeoPixelManager::applyOwnStripLimits()
+{
+    bool applied = false;
+    for (auto phys : _strips)
+    {
+        if (!phys) continue;
+
+        auto* cfg = phys->getConfig();
+        if (!cfg) continue;
+
+        uint8_t stripPowerMode = cfg->getPowerLimitMode();
+
+        // Only process strips with individual limits
+        if (stripPowerMode == 0 || stripPowerMode == 1) continue;
+
+        uint32_t stripLimit = 0;
+
+        if (stripPowerMode == 2)
+        {
+            stripLimit = cfg->getMaxCurrentMa();
+        }
+        else if (stripPowerMode == 3)
+        {
+            // PerLED: Use physical LED count (not VirtualStrip sum)
+            stripLimit = phys->getLedCount() * cfg->getCurrentPerLedMa();
+        }
+
+        // Calculate current from PhysicalStrip buffer
+        uint16_t ledCount = phys->getLedCount();
+        const uint8_t* buffer = phys->getBuffer();
+        if (!buffer) continue;
+
+        uint8_t bytesPerPixel = bufferStride(phys);
+        uint32_t stripRequestedCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, 255,
+                _powerManager.profileForProtocol(phys->getProtocol()));
+
+        if (stripLimit == 0)
+        {
+            // Own limit of 0 mA: nothing to limit, the current is still reported
+            _stripPowerCache[phys] = StripPowerStats{stripRequestedCurrent, 0, 0};
+            continue;
+        }
+
+        // Get ABL parameters
+        uint8_t autoBrLimit = cfg->getAutoBrightnessLimit();
+        uint8_t threshold = cfg->getPowerLimitThreshold();
+
+        // Apply ABL if needed
+        uint32_t actualCurrent = stripRequestedCurrent;
+        const float stripScale = ablScale(stripRequestedCurrent, stripLimit, threshold, autoBrLimit);
+        if (stripScale < 1.0f)
+        {
+            if (applyScaleToPhysicalBuffer(phys, stripScale))
+            {
+                actualCurrent = scaledCurrentMa(stripRequestedCurrent, stripScale, stripLimit);
+                applied = true;
+            }
+        }
+
+        // Update cache
+        StripPowerStats stats;
+        stats.currentMa = actualCurrent;
+        stats.limitMa = stripLimit;
+        stats.loadPercent = loadPercentOf(actualCurrent, stripLimit);
+        _stripPowerCache[phys] = stats;
+    }
+    return applied;
 }
 
 /**
@@ -660,20 +733,22 @@ void NeoPixelManager::applyPowerLimit()
     }
     bool limitApplied = false; // published once at the end, read by the module between frames
 
-    // Limiting switched off in ETS: never touch the pixels. The consumption is still
-    // reported, but the console and the KO read it seconds apart - walking every pixel
-    // of every strip once per frame for that only costs frame rate, and a lower frame
-    // rate shows up directly in millis()-driven effects.
+    // Global limiting switched off in ETS: only strips with their own limit are limited (every
+    // frame). The total is measured once per second for the console - walking every pixel of
+    // every strip once per frame for that only costs frame rate, and a lower frame rate shows up
+    // directly in millis()-driven effects.
     if (!_powerManager.isEnabled())
     {
+        _stripPowerCache.clear(); // only strips with their own limit are measured here
+        const bool applied = applyOwnStripLimits();
         const uint32_t now = millis();
         if ((uint32_t)(now - _lastIdleCurrentMeasureMs) >= kIdleCurrentMeasureIntervalMs)
         {
             _lastIdleCurrentMeasureMs = now;
             measureCurrentOnly();
         }
-        _powerLimitActive = false;
-        _powerLimitSeen = false;
+        _powerLimitActive = applied;
+        if (applied) _powerLimitSeen = true;
         return;
     }
 
@@ -810,66 +885,8 @@ void NeoPixelManager::applyPowerLimit()
             _stripPowerCache[phys] = stats;
         }
 
-        // IMPORTANT: Apply individual limits to strips that don't use global
-        // Even in GLOBAL mode, strips with Individual limits should be respected
-        for (auto phys : _strips)
-        {
-            if (!phys) continue;
-
-            auto* cfg = phys->getConfig();
-            if (!cfg) continue;
-
-            uint8_t stripPowerMode = cfg->getPowerLimitMode();
-
-            // Only process strips with individual limits
-            if (stripPowerMode == 0 || stripPowerMode == 1) continue;
-
-            uint32_t stripLimit = 0;
-
-            if (stripPowerMode == 2)
-            {
-                stripLimit = cfg->getMaxCurrentMa();
-            }
-            else if (stripPowerMode == 3)
-            {
-                // PerLED: Use physical LED count (not VirtualStrip sum)
-                stripLimit = phys->getLedCount() * cfg->getCurrentPerLedMa();
-            }
-
-            if (stripLimit == 0) continue;
-
-            // Calculate current from PhysicalStrip buffer
-            uint16_t ledCount = phys->getLedCount();
-            const uint8_t* buffer = phys->getBuffer();
-            if (!buffer) continue;
-
-            uint8_t bytesPerPixel = bufferStride(phys);
-            uint32_t stripRequestedCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, 255,
-                    _powerManager.profileForProtocol(phys->getProtocol()));
-
-            // Get ABL parameters
-            uint8_t autoBrLimit = cfg->getAutoBrightnessLimit();
-            uint8_t threshold = cfg->getPowerLimitThreshold();
-
-            // Apply ABL if needed
-            uint32_t actualCurrent = stripRequestedCurrent;
-            const float stripScale = ablScale(stripRequestedCurrent, stripLimit, threshold, autoBrLimit);
-            if (stripScale < 1.0f)
-            {
-                if (applyScaleToPhysicalBuffer(phys, stripScale))
-                {
-                    actualCurrent = scaledCurrentMa(stripRequestedCurrent, stripScale, stripLimit);
-                    limitApplied = true;
-                }
-            }
-
-            // Update cache
-            StripPowerStats stats;
-            stats.currentMa = actualCurrent;
-            stats.limitMa = stripLimit;
-            stats.loadPercent = loadPercentOf(actualCurrent, stripLimit);
-            _stripPowerCache[phys] = stats;
-        }
+        // Strips with their own limit are limited even in GLOBAL mode
+        if (applyOwnStripLimits()) limitApplied = true;
     }
     else if (mode == PowerLimitMode::PER_CHANNEL)
     {

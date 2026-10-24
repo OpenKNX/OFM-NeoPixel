@@ -4350,11 +4350,14 @@ bool NeoPixel::processPowerCommand(const std::string& args)
         openknx.logger.logWithValues("Total Power:      %.2f W (all strips)", totalPowerWatts);
 
         // Show if limiting is active
-        if (pm->isEnabled() && _manager->isPowerLimitActive())
+        if (_manager->isPowerLimitActive())
         {
             openknx.logger.log("");
             openknx.logger.color(CONSOLE_HEADLINE_COLOR);
-            openknx.logger.logWithValues("WARNING: POWER LIMITING ACTIVE - Current Load: %u%%", globalLoadPercent);
+            if (pm->isEnabled())
+                openknx.logger.logWithValues("WARNING: POWER LIMITING ACTIVE - Current Load: %u%%", globalLoadPercent);
+            else
+                openknx.logger.log("WARNING: POWER LIMITING ACTIVE (strips with their own limit)");
             openknx.logger.color(0);
         }
 
