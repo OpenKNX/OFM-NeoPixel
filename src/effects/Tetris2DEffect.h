@@ -549,8 +549,9 @@ class Tetris2DEffect : public Effect
 
         // Adapt the playfield to the actual matrix (clamped to the grid storage maximum),
         // so Tetris also runs on matrices smaller than 10×20 instead of staying black.
-        uint16_t mw = segment->getRenderWidth();
-        uint16_t mh = segment->getRenderHeight();
+        // Local panel size: the board is drawn with setPixelXY(), also inside an Effektkette.
+        uint16_t mw = segment->getGeometry().width;
+        uint16_t mh = segment->getGeometry().height;
         if (mw == 0 || mh == 0) return;
         uint8_t pw = static_cast<uint8_t>(mw < MAXW ? mw : MAXW);
         uint8_t ph = static_cast<uint8_t>(mh < MAXH ? mh : MAXH);

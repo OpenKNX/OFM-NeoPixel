@@ -373,10 +373,8 @@ class CylonEffect : public Effect
         for (uint8_t y = 0; y < geo.height; y++)
             for (uint8_t x = 0; x < geo.width; x++)
             {
-                uint16_t idx = segment->xyToIndex(x, y);
-                if (idx == 0xFFFF) continue;
                 uint8_t pr, pg, pb;
-                segment->getPixel(idx, pr, pg, pb);
+                if (!segment->getPixelXY(x, y, pr, pg, pb)) continue;
                 pr = FastLEDMath::scale8(pr, 255 - fadeAmt);
                 pg = FastLEDMath::scale8(pg, 255 - fadeAmt);
                 pb = FastLEDMath::scale8(pb, 255 - fadeAmt);

@@ -840,10 +840,16 @@ bool is3D() const;
 bool setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b);
 bool setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
 bool setPixelXYZ(uint8_t x, uint8_t y, uint8_t z, uint8_t r, uint8_t g, uint8_t b);
+bool getPixelXY(uint8_t x, uint8_t y, uint8_t& r, uint8_t& g, uint8_t& b) const;
 
-uint16_t xyToIndex(uint8_t x, uint8_t y) const;   // 0xFFFF if out of bounds
+uint16_t xyToIndex(uint8_t x, uint8_t y) const;   // local index, 0xFFFF if out of bounds
 uint16_t xyzToIndex(uint8_t x, uint8_t y, uint8_t z) const;
+uint16_t localToBandIndex(uint16_t local) const;  // local index -> index for setPixel()/getPixel()
 ```
+
+The coordinate setters take local panel coordinates, also inside an Effektkette. An effect that
+passes an `xyToIndex()` result to `setPixel()`/`getPixel()` must convert it with
+`localToBandIndex()` first, because inside a band those take band indices.
 
 #### Distributed 2D (virtual band)
 

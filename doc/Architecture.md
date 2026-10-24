@@ -812,7 +812,7 @@ The LED chain is always 1D on the wire. `Segment` adds a pure-software geometry 
    │   is2D() && effect supports 2D ──► update2D(seg, dt)     │
    │   otherwise                     ──► update(seg, dt)  (1D) │
    └──────────────────────────────────────────────────────────┘
-                       │ setPixelXY(x,y) / setPixelXYZ(x,y,z)
+                       │ setPixelXY(x,y) / getPixelXY / setPixelXYZ(x,y,z)
                        ▼
         xyToIndex() / xyzToIndex()  — topology mapping
                        │

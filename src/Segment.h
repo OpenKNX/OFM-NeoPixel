@@ -298,6 +298,12 @@ class Segment
     bool setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b, uint8_t w);
 
     /**
+     * @brief Read a pixel by local 2D coordinates.
+     * @note Returns the stored value: segment brightness applied, reverse/mirror not undone.
+     */
+    bool getPixelXY(uint8_t x, uint8_t y, uint8_t& r, uint8_t& g, uint8_t& b) const;
+
+    /**
      * @brief Set a pixel in global 2D coordinates across a virtual band.
      *
      * In standalone mode this falls back to local setPixelXY().
@@ -333,6 +339,12 @@ class Segment
      * @return Linear index, or 0xFFFF if out of bounds.
      */
     uint16_t xyzToIndex(uint8_t x, uint8_t y, uint8_t z) const;
+
+    /**
+     * @brief Convert a local index (e.g. from xyToIndex()) to the index setPixel()/getPixel() take.
+     * @return local + band offset inside an Effektkette, local when standalone, 0xFFFF on overflow.
+     */
+    uint16_t localToBandIndex(uint16_t local) const;
 
     // ====================================================================
     // Effect Management

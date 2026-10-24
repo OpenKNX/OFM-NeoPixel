@@ -43,6 +43,13 @@ bool Segment::translateVirtualIndex(uint16_t& index) const
     return true;
 }
 
+uint16_t Segment::localToBandIndex(uint16_t local) const
+{
+    if (_virtualTotalLength == 0) return local;
+    uint32_t band = (uint32_t)local + _virtualOffset;
+    return (band >= 0xFFFF) ? 0xFFFF : (uint16_t)band;
+}
+
 /**
  * @brief Constructor
  * @param virtualStrip The parent VirtualStrip
@@ -756,6 +763,8 @@ bool Segment::setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b)
 {
     uint16_t idx = xyToIndex(x, y);
     if (idx == 0xFFFF) return false;
+    idx = localToBandIndex(idx);
+    if (idx == 0xFFFF) return false;
     return setPixel(idx, r, g, b);
 }
 
@@ -763,7 +772,17 @@ bool Segment::setPixelXY(uint8_t x, uint8_t y, uint8_t r, uint8_t g, uint8_t b, 
 {
     uint16_t idx = xyToIndex(x, y);
     if (idx == 0xFFFF) return false;
+    idx = localToBandIndex(idx);
+    if (idx == 0xFFFF) return false;
     return setPixel(idx, r, g, b, w);
+}
+
+bool Segment::getPixelXY(uint8_t x, uint8_t y, uint8_t& r, uint8_t& g, uint8_t& b) const
+{
+    uint16_t idx = xyToIndex(x, y);
+    if (idx != 0xFFFF) idx = localToBandIndex(idx);
+    if (idx == 0xFFFF) { r = g = b = 0; return false; }
+    return getPixel(idx, r, g, b);
 }
 
 uint16_t Segment::getRenderWidth() const
@@ -859,6 +878,8 @@ bool Segment::setPixelGlobalXY(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uin
 bool Segment::setPixelXYZ(uint8_t x, uint8_t y, uint8_t z, uint8_t r, uint8_t g, uint8_t b)
 {
     uint16_t idx = xyzToIndex(x, y, z);
+    if (idx == 0xFFFF) return false;
+    idx = localToBandIndex(idx);
     if (idx == 0xFFFF) return false;
     return setPixel(idx, r, g, b);
 }
