@@ -76,7 +76,8 @@ void NeoPixel::setup(bool configured)
     logDebugP("Setting up NeoPixel module");
 
     // Initialize the manager
-    if (!_manager->init())
+    // init() returns false when one strip fails; the manager still runs the strips that came up
+    if (!_manager->init() && !_manager->isInitialized())
     {
         logErrorP("Failed to initialize NeoPixel manager!");
         return;
