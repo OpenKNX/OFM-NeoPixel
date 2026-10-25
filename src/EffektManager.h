@@ -217,6 +217,13 @@ class EffektManagerController
     /** @brief Returns the active Cue index (1-based, 0 if idle). */
     uint8_t activeCueNum() const { return _rt.isRunning() ? _rt.activeCueIdx + 1 : 0; }
 
+    /** @brief Time spent in the active cue in ms, frozen while paused; 0 if idle. */
+    uint32_t cueElapsedMs() const
+    {
+        if (!_rt.isRunning()) return 0;
+        return _rt.paused ? _rt.pauseElapsed : millis() - _rt.cueStartMs;
+    }
+
     /** @brief Save state for power-off persistence. */
     void saveState()
     {
