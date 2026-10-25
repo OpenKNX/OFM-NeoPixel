@@ -1162,7 +1162,8 @@ All commands start with `neo` prefix. Use `neo help` to see available commands.
 neo                     # Show module info and strip count
 neo list                # List all strips, virtual strips, and segments
 neo info                # Detailed system information
-neo perf                # Performance statistics (FPS, CPU usage)
+neo perf                # Performance statistics (render time, measured tick interval/rate, histogram)
+neo perf reset          # Reset performance statistics, start a new measurement window
 ```
 
 #### Update Control

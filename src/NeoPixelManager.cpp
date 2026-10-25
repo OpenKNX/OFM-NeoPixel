@@ -1493,7 +1493,11 @@ bool NeoPixelManager::updateAll()
     if (_framePhase != FramePhase::Idle)
     {
         showAll();
-        if (_framePhase != FramePhase::Idle) return _frameSuccess;
+        if (_framePhase != FramePhase::Idle)
+        {
+            _staleUpdateCount++;
+            return _frameSuccess;
+        }
     }
 
     // Never transmit a partially synchronized physical frame. A failed virtual

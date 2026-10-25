@@ -211,6 +211,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("neo auto on|off", "Enable/disable auto-update mode");
         openknx.console.printHelpLine("neo frameskip on|off", "Skip unchanged frames (default: off)");
         openknx.console.printHelpLine("neo perf", "Show performance statistics (requires auto-update)");
+        openknx.console.printHelpLine("neo perf reset", "Reset performance statistics, start a new window");
 
         printHelpSectionHeader("PhysicalStrip Management");
         openknx.console.printHelpLine("neo phys ?", "Show detailed PhysicalStrip commands");
@@ -519,6 +520,12 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
     else if (command == "neo perf")
     {
         return processPerformanceCommand();
+    }
+    else if (command == "neo perf reset")
+    {
+        g_perfTracker.reset();
+        openknx.logger.log("Performance statistics reset, new measurement window started");
+        return true;
     }
     else if (command == "neo list")
     {
@@ -1610,7 +1617,7 @@ bool NeoPixel::processInfoCommand()
             uint32_t targetFPS = ftl ? 0 : (1000 / _updateInterval);
             float cpuLoad = ftl ? 100.0f : (avgUpdateTime * targetFPS / 1000000.0f) * 100.0f;
 
-            openknx.logger.logWithValues("  Actual FPS:      %.1f Hz", actualFPS);
+            openknx.logger.logWithValues("  Capacity FPS:    %.1f Hz (1e6 / avg render us, capped at target)", actualFPS);
             openknx.logger.logWithValues("  Avg Update:      %d µs", avgUpdateTime);
             openknx.logger.logWithValues("  CPU Usage:       %.2f%%", cpuLoad);
 
@@ -2423,7 +2430,7 @@ bool NeoPixel::processPerformanceCommand()
     openknx.logger.log("Update Timing:");
     openknx.logger.color(0);
     openknx.logger.logWithValues("  Total Frames:    %lu", g_perfTracker.frameCount);
-    openknx.logger.logWithValues("  Current FPS:     %.1f Hz", currentFPS);
+    openknx.logger.logWithValues("  Capacity FPS:    %.1f Hz (1e6 / avg render us, capped at target)", currentFPS);
     if (ftl)
         openknx.logger.log("  Target FPS:      unlimited (FTL)");
     else
@@ -2443,6 +2450,75 @@ bool NeoPixel::processPerformanceCommand()
         uint32_t frameBudget = _updateInterval * 1000; // µs per frame
         float budgetUsed = (avgUpdateTime * 100.0f) / frameBudget;
         openknx.logger.logWithValues("  Frame Budget:    %lu µs (%.1f%% used)", frameBudget, budgetUsed);
+    }
+    openknx.logger.log("");
+
+    // Tick timing: measured render tick intervals (deltaTime the effects receive)
+    openknx.logger.color(CONSOLE_HEADLINE_COLOR);
+    openknx.logger.log("Tick Timing (measured):");
+    openknx.logger.color(0);
+    {
+        const uint32_t ticks = g_perfTracker.intervalTicks;
+        const uint32_t windowMs = g_perfTracker.getWindowMs();
+        const float avgIntervalMs = g_perfTracker.getAverageIntervalMs();
+        const uint32_t histTarget = g_perfTracker.histTargetMs;
+
+        openknx.logger.logWithValues("  Window:          %.1f s, %lu ticks (since boot or 'neo perf reset')",
+                                     windowMs / 1000.0f, (unsigned long)ticks);
+        openknx.logger.logWithValues("  Tick Rate:       %.1f Hz (1000 / avg interval)",
+                                     avgIntervalMs > 0.0f ? 1000.0f / avgIntervalMs : 0.0f);
+        openknx.logger.logWithValues("  Interval:        min %lu / avg %.2f / max %lu ms",
+                                     (unsigned long)(ticks > 0 ? g_perfTracker.minIntervalMs : 0), avgIntervalMs,
+                                     (unsigned long)g_perfTracker.maxIntervalMs);
+        if (histTarget > 0)
+            openknx.logger.logWithValues("  Lateness:        interval - target (%lu ms):", (unsigned long)histTarget);
+        else
+            openknx.logger.log("  Lateness:        interval (FTL, no target):");
+
+        // Bin ranges as recorded in PerformanceTracker::recordInterval(), clipped to target-1.
+        // A bin unreachable under the current target is printed only if an earlier target filled it.
+        static const uint32_t kBinLo[PerformanceTracker::kLateBins - 1] = {0, 1, 3, 6, 11};
+        static const uint32_t kBinHi[PerformanceTracker::kLateBins - 1] = {0, 2, 5, 10, UINT32_MAX};
+        for (uint8_t i = 0; i < PerformanceTracker::kLateBins; i++)
+        {
+            const uint32_t n = g_perfTracker.lateHistogram[i];
+            char label[24];
+            if (i == PerformanceTracker::kLateBins - 1)
+            {
+                if (histTarget == 0 && n == 0) continue; // no missed-tick bin in FTL
+                if (histTarget == 0)
+                    snprintf(label, sizeof(label), "prev. target");
+                else
+                    snprintf(label, sizeof(label), ">= %lu ms", (unsigned long)histTarget);
+            }
+            else
+            {
+                uint32_t hi = kBinHi[i];
+                if (histTarget > 0 && hi > histTarget - 1) hi = histTarget - 1;
+                if (histTarget > 0 && kBinLo[i] > hi)
+                {
+                    if (n == 0) continue;
+                    hi = kBinHi[i];
+                }
+                if (hi == UINT32_MAX)
+                    snprintf(label, sizeof(label), ">= %lu ms", (unsigned long)kBinLo[i]);
+                else if (hi == kBinLo[i])
+                    snprintf(label, sizeof(label), "%lu ms", (unsigned long)hi);
+                else
+                    snprintf(label, sizeof(label), "%lu-%lu ms", (unsigned long)kBinLo[i], (unsigned long)hi);
+            }
+            openknx.logger.logWithValues("    %-13s  %10lu  (%5.1f%%)%s", label, (unsigned long)n,
+                                         ticks > 0 ? n * 100.0f / ticks : 0.0f,
+                                         (i == PerformanceTracker::kLateBins - 1) ? "  missed >= 1 tick" : "");
+        }
+        if (g_perfTracker.histTargetChanged)
+            openknx.logger.log("  Note:            target changed during window, labels of reachable bins follow the current target - run 'neo perf reset'");
+        if (ticks == UINT32_MAX)
+            openknx.logger.log("  Note:            tick counter full, interval stats frozen, run 'neo perf reset'");
+        openknx.logger.logWithValues("  Deferred Passes: %lu (tick due, no free loop time)",
+                                     (unsigned long)g_perfTracker.deferredPasses);
+        openknx.logger.logWithValues("  Stale Ticks:     %lu (previous frame still in flight, frame not sent)",
+                                     (unsigned long)g_perfTracker.staleTicks);
     }
     openknx.logger.log("");
 

@@ -1182,7 +1182,8 @@ neo <category> <action> [parameters]
 | `neo ?` | Show help |
 | `neo list` | List all strips, virtual strips, segments |
 | `neo info` | Detailed system information |
-| `neo perf` | Performance statistics |
+| `neo perf` | Performance statistics: render time, measured tick interval/rate, lateness histogram, deferred passes, stale ticks |
+| `neo perf reset` | Reset performance statistics and start a new measurement window |
 
 ### Physical Strip Commands
 
@@ -1465,15 +1466,17 @@ class MyCustomDriver : public IHardwareDriver
 
 **Monitoring:**
 
-```cpp
-// Check performance
-neo perf
-
-// Output:
-// Update time: 22µs
-// FPS: 30
-// CPU usage: 0.07%
+```bash
+neo perf reset    # start a new measurement window
+neo perf          # after a few seconds
 ```
+
+`neo perf` reports:
+
+- **Update Timing** - render time per tick (`micros()` around the update). "Capacity FPS" is computed from that render time as 1e6 / avg render us, capped at the target rate when throttled; it is not a measured rate.
+- **Tick Timing (measured)** - the interval between render ticks (the `deltaTime` the effects receive): window length and tick count (since boot or `neo perf reset`), tick rate as 1000 / avg interval (time without ticks, e.g. auto-update off or dark periods, normally does not lower it; a scan that ends because its strip was removed can leave one long interval), interval min/avg/max, and a histogram of `interval - target` (0 | 1-2 | 3-5 | 6-10 | 11..target-1 | >= target = at least one tick missed; FTL: interval itself, last bin >= 11 ms).
+- **Deferred Passes** - loop passes where a tick was due but `openknx.freeLoopTime()` was exhausted, so the tick was postponed.
+- **Stale Ticks** - ticks that found the previous frame still on the wire; effects advanced but that frame was not sent.
 
 ---
 

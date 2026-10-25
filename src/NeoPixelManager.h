@@ -173,6 +173,9 @@ class NeoPixelManager
     /// True while a frame started by showAll() is still on the wire.
     bool isFrameInFlight() const { return _framePhase != FramePhase::Idle; }
 
+    /// Number of updateAll() calls that returned because the previous frame was still in flight (wraps).
+    uint32_t getStaleUpdateCount() const { return _staleUpdateCount; }
+
     /**
      * @brief Drive the in-flight frame to completion, blocking
      * @param timeoutMs Overall budget, 0 = derive from the strips' own frame deadlines
@@ -308,6 +311,7 @@ class NeoPixelManager
     uint32_t _updateCount;                     // Number of updates since start
     uint32_t _errorCount;                      // Error counter
     bool _suppressUnchangedFrames = false;      // Skip physical transfers when frame bytes did not change
+    uint32_t _staleUpdateCount = 0;              // updateAll() calls skipped on an in-flight frame
 
     // Frame state machine: showAll() used to transmit a whole frame in one call, blocking the
     // caller for payload + latch. It is now started and polled across later calls.

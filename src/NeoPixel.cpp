@@ -140,21 +140,32 @@ void NeoPixel::loop(bool configured)
 #endif
 
     // Auto-update mode - Render effects + send to hardware
-    if (_autoUpdate && openknx.freeLoopTime()) // Only update if there's free loop time
+    if (_autoUpdate)
     {
+        // freeLoopTime() and millis() are sampled in the former order; a due tick without free time only counts a deferred pass.
+        const bool freeTime = openknx.freeLoopTime();
         uint32_t now = millis();
         if ((now - _lastUpdateTime) >= _updateInterval)
         {
+            if (!freeTime)
+            {
+                g_perfTracker.recordDeferredPass();
+                return;
+            }
+
             uint32_t deltaTime = now - _lastUpdateTime;
             _lastUpdateTime = now;
 
             // ALWAYS render effects + send to hardware
+            const uint32_t staleBefore = _manager->getStaleUpdateCount();
             uint32_t updateStart = micros();
             _manager->update(deltaTime);
             uint32_t updateTime = micros() - updateStart;
 
             // Record timing for performance tracking
             g_perfTracker.recordUpdate(updateTime);
+            g_perfTracker.recordInterval(deltaTime, _updateInterval,
+                                         _manager->getStaleUpdateCount() != staleBefore);
 
             // FPS measurement (update every 1000ms)
             _fpsCounter++;

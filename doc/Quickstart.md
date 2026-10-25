@@ -468,7 +468,7 @@ Statistics:
   Errors:          0
   Auto Update:     Enabled
   Target FPS:      20 Hz (50 ms)
-  Actual FPS:      20.0 Hz
+  Capacity FPS:    20.0 Hz (1e6 / avg render us, capped at target)
   Avg Update:      641 µs
   CPU Usage:       1.28%
   DMA Accel:       Active
