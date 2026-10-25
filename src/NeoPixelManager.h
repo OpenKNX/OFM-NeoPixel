@@ -353,9 +353,9 @@ class NeoPixelManager
     bool _powerLimitSeen = false; // latched until takePowerLimitSeen()
     uint32_t _globalAblMs = 0;
 
-    mutable uint32_t _globalCurrentMa;                                  // Global total current (all strips)
-    mutable uint32_t _globalLimitMa;                                    // Global limit
-    mutable uint8_t _globalLoadPercent;                                 // Global load percentage
+    mutable uint32_t _globalCurrentMa = 0;                              // Global total current (all strips)
+    mutable uint32_t _globalLimitMa = 0;                                // Global limit
+    mutable uint8_t _globalLoadPercent = 0;                             // Global load percentage
 
     // Performance optimization: Physical→Virtual mapping lookup table
     // Pre-computed to avoid O(n²) nested loops in power limiting
