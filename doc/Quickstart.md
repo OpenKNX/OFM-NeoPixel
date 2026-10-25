@@ -794,6 +794,7 @@ neo help                        # Detailed help
 - Verify wiring (DIN, GND, VCC)
 - Try console command: `neo phys list` to see detected strips
 - Test with: `neo test`
+- See what was really sent: `neo phys dump 0` (lit LEDs, byte sum and hash of the encoded output buffer sent with the last show, first 8 LEDs in wire order)
 
 **Wrong colors?**
 - Check color order: `neo virt add 64 RGB` vs `neo virt add 64 GRB`

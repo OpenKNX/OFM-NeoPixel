@@ -1192,6 +1192,7 @@ neo <category> <action> [parameters]
 | `neo phys add <pin> <leds> [protocol]` | Add physical strip | `neo phys add 9 64 WS2812B` |
 | `neo phys del <index>` | Delete strip | `neo phys del 0` |
 | `neo phys list` | List strips | `neo phys list` |
+| `neo phys dump <i> [start] [count]` | Encoded output buffer, i.e. the bytes sent with the last show: LED count, bytes per LED, lit LEDs, byte sum, FNV-1a hash, age; then the bytes of up to 32 LEDs in wire order | `neo phys dump 0 0 8` |
 | `neo phys timings` | List all 11 timing modes + clone profiles | `neo phys timings` |
 | `neo phys timing <i>` | Show current timing mode for strip | `neo phys timing 0` |
 | `neo phys timing <i> <mode>` | Set timing mode | `neo phys timing 0 legacy` |

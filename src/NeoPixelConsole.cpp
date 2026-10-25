@@ -295,6 +295,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("add <gpio> <n> [type]", "1-Wire: ws2812b|sk6812 (default: ws2812b)");
         openknx.console.printHelpLine("add <clk> <n> apa102 <data>", "SPI: APA102 (CLK + DATA pins)");
         openknx.console.printHelpLine("del <i>", "Delete physical strip by ID");
+        openknx.console.printHelpLine("dump <i> [start] [count]", "Encoded output buffer (sent with the last show): lit/sum/hash + bytes per LED");
         openknx.console.printHelpLine("timings", "List all available timing modes + clone profiles");
         openknx.console.printHelpLine("timing <i>", "Show current timing mode for strip");
         openknx.console.printHelpLine("timing <i> <mode>", "Set timing (auto|legacy|slow5-20|fast5-25)");
@@ -2679,6 +2680,56 @@ bool NeoPixel::processPhysCommand(const std::string& args)
     else if (args.compare(0, 7, "config ") == 0)
     {
         return processPhysConfigCommand(args.substr(7));
+    }
+    else if (args.compare(0, 5, "dump ") == 0)
+    {
+        // neo phys dump <i> [start] [count]: encoded driver buffer = bytes sent with the last show()
+        if (!_initialized || !_manager)
+        {
+            openknx.logger.log("ERROR: NeoPixel module not initialized!");
+            return true;
+        }
+        int id = -1, start = 0, count = 8;
+        ConsoleArgStream dumpArgs(args.c_str() + 5);
+        dumpArgs >> id >> start >> count;
+        PhysicalStrip* strip = (id >= 0 && (uint32_t)id < _manager->getStripCount()) ? _manager->getStrip(id) : nullptr;
+        if (dumpArgs.count() < 1 || !strip)
+        {
+            openknx.logger.log("Usage: neo phys dump <i> [start] [count]   (count 1-32, default 8)");
+            return true;
+        }
+        const uint8_t* frame = strip->getBuffer();
+        const size_t size = frame ? strip->getBufferSize() : 0;
+        const uint16_t leds = strip->getLedCount();
+        const size_t bpl = leds ? size / leds : 0;
+        uint32_t hash = 2166136261u, sum = 0;
+        uint16_t lit = 0;
+        for (size_t i = 0; i < size; i++)
+        {
+            hash = (hash ^ frame[i]) * 16777619u;
+            sum += frame[i];
+        }
+        for (uint16_t l = 0; bpl && l < leds; l++)
+        {
+            for (size_t c = 0; c < bpl; c++)
+                if (frame[l * bpl + c]) { lit++; break; }
+        }
+        openknx.logger.logWithValues("Strip %d: leds=%u bpl=%u bytes=%u lit=%u sum=%lu hash=%08lX lastShow=%lums ago", id, (unsigned)leds,
+                                     (unsigned)bpl, (unsigned)size, (unsigned)lit, (unsigned long)sum, (unsigned long)hash,
+                                     (unsigned long)(millis() - strip->getLastShowMs()));
+        if (start < 0) start = 0;
+        if (start > (int)leds) start = leds;   // keeps start + count far from int overflow
+        if (count < 1) count = 1;
+        if (count > 32) count = 32;
+        for (int l = start; bpl && l < start + count && l < (int)leds; l++)
+        {
+            char line[48];
+            int n = snprintf(line, sizeof(line), "LED %3d:", l);
+            for (size_t c = 0; c < bpl && c < 5 && n > 0 && n < (int)sizeof(line) - 4; c++)
+                n += snprintf(line + n, sizeof(line) - n, " %02X", frame[l * bpl + c]);
+            openknx.logger.log(line);
+        }
+        return true;
     }
     else
     {
