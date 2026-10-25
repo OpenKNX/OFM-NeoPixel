@@ -522,6 +522,10 @@ bool VirtualStrip::syncToPhysical()
             continue;
         }
 
+        // A strip whose driver did not start (e.g. no free RMT channel) never takes a pixel;
+        // counting it as a failed write blocked the frame of every other strip.
+        if (!pstrip->isInitialized()) continue;
+
         // Drivers reject buffer updates during an asynchronous frame, so a busy strip is
         // skipped - never waited for. This runs on the render path, where a wait costs a
         // whole frame time; the frame stays dirty below and the next sync retries it.
