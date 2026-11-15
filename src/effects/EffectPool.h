@@ -9,9 +9,10 @@
 // ============================================================================
 //  NEOPIXEL_DISABLE_2D - drop every 2D effect at once
 //
-//  The 2D effects only render on a matrix topology. On a device that drives plain
-//  strips they are dead weight, so one flag stands in for the thirteen individual
-//  ones below. Setting a single effect's flag still works on its own.
+//  The 2D effects only render on a matrix topology (getCapabilities() without DIM_1D,
+//  scroll text included). On a device that drives plain strips they are dead weight, so
+//  one flag stands in for the fourteen individual ones below. Setting a single effect's
+//  flag still works on its own.
 // ============================================================================
 #ifdef NEOPIXEL_DISABLE_2D
     #ifndef NEOPIXEL_DISABLE_AURORA2D
@@ -37,6 +38,9 @@
     #endif
     #ifndef NEOPIXEL_DISABLE_PLASMANEBULA2D
         #define NEOPIXEL_DISABLE_PLASMANEBULA2D
+    #endif
+    #ifndef NEOPIXEL_DISABLE_SCROLLTEXT
+        #define NEOPIXEL_DISABLE_SCROLLTEXT
     #endif
     #ifndef NEOPIXEL_DISABLE_SNAKE2D
         #define NEOPIXEL_DISABLE_SNAKE2D
