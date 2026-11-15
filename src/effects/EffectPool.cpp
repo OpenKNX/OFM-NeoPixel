@@ -303,6 +303,7 @@ Effect* EffectPool::getSolid()
     return s_solid;
 }
 
+#ifndef NEOPIXEL_DISABLE_WIPE
 /**
  * @brief Get Wipe Effect singleton
  * @return Effect*
@@ -315,7 +316,9 @@ Effect* EffectPool::getWipe()
     }
     return s_wipe;
 }
+#endif
 
+#ifndef NEOPIXEL_DISABLE_RAINBOW
 /**
  * @brief Get Rainbow Effect singleton (FastLED port)
  * @return Effect*
@@ -328,7 +331,9 @@ Effect* EffectPool::getRainbow()
     }
     return s_rainbow;
 }
+#endif
 
+#ifndef NEOPIXEL_DISABLE_PRIDE
 /**
  * @brief Get Pride2015 Effect singleton (FastLED port)
  * @return Effect*
@@ -341,7 +346,9 @@ Effect* EffectPool::getPride()
     }
     return s_pride;
 }
+#endif
 
+#ifndef NEOPIXEL_DISABLE_JUGGLE
 /**
  * @brief Get Juggle Effect singleton (FastLED port)
  * @return Effect*
@@ -354,7 +361,9 @@ Effect* EffectPool::getJuggle()
     }
     return s_juggle;
 }
+#endif
 
+#ifndef NEOPIXEL_DISABLE_BPM
 /**
  * @brief Get BPM Effect singleton (FastLED port)
  * @return Effect*
@@ -367,7 +376,9 @@ Effect* EffectPool::getBPM()
     }
     return s_bpm;
 }
+#endif
 
+#ifndef NEOPIXEL_DISABLE_CYLON
 /**
  * @brief Get Cylon Effect singleton (FastLED port)
  * @return Effect*
@@ -380,10 +391,9 @@ Effect* EffectPool::getCylon()
     }
     return s_cylon;
 }
+#endif
 
-#ifndef NEOPIXEL_MINIMAL_EFFECTS
-// Advanced effects - excluded when NEOPIXEL_MINIMAL_EFFECTS is defined
-
+#ifndef NEOPIXEL_DISABLE_RGBWTEST
 /**
  * @brief Get SK6812 Test Effect singleton
  * @return Effect*
@@ -396,7 +406,12 @@ Effect* EffectPool::getRGBWTest()
     }
     return s_rgbwTest;
 }
+#endif
 
+#ifndef NEOPIXEL_MINIMAL_EFFECTS
+// Advanced effects - excluded when NEOPIXEL_MINIMAL_EFFECTS is defined
+
+#ifndef NEOPIXEL_DISABLE_FIRE
 /**
  * @brief Get Fire Effect singleton (FastLED Fire2012 port)
  * @return Effect*
@@ -409,7 +424,9 @@ Effect* EffectPool::getFire()
     }
     return s_fire;
 }
+#endif
 
+#ifndef NEOPIXEL_DISABLE_THEATERCHASE
 /**
  * @brief Get Theater Chase Effect singleton
  * @return Effect*
@@ -422,7 +439,9 @@ Effect* EffectPool::getTheaterChase()
     }
     return s_theaterChase;
 }
+#endif
 
+#ifndef NEOPIXEL_DISABLE_SPARKLE
 /**
  * @brief Get Sparkle Effect singleton
  * @return Effect*
@@ -435,7 +454,9 @@ Effect* EffectPool::getSparkle()
     }
     return s_sparkle;
 }
+#endif
 
+#ifndef NEOPIXEL_DISABLE_BREATHING
 /**
  * @brief Get Breathing Effect singleton
  * @return Effect*
@@ -448,7 +469,9 @@ Effect* EffectPool::getBreathing()
     }
     return s_breathing;
 }
+#endif
 
+#ifndef NEOPIXEL_DISABLE_STROBE
 /**
  * @brief Get Strobe Effect singleton
  * @return Effect*
@@ -461,7 +484,9 @@ Effect* EffectPool::getStrobe()
     }
     return s_strobe;
 }
+#endif
 
+#ifndef NEOPIXEL_DISABLE_COMET
 /**
  * @brief Get Comet Effect singleton
  * @return Effect*
@@ -474,6 +499,7 @@ Effect* EffectPool::getComet()
     }
     return s_comet;
 }
+#endif
 
     #ifndef NEOPIXEL_DISABLE_NOISE
 Effect* EffectPool::getNoise()
