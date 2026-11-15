@@ -146,7 +146,7 @@ No additional options. Color and brightness are set via the general segment sett
 
 | Option | Meaning |
 |--------|---------|
-| Speed | Animation speed. |
+| Speed | Simulation steps: 128 = one step every 50 ms, 255 twice as fast, 64 half as fast; independent of the frame rate. |
 | Cooling rate | How fast the fire cools down (higher = shorter flames). |
 | Spark rate | How often new embers appear (higher = livelier fire). |
 | Reverse direction | Switch: makes the fire burn downward instead of upward. |

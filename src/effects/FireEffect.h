@@ -29,6 +29,7 @@
  *  2) The heat from each cell drifts 'up' and diffuses a little
  *  3) Sometimes randomly new 'sparks' of heat are added at the bottom
  *  4) The heat from each cell is rendered as a color into the LEDs
+ * Steps 1-3 run at the pace of the speed parameter (takeSteps), step 4 every frame.
  */
 class FireEffect : public Effect
 {
@@ -48,6 +49,30 @@ class FireEffect : public Effect
     uint8_t _heat2D[MAX_DIM_2D][MAX_DIM_2D];
     uint8_t _lastWidth2D = 0;
     uint8_t _lastHeight2D = 0;
+
+    // Simulation pace: one step every 6400 / speed ms (speed 128 = 50 ms = one step per frame at the default 20 FPS)
+    static const uint16_t STEP_MIN_MS = 10;
+    static const uint16_t STEP_MAX_MS = 400;
+    static const uint8_t MAX_STEPS_PER_FRAME = 4;
+    uint16_t _stepAccuMs = 0;
+
+    /** @brief Simulation steps due in this frame from speed and frame time; a backlog beyond MAX_STEPS_PER_FRAME is dropped */
+    uint8_t takeSteps(uint8_t speed, uint32_t deltaTime)
+    {
+        uint32_t interval = speed ? 6400u / speed : STEP_MAX_MS;
+        if (interval < STEP_MIN_MS) interval = STEP_MIN_MS;
+        if (interval > STEP_MAX_MS) interval = STEP_MAX_MS;
+        uint32_t accu = (uint32_t)_stepAccuMs + deltaTime;
+        uint8_t steps = 0;
+        while (accu >= interval && steps < MAX_STEPS_PER_FRAME)
+        {
+            accu -= interval;
+            steps++;
+        }
+        if (accu >= interval) accu = 0;
+        _stepAccuMs = (uint16_t)accu;
+        return steps;
+    }
 
   public:
     // Members are per-segment state: a second segment gets its own instance
@@ -76,7 +101,7 @@ class FireEffect : public Effect
         const uint8_t intensity = config.intensity;    // Master brightness scaling (0..255)
         const uint8_t option1 = config.option1;        // Cooling control (0=default)
         const uint8_t option2 = config.option2;        // Sparking probability (0=default)
-        const bool reverseDir = (config.reverse != 0); // Reverse direction
+        const bool reverseDir = config.feature1;       // ReverseDirection (parameter 3)
         const bool blueMode = config.feature2;         // Blue fire mode
         const uint16_t length = segment->getLength();
         if (length == 0) return;
@@ -103,30 +128,35 @@ class FireEffect : public Effect
         const uint8_t sparkIn = (option2 == 0) ? 120 : option2;
         _sparking = 50 + (sparkIn * 150) / 255;
 
-        // Reverse direction from dedicated config.reverse flag
+        // Reverse direction from parameter 3 (feature1)
         _reverseDirection = reverseDir;
 
-        // Step 1. Cool down every cell a little
-        for (uint16_t i = 0; i < _numCells; i++)
+        // Steps 1-3 as often as the speed asks for in this frame (0 = the heat field stays)
+        const uint8_t steps = takeSteps(config.speed, deltaTime);
+        for (uint8_t step = 0; step < steps; step++)
         {
-            _heat[i] = FastLEDMath::qsub8(_heat[i],
-                                          FastLEDMath::random8(0, ((_cooling * 10) / _numCells) + 2));
-        }
-
-        // Step 2. Heat from each cell drifts 'up' and diffuses a little
-        for (int k = _numCells - 1; k >= 2; k--)
-        {
-            _heat[k] = (_heat[k - 1] + _heat[k - 2] + _heat[k - 2]) / 3;
-        }
-
-        // Step 3. Randomly ignite new 'sparks' of heat near the bottom
-        if (FastLEDMath::random8() < _sparking)
-        {
-            int y = FastLEDMath::random8(7);
-            if (y < _numCells)
+            // Step 1. Cool down every cell a little
+            for (uint16_t i = 0; i < _numCells; i++)
             {
-                _heat[y] = FastLEDMath::qadd8(_heat[y],
-                                              FastLEDMath::random8(160, 255));
+                _heat[i] = FastLEDMath::qsub8(_heat[i],
+                                              FastLEDMath::random8(0, ((_cooling * 10) / _numCells) + 2));
+            }
+
+            // Step 2. Heat from each cell drifts 'up' and diffuses a little
+            for (int k = _numCells - 1; k >= 2; k--)
+            {
+                _heat[k] = (_heat[k - 1] + _heat[k - 2] + _heat[k - 2]) / 3;
+            }
+
+            // Step 3. Randomly ignite new 'sparks' of heat near the bottom
+            if (FastLEDMath::random8() < _sparking)
+            {
+                int y = FastLEDMath::random8(7);
+                if (y < _numCells)
+                {
+                    _heat[y] = FastLEDMath::qadd8(_heat[y],
+                                                  FastLEDMath::random8(160, 255));
+                }
             }
         }
 
@@ -212,7 +242,7 @@ class FireEffect : public Effect
     {
         switch (index)
         {
-            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit (ungenutzt)", "Speed (unused)");
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed");
             case 1: return PARAM_LABEL_DE_EN("Abkühlung", "Cooling");
             case 2: return PARAM_LABEL_DE_EN("Funkenrate", "Sparking");
             case 3: return PARAM_LABEL_DE_EN("Richtung umkehren", "Reverse direction");
@@ -225,7 +255,7 @@ class FireEffect : public Effect
     {
         switch (index)
         {
-            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Animationsgeschwindigkeit (ungenutzt)", "Speed: Animation speed (unused)");
+            case 0: return PARAM_DESC_DE_EN("Geschwindigkeit: Simulationsschritte (128 = ein Schritt alle 50 ms, 255 doppelt so schnell, 64 halb so schnell)", "Speed: simulation steps (128 = one step every 50 ms, 255 twice as fast, 64 half as fast)");
             case 1: return PARAM_DESC_DE_EN("Kühlrate: Wie schnell das Feuer abkühlt (20-100)", "Cooling rate: How fast the fire cools down (20-100)");
             case 2: return PARAM_DESC_DE_EN("Funkenrate: Wie oft neue Funken entstehen (50-200)", "Spark rate: How often new sparks appear (50-200)");
             case 3: return PARAM_DESC_DE_EN("Richtung umkehren: Feuer nach unten", "Reverse direction: Fire downwards");
@@ -251,7 +281,7 @@ class FireEffect : public Effect
     {
         switch (index)
         {
-            case 0: return 128; // Speed (unused dummy)
+            case 0: return 128; // Speed: one step every 50 ms
             case 1: return 90;  // Cooling (maps to ~55 in algorithm)
             case 2: return 120; // Sparking (maps to ~120 in algorithm)
             case 3: return 0;   // ReverseDirection off
@@ -292,7 +322,7 @@ class FireEffect : public Effect
         auto& config = segment->getConfig();
         switch (index)
         {
-            case 0: return config.speed;    // Speed (unused)
+            case 0: return config.speed;    // Speed
             case 1: return config.option1;  // Cooling
             case 2: return config.option2;  // Sparking
             case 3: return config.feature1; // ReverseDirection
@@ -307,7 +337,7 @@ class FireEffect : public Effect
         auto& config = segment->getConfig();
         switch (index)
         {
-            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed (unused)
+            case 0: config.speed = static_cast<uint8_t>(value); break;   // Speed
             case 1: config.option1 = static_cast<uint8_t>(value); break; // Cooling (20-100)
             case 2: config.option2 = static_cast<uint8_t>(value); break; // Sparking (50-200)
             case 3: config.feature1 = static_cast<bool>(value); break;   // ReverseDirection
@@ -341,12 +371,15 @@ class FireEffect : public Effect
         uint8_t coolingIn = cfg.option1 ? cfg.option1 : 90;
         uint8_t sparkingIn = cfg.option2 ? cfg.option2 : 120;
         bool blue = cfg.feature2;
-        bool reverse = (cfg.reverse != 0);
+        bool reverse = cfg.feature1; // ReverseDirection (parameter 3)
         uint8_t intensity = cfg.intensity;
+
+        const uint8_t steps = takeSteps(cfg.speed, deltaTime);
+        for (uint8_t step = 0; step < steps; step++)
+            for (uint8_t x = 0; x < w; x++) simulateColumn2D(x, h, coolingIn, sparkingIn);
 
         for (uint8_t x = 0; x < w; x++)
         {
-            simulateColumn2D(x, h, coolingIn, sparkingIn);
             for (uint8_t y = 0; y < h; y++)
             {
                 uint8_t row = reverse ? y : (h - 1 - y);
