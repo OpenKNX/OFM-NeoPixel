@@ -85,46 +85,21 @@ bekommen. Erst Konzept, dann bewerten ob Aufwand/Nutzen passt.
 
 ## 2D-Effekt-Parität (WLED-inspiriert)  ·  Prio: niedrig · Aufwand: pro Effekt klein-mittel
 
-Vorhanden (12, teils einzigartig ggü. WLED): Clock/Uhr, Cylon, Fire/Feuer, Game of Life,
-Matrix, Noise, PlasmaNebula, Snake, StarfieldWarp, Tetris (mit KI), TRON, UFO-Swarm.
+Vorhanden (17 2D-fähige, teils einzigartig ggü. WLED): Uhr 2D (20), Snake 2D (21), Matrix 2D (22), Tetris 2D mit KI
+(23), TRON (24), Starfield Warp (25), Plasma Nebula (26), UFO Swarm (27), Game of Life 2D (28), DNA 2D (29),
+Aurora 2D (30), Lissajous 2D (31), Metaballs 2D (32), Laufschrift (19, nur 2D), dazu Fire, Noise und Cylon, die in 1D und 2D rendern.
 
 Kandidaten als **eigene, saubere Neuimplementierung** (Konzepte von WLED als Referenz, kein
 Code-Copy — Lizenz sauber halten; passt zudem besser auf unser Segment/Topologie-Modell):
-DNA/DNA-Spiral, Polar Lights/Aurora, Lissajous, Octopus/Metaballs (organische
-Blobs), Drift/Colored Bursts. Audio-reaktive 2D (GEQ/Spektrum) hängt am Audio-TODO oben.
+Drift/Colored Bursts. Audio-reaktive 2D (GEQ/Spektrum) hängt am Audio-TODO oben.
 
-**Pilot „Game of Life 2D" erledigt** (Effekt-ID 41, append-only; B3/S23 toroidal, Auto-Re-Seed
-bei Aussterben/Stillstand, 3 Farbmodi; Generator/Producer/Compile grün). Bestätigt damit das
-Muster: 1 Effekt = `*2DEffect.h` (am Snake-Effekt spiegeln) + EffectPool-Append +
-`Build-EffectParameters.ps1` (regeneriert Mapping/Param-XML/Help, hängt Lock an). Wichtig:
-Min/Max je Index **explizit** als `case` angeben (Generator parst keine `default:`-Fallthroughs);
-der Generator **entdeckt Effekte durch Scannen von `src/effects/*2DEffect.h`** (nicht über EffectPool).
-
-### ⛔ BLOCKER: Effekt-Parameter-ID-Raum ist voll (Layout-Entscheidung nötig)
-
-Die Effekt-Union-Param-IDs (`UP-…NNN`) laufen sequentiell und enden nach GoL bei **239**. IDs
-**240–254 sind bereits von Kern-Segment-Parametern belegt** (HCLMode, SegmentTopology,
-MatrixWidth/Height/Depth, SyncMode, VirtualOffset, StartupEM, SceneCount …). **GoL hat die letzten
-4 freien Slots (236–239) exakt gefüllt** → jeder weitere Effekt kollidiert („Duplicate Parameter
-240…"). Der Producer bricht ab.
-
-**Damit ist GoL der letzte Effekt, der ohne Layout-Änderung passte.** Die 4 nächsten Entwürfe
-(DNA, Aurora, Lissajous, Metaballs — fertig in `doc/pending-2d-effects/`, am GoL-Muster gespiegelt,
-aber **noch nicht compile-verifiziert**) brauchen zuerst eine **Erweiterung des Param-ID-Raums**:
-
-- Option A: Effekt-Union-Param-IDs auf eine **freie ID-Basis oberhalb** der Segment/Scene/Cue/Relais-
-  Params verschieben (Generator-Anpassung). Wenn die **Flash-Offsets gleich bleiben**, evtl. ohne
-  Reprogramm — **prüfen!**
-- Option B: Segment-Param-IDs nach oben schieben (Layout-Change → ApplicationVersion-Bump + Reprogramm).
-
-→ **Bewusste Layout-Entscheidung des Eigentümers** (Append-only-Constraint). Erst entscheiden,
-dann die 4 Entwürfe aus `doc/pending-2d-effects/` zurück nach `src/effects/` + EffectPool-Append.
-
-**✅ UPDATE (2026-06): GELÖST + 4 Effekte drin.** Effekt-Param-ID-Lane auf **600** (Marker in
-`Segment.templ.xml`), Segment-**Union 584→704 B** (`SizeInBit=5632`) für Offset-/Spillover-Budget.
-DNA(42)/Aurora(43)/Lissajous(44)/Metaballs(45) registriert, Producer + Compile grün, Lane-Reserve
-für ~50+ Effekte. Append-only ab hier (IDs nie verschieben). Achtung: Union-Bump = Layout-Migration
-(Offsets wandern → ETS-Re-Import; per Producer-Regel kompatibel, RefIds/KO-Nummern bleiben).
+Muster für einen neuen 2D-Effekt: `*2DEffect.h` (am Snake-Effekt spiegeln), Getter mit eigenem
+`NEOPIXEL_DISABLE_<X>`-Guard, Eintrag in den `#ifdef NEOPIXEL_DISABLE_2D`-Block von `EffectPool.h` und Anhängen
+am Ende von `EffectPool::getEffectByIndex()` (Schritte: `doc/Effects-Porting.md`, Step 4); danach in der OAM
+`Build-EffectParameters.ps1` (hängt die Nummer an `src/EffectIds.lock` an, erzeugt Parameter, Mapping und Hilfe).
+Die 2D-Zugehörigkeit liest der Generator aus den Guards von `getEffectByIndex()` und dem `NEOPIXEL_DISABLE_2D`-Block
+von `EffectPool.h`. Min/Max je Index **explizit** als `case` angeben (der Generator parst keine
+`default:`-Fallthroughs).
 
 ## Formula2D — Per-Pixel-Formel-Effekt („Shader-Slot")  ·  Prio: Vision · Aufwand: mittel-groß
 
@@ -138,11 +113,11 @@ für ~50+ Effekte. Append-only ab hier (IDs nie verschieben). Achtung: Union-Bum
   vendored in `OFM-LogicModule/src/tinyexpr.{c,h}`; NICHT selbst parsen!). `te_compile` **einmal** bei
   Formel-Änderung → `te_eval` pro Pixel; Vars `x,y,t,w,h` binden (statt e1/e2/a). Eingabe: ETS-Langtext
   (~99 Zeichen, `\n`-Trick wie LogicModul). Reiner Ausdruck → sandboxed; NaN/Fehler → Pixel aus.
-- **⚠️ Lib-Hürde:** TinyExpr ist im LogicModul vendored. Eine **zweite Kopie in OFM-NeoPixel = doppelte
+- **Lib-Hürde:** TinyExpr ist im LogicModul vendored. Eine **zweite Kopie in OFM-NeoPixel = doppelte
 Symbole (Link-Fehler)**, da beide Module in dieselbe Firmware linken; direkter Zugriff aufs LogicModul
   verletzt OAM/OFM-Trennung. → **Sauber: TinyExpr in eine gemeinsame Lib auslagern** (LogicModul + NeoPixel
   teilen sich eine Kopie). **Mit Waldemar/OpenKNX abstimmen** (anti-duplizierung, kommt allen zugute).
-- **⚠️ RP-Performance (harte Vorgabe):** `double`/Pixel ohne HW-double → Caps (Matrixgröße, FPS, nur
+- **RP-Performance (harte Vorgabe):** `double`/Pixel ohne HW-double → Caps (Matrixgröße, FPS, nur
   Zeitschritt rechnen), evtl. Fixed-Point-Fallback. ESP32 unkritisch.
 
 ## Wert-gesteuerte Effekte (Variante B) — „Pegel/Wert"-Effekt  ·  Prio: mittel · GEPARKT
