@@ -211,8 +211,8 @@ void EffektManagerController::applyCue(const EffektCue& cue, Segment* segment)
     _rt.cueBri = cue.brightness;
     segment->setBrightness((uint8_t)(((uint16_t)segment->getMasterBrightness() * (uint16_t)cue.brightness + 127) / 255));
 
-    // Set effect parameters
-    Effect* effect = EffectPool::getEffectByIndex(cue.effectId);
+    // Set effect parameters (a compiled-out effect runs Solid, a number out of range clears the segment)
+    Effect* effect = EffectPool::getEffectOrSolid(cue.effectId);
     if (effect)
     {
         uint8_t paramCount = effect->getParameterCount();

@@ -1097,7 +1097,8 @@ void NeoPixel::printEmCueTable(int onlySeg)
         };
         auto printCueRow = [&](int col1, const char* aMark, uint8_t cueNum, const EffektCue& cue) {
             Effect* effect = EffectPool::getEffectByIndex(cue.effectId);
-            const char* effectName = effect ? effect->getName() : "unknown";
+            // a compiled-out effect runs Solid (EffectPool::getEffectOrSolid)
+            const char* effectName = effect ? effect->getName() : (cue.effectId < EffectPool::getEffectCount() ? "Solid (not built)" : "unknown");
             showHeader();
             // Divider line whenever the ID column changes (segment→segment / EM→EM).
             if (!firstRow && col1 != lastCol1) openknx.logger.log(kRowSep);
@@ -4042,7 +4043,13 @@ bool NeoPixel::processEffectCommand(const std::string& args)
         {
             // Numeric ID
             effId = (int)parsedId;
-            effect = EffectPool::getEffectByIndex(effId);
+            // a compiled-out effect number runs Solid like every other path; out of range stays "not found"
+            if (effId >= 0 && effId <= 255)
+            {
+                effect = EffectPool::getEffectOrSolid((uint8_t)effId);
+                if (effect && !EffectPool::getEffectByIndex((uint8_t)effId))
+                    openknx.logger.logWithValues("Effect %d is not built, Solid is used", effId);
+            }
         }
         else
         {

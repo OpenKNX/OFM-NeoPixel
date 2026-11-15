@@ -155,6 +155,8 @@ class EffectPool
     // Dynamic effect registry access
     static uint8_t getEffectCount();
     static Effect* getEffectByIndex(uint8_t index);
+    // effect with the stable number index; Solid for a compiled-out effect, nullptr for a number out of range
+    static Effect* getEffectOrSolid(uint8_t index);
 
   private:
     EffectPool() = delete;

@@ -16,7 +16,8 @@
 //     - index 2 → getRainbow()      → ETS XML: <Enumeration Value="2" Text="Rainbow"/>
 //
 // When KNX sends "Effect ID = 23", OAM calls getEffectByIndex(23).
-// The XML ID must match the C++ registration index exactly!
+// The XML ID must match the C++ registration index exactly! A disabled effect keeps its number
+// (getEffectByIndex() returns nullptr for it), so disabling one never moves another.
 //
 // !!!  DO NOT REORDER getEffectByIndex() without regenerating XML!
 // !!! Always run Build-EffectParameters.ps1 after changing effect order!
@@ -679,230 +680,176 @@ Effect* EffectPool::getMetaballs2D()
 #endif
 // ============================================================================
 
+// number of effect numbers, set by getEffectByIndex() when it walks past the last one
+static uint8_t s_effectNumbers = 0;
+
 /**
- * @brief Get total number of available effects
- * @return Number of effects in pool
+ * @brief Number of effect numbers (0..n-1), compiled-out effects included
+ * @note getEffectByIndex() returns nullptr for a compiled-out effect: loops over all numbers skip it
  */
 uint8_t EffectPool::getEffectCount()
 {
-    uint8_t count = 1; // Solid always included
-
-#ifndef NEOPIXEL_DISABLE_WIPE
-    count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_RAINBOW
-    count++; // Rainbow (incl. Rainbow Cycle mode)
-#endif
-#ifndef NEOPIXEL_DISABLE_PRIDE
-    count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_JUGGLE
-    count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_BPM
-    count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_CYLON
-    count++;
-#endif
-#ifndef NEOPIXEL_DISABLE_RGBWTEST
-    count++;
-#endif
-
-#ifndef NEOPIXEL_MINIMAL_EFFECTS
-    #ifndef NEOPIXEL_DISABLE_FIRE
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_THEATERCHASE
-    count++; // TheaterChase (incl. Rainbow mode)
-    #endif
-    #ifndef NEOPIXEL_DISABLE_SPARKLE
-    count++; // Sparkle (incl. Twinkle/Confetti modes)
-    #endif
-    #ifndef NEOPIXEL_DISABLE_BREATHING
-    count++; // Breathing (incl. Pulse waveforms)
-    #endif
-    #ifndef NEOPIXEL_DISABLE_STROBE
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_COMET
-    count++; // Comet (incl. Meteor/Sinelon modes)
-    #endif
-    #ifndef NEOPIXEL_DISABLE_NOISE
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_PALETTE
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_LIGHTNING
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_GRADIENT
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_CANDLE
-    count++; // Candle (incl. multi-zone)
-    #endif
-#endif // NEOPIXEL_MINIMAL_EFFECTS
-    // 2D effects
-    #ifndef NEOPIXEL_DISABLE_SCROLLTEXT
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_CLOCK2D
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_SNAKE2D
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_MATRIX2D
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_TETRIS2D
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_TRON2D
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_STARFIELDWARP2D
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_PLASMANEBULA2D
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_UFOSWARM2D
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_GAMEOFLIFE2D
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_DNA2D
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_AURORA2D
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_LISSAJOUS2D
-    count++;
-    #endif
-    #ifndef NEOPIXEL_DISABLE_METABALLS2D
-    count++;
-    #endif
-
-    return count;
+    (void)getEffectByIndex(UINT8_MAX); // walks every number and stores the count
+    return s_effectNumbers;
 }
 
 /**
- * @brief Get effect instance by index
- * @param index Logical effect index (0-based)
- * @return Effect instance or nullptr if invalid index
+ * @brief Effect for a stored effect number (cue, runtime command): a compiled-out effect runs Solid, as the ETS
+ *        mapping does; a number out of range gives nullptr
+ */
+Effect* EffectPool::getEffectOrSolid(uint8_t index)
+{
+    Effect* effect = getEffectByIndex(index);
+    if (!effect && index < getEffectCount()) effect = getSolid();
+    return effect;
+}
+
+/**
+ * @brief Effect with the stable effect number index
+ * @param index Effect number (ETS value, registration order below)
+ * @return Effect instance, nullptr when the effect is compiled out or the number is out of range
  */
 Effect* EffectPool::getEffectByIndex(uint8_t index)
 {
-    uint8_t currentIndex = 0;
+    // n = stable effect number: it also counts the compiled-out effects, so a disabled effect
+    // returns nullptr and moves no later number (ETS value, src/EffectIds.lock of the OAM)
+    uint8_t n = 0;
 
-    // Index 0: Solid (always included)
-    if (index == currentIndex++) return getSolid();
-
+    if (index == n) return getSolid(); // always included
+    n++;
 #ifndef NEOPIXEL_DISABLE_WIPE
-    if (index == currentIndex++) return getWipe();
+    if (index == n) return getWipe();
 #endif
+    n++;
 #ifndef NEOPIXEL_DISABLE_RAINBOW
-    if (index == currentIndex++) return getRainbow();
+    if (index == n) return getRainbow();
 #endif
+    n++;
 #ifndef NEOPIXEL_DISABLE_PRIDE
-    if (index == currentIndex++) return getPride();
+    if (index == n) return getPride();
 #endif
+    n++;
 #ifndef NEOPIXEL_DISABLE_JUGGLE
-    if (index == currentIndex++) return getJuggle();
+    if (index == n) return getJuggle();
 #endif
+    n++;
 #ifndef NEOPIXEL_DISABLE_BPM
-    if (index == currentIndex++) return getBPM();
+    if (index == n) return getBPM();
 #endif
+    n++;
 #ifndef NEOPIXEL_DISABLE_CYLON
-    if (index == currentIndex++) return getCylon();
+    if (index == n) return getCylon();
 #endif
+    n++;
 #ifndef NEOPIXEL_DISABLE_RGBWTEST
-    if (index == currentIndex++) return getRGBWTest();
+    if (index == n) return getRGBWTest();
 #endif
+    n++;
 
-#ifndef NEOPIXEL_MINIMAL_EFFECTS
-    #ifndef NEOPIXEL_DISABLE_FIRE
-    if (index == currentIndex++) return getFire();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_THEATERCHASE
-    if (index == currentIndex++) return getTheaterChase();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_SPARKLE
-    if (index == currentIndex++) return getSparkle();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_BREATHING
-    if (index == currentIndex++) return getBreathing();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_STROBE
-    if (index == currentIndex++) return getStrobe();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_COMET
-    if (index == currentIndex++) return getComet();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_NOISE
-    if (index == currentIndex++) return getNoise();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_PALETTE
-    if (index == currentIndex++) return getPalette();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_LIGHTNING
-    if (index == currentIndex++) return getLightning();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_GRADIENT
-    if (index == currentIndex++) return getGradient();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_CANDLE
-    if (index == currentIndex++) return getCandle();
-    #endif
-#endif // NEOPIXEL_MINIMAL_EFFECTS
+    // extended effects: also removed by NEOPIXEL_MINIMAL_EFFECTS
+#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_FIRE)
+    if (index == n) return getFire();
+#endif
+    n++;
+#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_THEATERCHASE)
+    if (index == n) return getTheaterChase();
+#endif
+    n++;
+#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_SPARKLE)
+    if (index == n) return getSparkle();
+#endif
+    n++;
+#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_BREATHING)
+    if (index == n) return getBreathing();
+#endif
+    n++;
+#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_STROBE)
+    if (index == n) return getStrobe();
+#endif
+    n++;
+#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_COMET)
+    if (index == n) return getComet();
+#endif
+    n++;
+#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_NOISE)
+    if (index == n) return getNoise();
+#endif
+    n++;
+#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_PALETTE)
+    if (index == n) return getPalette();
+#endif
+    n++;
+#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_LIGHTNING)
+    if (index == n) return getLightning();
+#endif
+    n++;
+#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_GRADIENT)
+    if (index == n) return getGradient();
+#endif
+    n++;
+#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_CANDLE)
+    if (index == n) return getCandle();
+#endif
+    n++;
+
     // 2D effects
-    #ifndef NEOPIXEL_DISABLE_SCROLLTEXT
-    if (index == currentIndex++) return getScrollText();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_CLOCK2D
-    if (index == currentIndex++) return getClock2D();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_SNAKE2D
-    if (index == currentIndex++) return getSnake2D();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_MATRIX2D
-    if (index == currentIndex++) return getMatrix2D();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_TETRIS2D
-    if (index == currentIndex++) return getTetris2D();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_TRON2D
-    if (index == currentIndex++) return getTron2D();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_STARFIELDWARP2D
-    if (index == currentIndex++) return getStarfieldWarp2D();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_PLASMANEBULA2D
-    if (index == currentIndex++) return getPlasmaNebula2D();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_UFOSWARM2D
-    if (index == currentIndex++) return getUfoSwarm2D();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_GAMEOFLIFE2D
-    if (index == currentIndex++) return getGameOfLife2D();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_DNA2D
-    if (index == currentIndex++) return getDNA2D();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_AURORA2D
-    if (index == currentIndex++) return getAurora2D();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_LISSAJOUS2D
-    if (index == currentIndex++) return getLissajous2D();
-    #endif
-    #ifndef NEOPIXEL_DISABLE_METABALLS2D
-    if (index == currentIndex++) return getMetaballs2D();
-    #endif
+#ifndef NEOPIXEL_DISABLE_SCROLLTEXT
+    if (index == n) return getScrollText();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_CLOCK2D
+    if (index == n) return getClock2D();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_SNAKE2D
+    if (index == n) return getSnake2D();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_MATRIX2D
+    if (index == n) return getMatrix2D();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_TETRIS2D
+    if (index == n) return getTetris2D();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_TRON2D
+    if (index == n) return getTron2D();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_STARFIELDWARP2D
+    if (index == n) return getStarfieldWarp2D();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_PLASMANEBULA2D
+    if (index == n) return getPlasmaNebula2D();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_UFOSWARM2D
+    if (index == n) return getUfoSwarm2D();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_GAMEOFLIFE2D
+    if (index == n) return getGameOfLife2D();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_DNA2D
+    if (index == n) return getDNA2D();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_AURORA2D
+    if (index == n) return getAurora2D();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_LISSAJOUS2D
+    if (index == n) return getLissajous2D();
+#endif
+    n++;
+#ifndef NEOPIXEL_DISABLE_METABALLS2D
+    if (index == n) return getMetaballs2D();
+#endif
+    n++;
 
-    return nullptr; // Index out of range
+    s_effectNumbers = n;
+    return nullptr; // number out of range
 }

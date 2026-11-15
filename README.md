@@ -1882,8 +1882,8 @@ public:
 // Built-in effects are pool instances accessed via EffectPool getters; segments keep
 // the runtime state (buffer effects: own instance when the pool instance renders another segment).
 namespace EffectPool {
-    Effect*  getEffectByIndex(uint8_t id); // id 0..32 (see `neo effects` for the full map)
-    uint8_t  getEffectCount();             // 33
+    Effect*  getEffectByIndex(uint8_t id); // stable id 0..32 (see `neo effects`); nullptr for an effect compiled out by NEOPIXEL_DISABLE_*
+    uint8_t  getEffectCount();             // 33: every id, compiled-out effects included
 
     // Per-effect getters also exist, e.g.:
     Effect* getSolid();    // ID 0
