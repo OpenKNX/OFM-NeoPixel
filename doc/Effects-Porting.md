@@ -324,32 +324,58 @@ void update(Segment* segment, uint32_t deltaTime) override {
 
 ---
 
-### Step 4: Add to Effect Pool
+### Step 4: Register the Effect in the Pool
 
-```cpp
-// src/effects/EffectPool.h
-#include "RainbowEffect.h"
+`src/effects/EffectPool.cpp` holds one lazily created instance per effect type. The **effect number** is the position
+of the effect in `EffectPool::getEffectByIndex()` and never changes: the OAM stores it in ETS parameters, KO values,
+scenes and cues. Example for a new effect `BlinkEffect` with the flag `NEOPIXEL_DISABLE_BLINK`:
 
-namespace EffectPool {
-    // Add singleton instance
-    extern RainbowEffect rainbowEffect;
-}
+1. **`EffectPool.h`:** declare the getter next to the others: `static Effect* getBlink();`. A 2D effect also gets its
+   flag in the `#ifdef NEOPIXEL_DISABLE_2D` block at the top of the header, so `NEOPIXEL_DISABLE_2D` removes it too.
+2. **`EffectPool.cpp`, include and instance**, each under the effect's own flag (an extended effect, removed by
+   `NEOPIXEL_MINIMAL_EFFECTS`, inside the `#ifndef NEOPIXEL_MINIMAL_EFFECTS` blocks):
 
-// src/effects/EffectPool.cpp
-namespace EffectPool {
-    RainbowEffect rainbowEffect;  // Define instance
-    
-    Effect* getEffect(uint8_t id) {
-        switch (id) {
-            case 0: return &solidEffect;
-            case 2: return &rainbowEffect;  // Add here
-            case 3: return &prideEffect;
-            // ...
-        }
-        return nullptr;
-    }
-}
-```
+   ```cpp
+   #ifndef NEOPIXEL_DISABLE_BLINK
+       #include "BlinkEffect.h"
+   #endif
+
+   #ifndef NEOPIXEL_DISABLE_BLINK
+   static BlinkEffect* s_blink = nullptr;
+   #endif
+   ```
+
+3. **Getter**, under the same flag (created on first use):
+
+   ```cpp
+   #ifndef NEOPIXEL_DISABLE_BLINK
+   Effect* EffectPool::getBlink()
+   {
+       if (!s_blink) s_blink = new BlinkEffect();
+       return s_blink;
+   }
+   #endif
+   ```
+
+4. **Registration: append at the end of `getEffectByIndex()`**, directly before `s_effectNumbers = n;`:
+
+   ```cpp
+   #ifndef NEOPIXEL_DISABLE_BLINK
+       if (index == n) return getBlink();
+   #endif
+       n++;
+   ```
+
+   - `n++` stays outside the guard: every number counts, also a compiled-out one, so no later number moves.
+   - Never insert in the middle, reorder or remove an entry. To retire an effect, keep its entry and leave it out with
+     its flag; its number then runs Solid (`EffectPool::getEffectOrSolid()`).
+   - Extended effect: `#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_BLINK)`. The OAM generator
+     reads these guards; only `#ifndef <flag>` or `!defined(...)` joined by `&&` is supported, and every effect except
+     Solid needs exactly one own `NEOPIXEL_DISABLE_<X>` flag.
+
+5. **OAM-NeoPixel:** run `scripts/Build-EffectParameters.ps1`. It appends the effect to `src/EffectIds.lock` with the
+   next number, writes the ETS parameters, the mapping headers and the help files, and stops when an effect number
+   moved or an effect was removed (OAM `doc/Effect-Flags.md`).
 
 ---
 
@@ -361,7 +387,7 @@ neo phys add 9 64
 neo virt add 64
 neo virt attach 0 0
 neo seg add 0 0 63
-neo effect 0 2          // Rainbow (ID 2)
+neo effect set 0 33     // the new effect (next free number; neo effects lists all)
 neo brightness 0 255    // Full brightness
 neo auto on
 ```

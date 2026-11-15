@@ -416,47 +416,10 @@ void update(Segment* segment, uint32_t deltaTime) override {
 
 ---
 
-### Step 4: Add to Effect Pool
+### Step 4 and 5: Register and Test the Effect
 
-```cpp
-// src/effects/EffectPool.h
-#include "RainbowEffect.h"
-
-namespace EffectPool {
-    // Add singleton instance
-    extern RainbowEffect rainbowEffect;
-}
-
-// src/effects/EffectPool.cpp
-namespace EffectPool {
-    RainbowEffect rainbowEffect;  // Define instance
-    
-    Effect* getEffect(uint8_t id) {
-        switch (id) {
-            case 0: return &solidEffect;
-            case 1: return &rainbowEffect;  // Add here
-            case 2: return &prideEffect;
-            // ...
-        }
-        return nullptr;
-    }
-}
-```
-
----
-
-### Step 5: Test Effect
-
-```cpp
-// Console commands
-neo phys add 9 64
-neo virt add 64
-neo virt attach 0 0
-neo seg add 0 0 63
-neo effect 0 1          // Rainbow (ID 1)
-neo brightness 0 255    // Full brightness
-neo auto on
-```
+The current steps (getter, guard, append-only registration in `getEffectByIndex()`, `src/EffectIds.lock` in the OAM,
+console test) are in [doc/Effects-Porting.md, Step 4](../../doc/Effects-Porting.md#step-4-register-the-effect-in-the-pool).
 
 ---
 

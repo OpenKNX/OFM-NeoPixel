@@ -60,7 +60,8 @@ Bounds: Ein stale/zu großer Cue-Index wird auf 0 zurückgesetzt (`activeCueIdx 
 ## Cue anwenden (`applyCue`)
 1. Primärfarbe (RGBW) setzen.
 2. Helligkeit setzen.
-3. Effekt per Effekt-ID auflösen (`EffectPool::getEffectByIndex`, null-geprüft); unbekannte/0-ID
+3. Effekt per Effekt-ID auflösen (`EffectPool::getEffectOrSolid`): ID 0 ist Solid; ein Effekt, den der Build
+   weglässt (`NEOPIXEL_DISABLE_<X>`), läuft als Solid; eine ID außerhalb der Effektliste (`>= getEffectCount()`)
    → Effekt löschen + Segment leeren.
 4. Effekt-Parameter aus den Cue-Slots schreiben (begrenzt auf `getParameterCount()` und
    `EM_PARAM_COUNT`); jeder Wert wird auf Min/Max geklemmt, Unter-Min fällt auf den Effekt-Default.

@@ -30,7 +30,7 @@ A high-performance, hardware-optimized LED control library for addressable RGB/R
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
   - [System Overview](#system-overview)
-  - [PhysicalStripConfig Architecture](#physicalstripconfig-architecture)
+  - [PhysicalStripConfig Architecture](#physicalstripconfig-architecture-new)
   - [Data Flow with Global Power Management](#data-flow-with-global-power-management)
   - [Memory Layout](#memory-layout)
   - [ColorOrder Architecture](#colororder-architecture)
@@ -56,7 +56,7 @@ A high-performance, hardware-optimized LED control library for addressable RGB/R
 - [Performance](#performance)
 - [2D / 3D Matrix Support](#2d--3d-matrix-support)
 - [Effektmanager (Cue Sequencer)](#effektmanager-cue-sequencer)
-- [Effektkette — Distributed Rendering](#effektkette--distributed-rendering)
+- [Effektkette (Distributed Rendering)](#effektkette-distributed-rendering)
 - [Power Management & Current Limiting](#power-management--current-limiting)
   - [How It Works](#how-it-works)
   - [LED Current Profiles](#led-current-profiles)
@@ -1883,6 +1883,7 @@ public:
 // the runtime state (buffer effects: own instance when the pool instance renders another segment).
 namespace EffectPool {
     Effect*  getEffectByIndex(uint8_t id); // stable id 0..32 (see `neo effects`); nullptr for an effect compiled out by NEOPIXEL_DISABLE_*
+    Effect*  getEffectOrSolid(uint8_t id); // as getEffectByIndex, but Solid for a compiled-out effect; nullptr only for an id >= getEffectCount()
     uint8_t  getEffectCount();             // 33: every id, compiled-out effects included
 
     // Per-effect getters also exist, e.g.:
@@ -1917,7 +1918,7 @@ void setup() {
     
     // Create segment covering all LEDs
     auto segment = neoPixelModule.addSegment(0, 0, 63);
-    segment->setEffect(1);  // Rainbow effect
+    segment->setEffect(EffectPool::getEffectOrSolid(2));  // Rainbow (effect number 2; Solid if compiled out)
     segment->setBrightness(128);
     
     // Enable auto-update
@@ -1956,9 +1957,9 @@ void setup() {
     auto seg2 = neoPixelModule.addSegment(0, 100, 163); // Strip 2
     auto seg3 = neoPixelModule.addSegment(0, 164, 171); // Strip 3
     
-    seg1->setEffect(1);  // Rainbow
-    seg2->setEffect(6);  // Cylon
-    seg3->setEffect(0);  // Solid white
+    seg1->setEffect(EffectPool::getEffectOrSolid(2));  // Rainbow
+    seg2->setEffect(EffectPool::getEffectOrSolid(6));  // Cylon
+    seg3->setEffect(EffectPool::getSolid());           // Solid white
     seg3->setColor(0, 0, 0, 255);  // Pure white on W channel
     
     // Enable auto-update
@@ -1980,8 +1981,9 @@ void loop() {
     if (millis() - lastChange > 10000) {
         auto segment = neoPixelModule.getManager()->getSegment(0);
         if (segment) {
-            currentEffect = (currentEffect + 1) % EffectPool::getEffectCount();  // Cycle through all effects
-            segment->setEffect(currentEffect);
+            currentEffect = (currentEffect + 1) % EffectPool::getEffectCount();  // Cycle through all effect numbers
+            Effect* effect = EffectPool::getEffectOrSolid(currentEffect);       // compiled-out number: Solid
+            if (effect) segment->setEffect(effect);                             // nullptr only out of range
             
             // Random brightness
             uint8_t brightness = random(64, 255);
@@ -2013,15 +2015,15 @@ void setup() {
     auto seg3 = neoPixelModule.addSegment(0, 20, 29);  // Last 10 LEDs
     
     // Segment 1: Pure RGB color (no white)
-    seg1->setEffect(0);  // Solid
+    seg1->setEffect(EffectPool::getSolid());
     seg1->setColor(255, 0, 0, 0);  // Red
     
     // Segment 2: RGB + White
-    seg2->setEffect(0);
+    seg2->setEffect(EffectPool::getSolid());
     seg2->setColor(0, 255, 0, 128);  // Green + 50% white
     
     // Segment 3: Pure white
-    seg3->setEffect(0);
+    seg3->setEffect(EffectPool::getSolid());
     seg3->setColor(0, 0, 0, 255);  // White channel only
     
     // Update once
@@ -2241,7 +2243,7 @@ uint16_t idx = seg->xyzToIndex(x, y, z); // 3D → linear
 
 `Fire`, `Noise` and `Cylon` are **geometry-aware**: the same effect renders in 1D or 2D depending on the segment's geometry (no separate `*2D` class).
 
-Access any of them via `EffectPool::getEffectByIndex(<id>)` or the per-effect getter (e.g. `EffectPool::getTetris2D()`).
+Access any of them via `EffectPool::getEffectOrSolid(<id>)` (Solid when the build leaves the effect out), `EffectPool::getEffectByIndex(<id>)` (nullptr then) or the per-effect getter (e.g. `EffectPool::getTetris2D()`; it is only defined while the effect is in the build, a call to the getter of a compiled-out effect does not link).
 
 ### Writing a custom 2D effect
 

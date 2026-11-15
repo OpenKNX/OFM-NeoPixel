@@ -18,6 +18,23 @@ Notes:
 - Most effects use the base color configured in the segment; if it is
   black (all channels 0), many effects automatically produce rainbow colors.
 
+## Effect numbers and leaving effects out of a build
+
+- **Stable numbers:** the number in each heading below is the position of the effect in
+  `EffectPool::getEffectByIndex()` (`src/effects/EffectPool.cpp`). New effects are appended; no number moves, also
+  when a build leaves an effect out. Applications store these numbers (ETS, KO values, scenes, cues).
+- **Build flags** (`-D` in the build flags of the application):
+  - `NEOPIXEL_DISABLE_<X>` leaves out one effect (e.g. `NEOPIXEL_DISABLE_FIRE`); every effect except Solid has
+    exactly one such flag, and its getter, instance and include are guarded by it.
+  - `NEOPIXEL_MINIMAL_EFFECTS` leaves out the 11 extended effects (Fire, Theater Chase, Sparkle, Breathing, Strobe,
+    Comet, Noise, Palette, Lightning, Gradient, Candle).
+  - `NEOPIXEL_DISABLE_2D` sets the flags of the 13 2D effects (20–32) in `EffectPool.h`.
+- **Fallback:** `getEffectByIndex(n)` returns `nullptr` for a left-out effect; `EffectPool::getEffectOrSolid(n)`
+  returns Solid instead (`nullptr` only for `n >= getEffectCount()`). The Effektmanager uses it for cues, the
+  console for `neo effect set <seg> <number>`. Solid (0) cannot be left out.
+- **OAM-NeoPixel:** the flags per target, the product effect groups (`NEOPIXEL_DISABLE_GROUP_<NAME>`) and the ETS
+  check of the selected hardware are described in OAM-NeoPixel `doc/Effect-Flags.md`.
+
 ---
 
 ## 0 – Solid
