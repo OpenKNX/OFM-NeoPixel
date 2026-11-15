@@ -96,6 +96,16 @@ class RGBWTestEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Phasendauer (s)", "Phase duration (s)");
+            case 1: return PARAM_LABEL_DE_EN("Modus", "Mode");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

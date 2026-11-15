@@ -41,6 +41,18 @@ class PaletteEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed");
+            case 1: return PARAM_LABEL_DE_EN("Palette", "Palette");
+            case 2: return PARAM_LABEL_DE_EN("Überblendung", "Blend");
+            case 3: return PARAM_LABEL_DE_EN("Abstand", "Spacing");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

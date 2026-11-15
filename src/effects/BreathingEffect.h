@@ -169,6 +169,19 @@ class BreathingEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed");
+            case 1: return PARAM_LABEL_DE_EN("Min. Helligkeit / Pulsbreite", "Min. brightness / pulse width");
+            case 2: return PARAM_LABEL_DE_EN("Kurve / Gamma", "Curve / gamma");
+            case 3: return PARAM_LABEL_DE_EN("Regenbogen", "Rainbow");
+            case 4: return PARAM_LABEL_DE_EN("Wellenform", "Waveform");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

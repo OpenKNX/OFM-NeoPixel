@@ -36,6 +36,18 @@ class PlasmaNebula2DEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed");
+            case 1: return PARAM_LABEL_DE_EN("Sättigung", "Saturation");
+            case 2: return PARAM_LABEL_DE_EN("Kontrast", "Contrast");
+            case 3: return PARAM_LABEL_DE_EN("Palettenverschiebung", "Palette shift");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t index) const override
     {
         return ParameterType::PARAM_UINT8;

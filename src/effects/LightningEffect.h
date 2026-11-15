@@ -49,6 +49,19 @@ class LightningEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Häufigkeit", "Frequency");
+            case 1: return PARAM_LABEL_DE_EN("Breite", "Width");
+            case 2: return PARAM_LABEL_DE_EN("Abklingzeit", "Decay");
+            case 3: return PARAM_LABEL_DE_EN("Farbton", "Hue");
+            case 4: return PARAM_LABEL_DE_EN("Intensität", "Intensity");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

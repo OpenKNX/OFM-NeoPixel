@@ -66,6 +66,17 @@
     // must not name the literals at all - even a discarded reference keeps them
     #define PARAM_DESC_DE_EN(de_text, en_text) ((const char*)nullptr)
 #endif
+
+/**
+ * @brief Short parameter label for the ETS parameter row, German and English (getParameterLabel(), see Effect)
+ * Build-time text like PARAM_DESC_DE_EN: compiled in only with NEOPIXEL_EFFECT_PARAM_DESCRIPTIONS.
+ */
+#if NEOPIXEL_EFFECT_PARAM_DESCRIPTIONS
+    #define PARAM_LABEL_DE_EN(de_text, en_text) \
+        (lang && strcmp(lang, "de") == 0 ? (de_text) : (en_text))
+#else
+    #define PARAM_LABEL_DE_EN(de_text, en_text) ((const char*)nullptr)
+#endif
 /**
  * Macro for multi-language effect names
  * @param de_name German effect name
@@ -224,6 +235,13 @@ class Effect
      * @return Parameter description or nullptr
      */
     virtual const char* getParameterDescription(uint8_t index, const char* lang = "de") const { return nullptr; }
+
+    /*
+     * Parameter label (short text of the ETS parameter row): every effect with parameters defines
+     *   const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+     * with one PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed") per index. Not virtual and not called by the firmware, so it
+     * costs no flash; scripts/Build-EffectParameters.ps1 reads the literals from the header and stops on a missing label.
+     */
 
     /**
      * @brief Get parameter minimum value

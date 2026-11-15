@@ -95,6 +95,17 @@ class CandleEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Flackergeschwindigkeit", "Flicker speed");
+            case 1: return PARAM_LABEL_DE_EN("Flackerstärke", "Flicker strength");
+            case 2: return PARAM_LABEL_DE_EN("Zonen", "Zones");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t index) const override
     {
         return ParameterType::PARAM_UINT8;

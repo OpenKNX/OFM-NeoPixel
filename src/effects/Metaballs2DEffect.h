@@ -71,6 +71,18 @@ class Metaballs2DEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed");
+            case 1: return PARAM_LABEL_DE_EN("Farbton", "Hue");
+            case 2: return PARAM_LABEL_DE_EN("Anzahl Blobs", "Number of blobs");
+            case 3: return PARAM_LABEL_DE_EN("Kontrast", "Contrast");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

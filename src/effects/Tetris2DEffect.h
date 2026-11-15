@@ -411,6 +411,20 @@ class Tetris2DEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Fallgeschwindigkeit", "Fall speed");
+            case 1: return PARAM_LABEL_DE_EN("Helligkeit Hintergrundgitter", "Grid brightness");
+            case 2: return PARAM_LABEL_DE_EN("Geist-Stein", "Ghost piece");
+            case 3: return PARAM_LABEL_DE_EN("Farbmodus", "Colour mode");
+            case 4: return PARAM_LABEL_DE_EN("Volle Reihen blitzen", "Flash full rows");
+            case 5: return PARAM_LABEL_DE_EN("Selbstspielende KI", "Auto play");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

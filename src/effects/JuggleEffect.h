@@ -57,6 +57,18 @@ class JuggleEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed");
+            case 1: return PARAM_LABEL_DE_EN("Anzahl Punkte", "Number of dots");
+            case 2: return PARAM_LABEL_DE_EN("Ausblendrate", "Fade rate");
+            case 3: return PARAM_LABEL_DE_EN("Farbton-Versatz", "Hue offset");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

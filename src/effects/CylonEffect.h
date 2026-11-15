@@ -82,6 +82,20 @@ class CylonEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed");
+            case 1: return PARAM_LABEL_DE_EN("Farbton", "Hue");
+            case 2: return PARAM_LABEL_DE_EN("Augengröße", "Eye size");
+            case 3: return PARAM_LABEL_DE_EN("Schweif-Abklingen", "Tail fade");
+            case 4: return PARAM_LABEL_DE_EN("Richtung (nur 2D)", "Direction (2D only)");
+            case 5: return PARAM_LABEL_DE_EN("Modus", "Mode");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

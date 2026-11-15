@@ -225,6 +225,19 @@ class ScrollTextEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed");
+            case 1: return PARAM_LABEL_DE_EN("Zeichenabstand", "Character gap");
+            case 2: return PARAM_LABEL_DE_EN("Wiederholen", "Repeat");
+            case 3: return PARAM_LABEL_DE_EN("Text", "Text");
+            case 4: return PARAM_LABEL_DE_EN("Schrift", "Font");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t index) const override
     {
         switch (index)

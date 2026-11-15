@@ -924,6 +924,7 @@ class Effect
     virtual uint8_t getParameterCount() const;
     virtual void setParameter(Segment* segment, uint8_t index, uint32_t value);
     // ... getParameterName/Type/Default/Min/Max, getParameter
+    // not virtual, build-time text: getParameterLabel(index, lang) with PARAM_LABEL_DE_EN (ETS row label)
 
     // Lifecycle hooks and completion
     virtual void onEnter(Segment* segment);

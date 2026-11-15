@@ -205,6 +205,20 @@ class TheaterChaseEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed");
+            case 1: return PARAM_LABEL_DE_EN("Abstand", "Spacing");
+            case 2: return PARAM_LABEL_DE_EN("Punktgröße", "Dot size");
+            case 3: return PARAM_LABEL_DE_EN("Farbmodus", "Colour mode");
+            case 4: return PARAM_LABEL_DE_EN("Farbwechsel-Geschwindigkeit", "Colour change speed");
+            case 5: return PARAM_LABEL_DE_EN("Hin und her", "Bounce");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

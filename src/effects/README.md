@@ -103,7 +103,14 @@ virtual const char* getParameterName(uint8_t idx) const;
 virtual ParameterType getParameterType(uint8_t idx) const;
 virtual uint32_t getParameter(const Segment* seg, uint8_t idx) const;
 virtual void setParameter(Segment* seg, uint8_t idx, uint32_t val);
+// not virtual, build-time text (Effect.h): label of the ETS row per index
+const char* getParameterLabel(uint8_t index, const char* lang = "de") const;  // PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed")
 ```
+
+Every effect with parameters needs `getParameterLabel()`: OAM-NeoPixel `scripts/Build-EffectParameters.ps1` takes the German
+label as the text of the ETS row and stops when one is missing. `getCapabilities()` places the effect in the ETS lists:
+without `DIM_1D` it is a 2D effect („2D ·“, left out of the lists of hardware built with `NEOPIXEL_DISABLE_2D`, which must
+then name it in `EffectPool.h`), `DIM_1D | DIM_2D` gets „1D/2D ·“.
 
 ### Types
 

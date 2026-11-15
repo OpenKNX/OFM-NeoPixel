@@ -159,6 +159,19 @@ class StrobeEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed");
+            case 1: return PARAM_LABEL_DE_EN("Einschaltanteil (%)", "On ratio (%)");
+            case 2: return PARAM_LABEL_DE_EN("Min. Helligkeit", "Min. brightness");
+            case 3: return PARAM_LABEL_DE_EN("Zufälliges Timing", "Random timing");
+            case 4: return PARAM_LABEL_DE_EN("Regenbogen", "Rainbow");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

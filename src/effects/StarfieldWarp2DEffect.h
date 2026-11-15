@@ -53,6 +53,18 @@ class StarfieldWarp2DEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed");
+            case 1: return PARAM_LABEL_DE_EN("Dichte (%)", "Density (%)");
+            case 2: return PARAM_LABEL_DE_EN("Farbmodus", "Colour mode");
+            case 3: return PARAM_LABEL_DE_EN("Warp-Puls", "Warp pulse");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t index) const override
     {
         switch (index)

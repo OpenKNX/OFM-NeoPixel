@@ -74,6 +74,18 @@ class DNA2DEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Rotationsgeschwindigkeit", "Rotation speed");
+            case 1: return PARAM_LABEL_DE_EN("Farbton", "Hue");
+            case 2: return PARAM_LABEL_DE_EN("Windungen", "Twists");
+            case 3: return PARAM_LABEL_DE_EN("Sprossenabstand", "Rung spacing");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

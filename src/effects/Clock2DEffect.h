@@ -138,6 +138,24 @@ class Clock2DEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Anzeigemodus", "View mode");
+            case 1: return PARAM_LABEL_DE_EN("Sekunden anzeigen", "Show seconds");
+            case 2: return PARAM_LABEL_DE_EN("Doppelpunkt blinkt", "Blinking colon");
+            case 3: return PARAM_LABEL_DE_EN("Farbton Uhrzeit", "Time hue");
+            case 4: return PARAM_LABEL_DE_EN("Datumsanzeige", "Date display");
+            case 5: return PARAM_LABEL_DE_EN("Datumsformat", "Date format");
+            case 6: return PARAM_LABEL_DE_EN("Farbton Datum", "Date hue");
+            case 7: return PARAM_LABEL_DE_EN("Wechselintervall (s)", "Switch interval (s)");
+            case 8: return PARAM_LABEL_DE_EN("Scrollgeschwindigkeit", "Scroll speed");
+            case 9: return PARAM_LABEL_DE_EN("Schrift", "Font");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

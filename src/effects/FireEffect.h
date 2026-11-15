@@ -208,6 +208,19 @@ class FireEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit (ungenutzt)", "Speed (unused)");
+            case 1: return PARAM_LABEL_DE_EN("Abkühlung", "Cooling");
+            case 2: return PARAM_LABEL_DE_EN("Funkenrate", "Sparking");
+            case 3: return PARAM_LABEL_DE_EN("Richtung umkehren", "Reverse direction");
+            case 4: return PARAM_LABEL_DE_EN("Blaues Feuer", "Blue fire");
+            default: return "";
+        }
+    }
+
     const char* getParameterDescription(uint8_t index, const char* lang = "de") const override
     {
         switch (index)

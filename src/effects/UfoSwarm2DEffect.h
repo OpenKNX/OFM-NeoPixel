@@ -56,6 +56,18 @@ class UfoSwarm2DEffect : public Effect
         }
     }
 
+    const char* getParameterLabel(uint8_t index, const char* lang = "de") const
+    {
+        switch (index)
+        {
+            case 0: return PARAM_LABEL_DE_EN("Geschwindigkeit", "Speed");
+            case 1: return PARAM_LABEL_DE_EN("Anzahl UFOs", "Number of UFOs");
+            case 2: return PARAM_LABEL_DE_EN("Farbton", "Hue");
+            case 3: return PARAM_LABEL_DE_EN("Traktorstrahl", "Tractor beam");
+            default: return "";
+        }
+    }
+
     ParameterType getParameterType(uint8_t index) const override
     {
         switch (index)
