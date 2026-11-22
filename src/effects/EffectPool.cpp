@@ -124,6 +124,10 @@
         #include "CandleEffect.h"
     #endif
 
+    #ifndef NEOPIXEL_DISABLE_TWINKLEFOX
+        #include "TwinkleFoxEffect.h"
+    #endif
+
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 
     // 2D effects (always included unless explicitly disabled)
@@ -248,6 +252,10 @@ static GradientEffect* s_gradient = nullptr;
 
     #ifndef NEOPIXEL_DISABLE_CANDLE
 static CandleEffect* s_candle = nullptr;
+    #endif
+
+    #ifndef NEOPIXEL_DISABLE_TWINKLEFOX
+static TwinkleFoxEffect* s_twinkleFox = nullptr;
     #endif
 
 #endif // NEOPIXEL_MINIMAL_EFFECTS
@@ -561,6 +569,14 @@ Effect* EffectPool::getCandle()
 }
     #endif
 
+    #ifndef NEOPIXEL_DISABLE_TWINKLEFOX
+Effect* EffectPool::getTwinkleFox()
+{
+    if (!s_twinkleFox) s_twinkleFox = new TwinkleFoxEffect();
+    return s_twinkleFox;
+}
+    #endif
+
 #endif // NEOPIXEL_MINIMAL_EFFECTS
 
 // ── 2D effects ───────────────────────────────────────────────────────────────
@@ -847,6 +863,11 @@ Effect* EffectPool::getEffectByIndex(uint8_t index)
     n++;
 #ifndef NEOPIXEL_DISABLE_METABALLS2D
     if (index == n) return getMetaballs2D();
+#endif
+    n++;
+
+#if !defined(NEOPIXEL_MINIMAL_EFFECTS) && !defined(NEOPIXEL_DISABLE_TWINKLEFOX)
+    if (index == n) return getTwinkleFox();
 #endif
     n++;
 

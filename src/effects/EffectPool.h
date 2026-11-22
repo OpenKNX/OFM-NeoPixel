@@ -138,6 +138,7 @@ class EffectPool
     static Effect* getLightning();
     static Effect* getGradient();
     static Effect* getCandle();
+    static Effect* getTwinkleFox();
     // 2D effects
     static Effect* getScrollText();
     static Effect* getClock2D();
