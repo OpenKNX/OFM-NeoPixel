@@ -1387,6 +1387,7 @@ bool NeoPixel::processInfoCommand()
                     case ColorOrder::BRG: colorOrder = "BRG"; break;
                     case ColorOrder::RGBW: colorOrder = "RGBW"; break;
                     case ColorOrder::GRBW: colorOrder = "GRBW"; break;
+                    case ColorOrder::WRGB: colorOrder = "WRGB"; break;
                     // 5-Channel color orders (RGBCCT)
                     case ColorOrder::RGBCCT: colorOrder = "RGBCCT"; break;
                     case ColorOrder::GRBCCT: colorOrder = "GRBCCT"; break;
@@ -2788,6 +2789,7 @@ bool NeoPixel::processPhysListCommand()
                     case ColorOrder::BRG: colorOrder = "BRG"; break;
                     case ColorOrder::RGBW: colorOrder = "RGBW"; break;
                     case ColorOrder::GRBW: colorOrder = "GRBW"; break;
+                    case ColorOrder::WRGB: colorOrder = "WRGB"; break;
                     // 5-Channel color orders (RGBCCT)
                     case ColorOrder::RGBCCT: colorOrder = "RGBCCT"; break;
                     case ColorOrder::GRBCCT: colorOrder = "GRBCCT"; break;
@@ -4690,8 +4692,8 @@ bool NeoPixel::processPowerCommand(const std::string& args)
                 phys->getColorOrder(),
                 true); // hasDummyLed for APA102
 
-            openknx.logger.logWithValues("Current Draw:     %u mA (%.2f W @ 5V)",
-                                         stripCurrent, stripCurrent * 5.0f / 1000.0f);
+            openknx.logger.logWithValues("Estimated Current: %u mA (%.2f W)",
+                                         stripCurrent, phys->getPowerWatts(stripCurrent));
 
             printSectionSeparator();
             openknx.logger.log("");

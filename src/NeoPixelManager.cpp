@@ -466,6 +466,17 @@ namespace
         const uint8_t stride = ProtocolHelper::getBytesPerLed(strip->getProtocol());
         return (stride >= 2 && stride <= 10) ? stride : 3;
     }
+
+    uint32_t measurePhysicalCurrent(const PowerManager& power, PhysicalStrip* strip)
+    {
+        const uint8_t* buffer = strip->getBuffer();
+        if (!buffer) return 0;
+        const auto protocol = strip->getProtocol();
+        if (strip->isSpiStrip())
+            return power.calculateTotalCurrent(buffer, strip->getLedCount(), bufferStride(strip), 255,
+                                               power.profileForProtocol(protocol));
+        return power.calculateStripCurrent(buffer, strip->getLedCount(), protocol, strip->getColorOrder());
+    }
 } // namespace
 
 bool NeoPixelManager::removeStrip(PhysicalStrip* strip)
@@ -613,11 +624,7 @@ void NeoPixelManager::measureCurrentOnly()
     for (auto phys : _strips)
     {
         if (!phys) continue;
-        const uint8_t* buffer = phys->getBuffer();
-        if (!buffer) continue;
-
-        total += _powerManager.calculateTotalCurrent(buffer, phys->getLedCount(), bufferStride(phys), 255,
-                _powerManager.profileForProtocol(phys->getProtocol()));
+        total += measurePhysicalCurrent(_powerManager, phys);
     }
 
     const uint32_t limit = _powerManager.getMaxCurrent();
@@ -659,13 +666,8 @@ bool NeoPixelManager::applyOwnStripLimits()
         }
 
         // Calculate current from PhysicalStrip buffer
-        uint16_t ledCount = phys->getLedCount();
-        const uint8_t* buffer = phys->getBuffer();
-        if (!buffer) continue;
-
-        uint8_t bytesPerPixel = bufferStride(phys);
-        uint32_t stripRequestedCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, 255,
-                _powerManager.profileForProtocol(phys->getProtocol()));
+        if (!phys->getBuffer()) continue;
+        const uint32_t stripRequestedCurrent = measurePhysicalCurrent(_powerManager, phys);
 
         if (stripLimit == 0)
         {
@@ -777,15 +779,7 @@ void NeoPixelManager::applyPowerLimit()
             }
 
             // Calculate current from PhysicalStrip buffer (after syncAll())
-            uint16_t ledCount = phys->getLedCount();
-            const uint8_t* buffer = phys->getBuffer();
-            if (!buffer) continue;
-
-            uint8_t bytesPerPixel = bufferStride(phys);
-            uint8_t hardwareBrightness = 255; // syncAll() already applied brightness
-
-            uint32_t stripCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, hardwareBrightness,
-                    _powerManager.profileForProtocol(phys->getProtocol()));
+            const uint32_t stripCurrent = measurePhysicalCurrent(_powerManager, phys);
             totalRequestedCurrent += stripCurrent;
             if (phys->isSpiStrip()) unscalableCurrent += stripCurrent;
         }
@@ -846,16 +840,7 @@ void NeoPixelManager::applyPowerLimit()
             uint8_t stripPowerMode = cfg->getPowerLimitMode();
 
             // Calculate current from PhysicalStrip buffer
-            uint16_t ledCount = phys->getLedCount();
-            const uint8_t* buffer = phys->getBuffer();
-            uint32_t stripCurrent = 0;
-
-            if (buffer)
-            {
-                uint8_t bytesPerPixel = bufferStride(phys);
-                stripCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, 255,
-                    _powerManager.profileForProtocol(phys->getProtocol()));
-            }
+            const uint32_t stripCurrent = measurePhysicalCurrent(_powerManager, phys);
 
             // Determine effective limit based on mode
             uint32_t stripLimit = 0;
@@ -875,7 +860,7 @@ void NeoPixelManager::applyPowerLimit()
             else if (stripPowerMode == 3)
             {
                 // PerLED: Use physical LED count (not VirtualStrip sum)
-                stripLimit = ledCount * cfg->getCurrentPerLedMa();
+                stripLimit = phys->getLedCount() * cfg->getCurrentPerLedMa();
             }
 
             StripPowerStats stats;
@@ -904,16 +889,7 @@ void NeoPixelManager::applyPowerLimit()
             uint8_t stripPowerMode = cfg->getPowerLimitMode();
 
             // Calculate current from PhysicalStrip buffer
-            uint16_t ledCount = phys->getLedCount();
-            const uint8_t* buffer = phys->getBuffer();
-            uint32_t stripRequestedCurrent = 0;
-
-            if (buffer)
-            {
-                uint8_t bytesPerPixel = bufferStride(phys);
-                stripRequestedCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, 255,
-                    _powerManager.profileForProtocol(phys->getProtocol()));
-            }
+            const uint32_t stripRequestedCurrent = measurePhysicalCurrent(_powerManager, phys);
 
             // Determine strip limit
             uint32_t stripLimit = 0;
@@ -933,7 +909,7 @@ void NeoPixelManager::applyPowerLimit()
             else if (stripPowerMode == 3)
             {
                 // PerLED: Use physical LED count (not VirtualStrip sum)
-                stripLimit = ledCount * cfg->getCurrentPerLedMa();
+                stripLimit = phys->getLedCount() * cfg->getCurrentPerLedMa();
             }
 
             // Cache stats
@@ -1027,16 +1003,7 @@ void NeoPixelManager::applyPowerLimit()
             uint8_t stripPowerMode = cfg->getPowerLimitMode();
 
             // Calculate current from PhysicalStrip buffer
-            uint16_t ledCount = phys->getLedCount();
-            const uint8_t* buffer = phys->getBuffer();
-            uint32_t stripRequestedCurrent = 0;
-
-            if (buffer)
-            {
-                uint8_t bytesPerPixel = bufferStride(phys);
-                stripRequestedCurrent = _powerManager.calculateTotalCurrent(buffer, ledCount, bytesPerPixel, 255,
-                    _powerManager.profileForProtocol(phys->getProtocol()));
-            }
+            const uint32_t stripRequestedCurrent = measurePhysicalCurrent(_powerManager, phys);
 
             // Determine strip limit
             uint32_t stripLimit = 0;
@@ -1048,7 +1015,7 @@ void NeoPixelManager::applyPowerLimit()
             else if (stripPowerMode == 1)
             {
                 // UseGlobal: Use physical LED count (not VirtualStrip sum)
-                stripLimit = ledCount * globalCurrentPerLed;
+                stripLimit = phys->getLedCount() * globalCurrentPerLed;
             }
             else if (stripPowerMode == 2)
             {
@@ -1057,7 +1024,7 @@ void NeoPixelManager::applyPowerLimit()
             else if (stripPowerMode == 3)
             {
                 // PerLED: Use physical LED count (not VirtualStrip sum)
-                stripLimit = ledCount * cfg->getCurrentPerLedMa();
+                stripLimit = phys->getLedCount() * cfg->getCurrentPerLedMa();
             }
 
             // Cache stats
@@ -1193,31 +1160,16 @@ bool NeoPixelManager::applyScaleToPhysicalBuffer(PhysicalStrip* phys, float scal
     uint8_t* buffer = phys->getBuffer();
     size_t bufferSize = phys->getBufferSize();
 
-    // Scale all pixels in this PhysicalStrip
-    for (uint16_t i = 0; i < ledCount; i++)
+    const uint8_t prefix = ProtocolHelper::getSerialPrefixBytes(phys->getProtocol());
+    const size_t limit = (size_t)prefix + (size_t)ledCount * bytesPerPixel;
+    if (limit > bufferSize)
     {
-        size_t offset = (size_t)i * bytesPerPixel;
-
-        // Validate buffer bounds before access
-        if (offset + bytesPerPixel > bufferSize)
-        {
-            logErrorP("NeoPixelManager: Power limiting buffer overflow on PhysicalStrip! LED %u, offset %u, bufferSize %u",
-                      i, (uint32_t)offset, (uint32_t)bufferSize);
-            break; // Skip remaining LEDs for this strip
-        }
-
-        buffer[offset] = (uint8_t)(buffer[offset] * scale);         // R
-        buffer[offset + 1] = (uint8_t)(buffer[offset + 1] * scale); // G
-        buffer[offset + 2] = (uint8_t)(buffer[offset + 2] * scale); // B
-        if (bytesPerPixel >= 4)
-        {
-            buffer[offset + 3] = (uint8_t)(buffer[offset + 3] * scale); // W
-        }
-        if (bytesPerPixel >= 5)
-        {
-            buffer[offset + 4] = (uint8_t)(buffer[offset + 4] * scale); // CW
-        }
+        logErrorP("NeoPixelManager: Power limiting needs %u bytes, strip buffer has %u",
+                  (unsigned)limit, (unsigned)bufferSize);
+        return false;
     }
+    for (size_t i = prefix; i < limit; ++i)
+        buffer[i] = (uint8_t)(buffer[i] * scale);
     return true;
 }
 

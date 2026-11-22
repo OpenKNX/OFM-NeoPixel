@@ -514,6 +514,12 @@ namespace ProtocolHelper
         }
     }
 
+    // TM1814 sends two four-byte current control words before the pixel data.
+    constexpr uint8_t getSerialPrefixBytes(LedProtocol protocol)
+    {
+        return protocol == LedProtocol::TM1814 ? 8 : 0;
+    }
+
     /**
      * Get number of color channels for color order
      */

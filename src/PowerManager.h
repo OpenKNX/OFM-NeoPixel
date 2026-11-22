@@ -489,20 +489,24 @@ class PowerManager
             return calculateAPA102Current(buffer, numPixels, hasDummyLed);
         }
 
-        // All other protocols: Standard RGB/RGBW/RGBCCT format
-        // Determine bytes per pixel from ColorOrder
-        uint8_t bytesPerPixel = 3; // Default RGB
-        if (order == ColorOrder::RGBCCT || order == ColorOrder::GRBCCT ||
-            order == ColorOrder::RGBCTW || order == ColorOrder::GRBCTW)
+        if (order == ColorOrder::NONE) order = ProtocolHelper::getColorOrder(protocol);
+        const LedCurrentProfile profile = profileForProtocol(protocol);
+        const uint16_t currentMa[] = {profile.redMA, profile.greenMA, profile.blueMA,
+                                      profile.warmWhiteMA, profile.coolWhiteMA};
+        uint8_t channels[6];
+        const uint8_t packed = ProtocolHelper::orderChannels(order, 0, 1, 2, 3, 4, channels);
+        const uint8_t stride = ProtocolHelper::getBytesPerLed(protocol);
+        const uint8_t channelBytes = ProtocolHelper::getBitsPerChannel(protocol) / 8;
+        const uint8_t channelCount = (packed * channelBytes <= stride) ? packed : stride / channelBytes;
+        const uint8_t* pixel = buffer + ProtocolHelper::getSerialPrefixBytes(protocol);
+        uint32_t totalMa = 0;
+        for (uint16_t i = 0; i < numPixels; ++i, pixel += stride)
         {
-            bytesPerPixel = 5; // 5-channel
+            // The serial drivers expand each 8-bit brightness to identical high/low bytes for 16-bit protocols.
+            for (uint8_t ch = 0; ch < channelCount; ++ch)
+                totalMa += uint32_t(pixel[ch * channelBytes]) * currentMa[channels[ch]] / 255;
         }
-        else if (order == ColorOrder::RGBW || order == ColorOrder::GRBW)
-        {
-            bytesPerPixel = 4; // 4-channel
-        }
-
-        return calculateTotalCurrent(buffer, numPixels, bytesPerPixel, 255);
+        return totalMa;
     }
 
     /**

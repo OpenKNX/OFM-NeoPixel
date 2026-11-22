@@ -339,7 +339,7 @@ PIO_NeoPixel_Serial::PIO_NeoPixel_Serial(uint pin, uint16_t ledCount, LedProtoco
     // CRITICAL: Cast to size_t to prevent overflow (e.g., 22000 * 3 = 66000 > uint16_t max 65535)
     // TM1814 expects C1 C2 D1..Dn: two 4-byte constant-current commands, the second the
     // bit complement of the first (datasheet section "One frame of complete data structure").
-    _inst->prefixBytes = (protocol == LedProtocol::TM1814) ? 8 : 0;
+    _inst->prefixBytes = ProtocolHelper::getSerialPrefixBytes(protocol);
 
     _inst->bufferSize = (size_t)_inst->prefixBytes + (size_t)ledCount * _inst->bytesPerLed +
                         sm16825SettingsBytes(protocol);

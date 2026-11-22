@@ -242,7 +242,7 @@ RMT_NeoPixel_Serial::RMT_NeoPixel_Serial(uint32_t pin, uint16_t ledCount, LedPro
 
     // TM1814 expects C1 C2 D1..Dn: two 4-byte constant-current commands, the second the
     // bit complement of the first.
-    _inst->prefixBytes = (protocol == LedProtocol::TM1814) ? 8 : 0;
+    _inst->prefixBytes = ProtocolHelper::getSerialPrefixBytes(protocol);
 
     _inst->bufferSize = (size_t)_inst->prefixBytes + (size_t)ledCount * _inst->bytesPerLed +
                         sm16825SettingsBytes(protocol);
