@@ -15,7 +15,7 @@
  *   [2] EyeSize (1-20)     - Size of the eye
  *   [3] FadeAmount (1-255) - Trail fade speed
  *   [4] Direction (bool)   - 2D: 0=horizontal, 1=vertical
- *   [5] Mode (0/1)         - 0=Larson (bounce), 1=Center double-cylon ("Tor")
+ *   [5] Mode (0-2)         - Larson, Center (gate), Scanner Dual
  *
  * Config usage (ETS mapping):
  *   - config.speed      -> Speed
@@ -23,7 +23,7 @@
  *   - config.option2    -> EyeSize
  *   - config.option3    -> FadeAmount
  *   - config.feature1   -> Direction (2D)
- *   - config.mode       -> Mode (0=Larson, 1=Center)
+ *   - config.mode       -> Mode (0=Larson, 1=Center, 2=Scanner Dual)
  *   - config.intensity  -> Brightness
  *   - config.reverse    -> Invert initial direction
  *   - config.feature2   -> hsv2rgb_rainbow yellow brightness compensation
@@ -36,6 +36,7 @@
 #include "../Segment.h"
 #include "Effect.h"
 #include "FastLEDMath.h"
+#include <algorithm>
 
 class CylonEffect : public Effect
 {
@@ -43,8 +44,36 @@ class CylonEffect : public Effect
     /// Per-segment state in Segment::effectScratch(); all-zero is the start state
     struct State
     {
-        uint32_t timeAcc; // accumulated ms
+        uint32_t timeAcc; // accumulated ms for the original 2D sweep
+        uint32_t dualTime;
     };
+
+    static uint16_t dualPosition(Segment* segment, uint16_t length, uint32_t deltaTime)
+    {
+        if (length < 2) return 0;
+        const auto& cfg = segment->getConfig();
+        const uint16_t span = length - 1;
+        const uint16_t stepMs = cfg.speed ? 5 + (255 - cfg.speed) : std::max<uint16_t>(5, 1250 / span);
+        const uint32_t periodMs = 2u * span * stepMs;
+        auto& elapsed = segment->effectScratch<State>().dualTime;
+        // Reduce delta before adding to handle even a wrapped or unusually long frame interval.
+        elapsed = (elapsed + deltaTime % periodMs) % periodMs;
+        const uint32_t phase = (elapsed / stepMs + (cfg.reverse ? span / 2 : 0)) % (2u * span);
+        return phase <= span ? phase : 2u * span - phase;
+    }
+
+    template <typename Draw>
+    static void drawTwinEyes(uint16_t position, uint16_t length, uint8_t eyeSize, Draw draw)
+    {
+        const int32_t first = std::max<int32_t>(0, int32_t(position) - eyeSize / 2);
+        const int32_t end = std::min<int32_t>(length, int32_t(position) + (eyeSize + 1) / 2);
+        for (int32_t pixel = first; pixel < end; ++pixel)
+        {
+            draw(pixel);
+            const int32_t mirror = length - 1 - pixel;
+            if (mirror < first || mirror >= end) draw(mirror);
+        }
+    }
 
   public:
     CylonEffect() = default;
@@ -57,8 +86,8 @@ class CylonEffect : public Effect
     const char* getDescription(const char* lang = nullptr) override
     {
         return EFFECT_DESC_DE_EN(
-            "Klassischer KITT/Cylon-Effekt mit hin- und herspringendem Lichtauge und verblassendem Schweif. Unterstützt 1D-Streifen und 2D-Matrizen. Mode 1 erzeugt zwei gespiegelte Augen aus der Mitte (Tor).",
-            "Classic KITT/Cylon effect with bouncing light eye and fading trail. Supports 1D strips and 2D matrices. Mode 1 creates two mirrored eyes from the center (gate).");
+            "Klassischer KITT/Cylon-Effekt mit hin- und herspringendem Lichtauge und verblassendem Schweif. Unterstützt 1D-Streifen und 2D-Matrizen. Modus 1 öffnet zwei Augen aus der Mitte. Scanner Dual spiegelt zwei Augen, die sich kreuzen und an den Enden umkehren.",
+            "Classic KITT/Cylon effect with bouncing light eye and fading trail. Supports 1D strips and 2D matrices. Mode 1 opens two eyes from the center. Scanner Dual mirrors two eyes that cross and turn around at the ends.");
     }
 
     uint8_t getCapabilities() const override { return DIM_1D | DIM_2D; }
@@ -116,8 +145,8 @@ class CylonEffect : public Effect
                 "Richtung (nur 2D): 0=horizontal (Spalte wandert links-rechts), 1=vertikal (Zeile wandert oben-unten).",
                 "Direction (2D only): 0=horizontal (column sweeps left-right), 1=vertical (row sweeps top-bottom).");
             case 5: return PARAM_DESC_DE_EN(
-                "Modus: 0=Larson (klassisch hin-und-her), 1=Mitte→außen Doppel-Cylon (Tor).",
-                "Mode: 0=Larson (classic back-and-forth), 1=center→outside double cylon (gate).");
+                "Modus: 0=Larson (klassisch hin-und-her), 1=Mitte→außen Doppel-Cylon (Tor), 2=Scanner Dual mit gespiegeltem Lauf und Nachleuchten (1D und 2D).",
+                "Mode: 0=Larson (classic back-and-forth), 1=center→outside double cylon (gate), 2=Scanner Dual with mirrored motion and trails (1D and 2D).");
             default: return nullptr;
         }
     }
@@ -153,6 +182,7 @@ class CylonEffect : public Effect
             {
                 case 0: return "Larson";
                 case 1: return "Mitte nach aussen";
+                case 2: return "Scanner Dual";
                 default: return nullptr;
             }
         }
@@ -162,7 +192,7 @@ class CylonEffect : public Effect
     uint8_t getEnumValueCount(uint8_t paramIndex) const override
     {
         if (paramIndex == 4) return 2;
-        if (paramIndex == 5) return 2;
+        if (paramIndex == 5) return 3;
         return 0;
     }
 
@@ -203,7 +233,7 @@ class CylonEffect : public Effect
             case 2: return 20;  // EyeSize max
             case 3: return 255; // FadeAmount max
             case 4: return 1;   // Direction true
-            case 5: return 1;   // Mode max (0=Larson,1=Center)
+            case 5: return 2;   // Scanner Dual
             default: return 255;
         }
     }
@@ -277,6 +307,16 @@ class CylonEffect : public Effect
                 b = FastLEDMath::fadeToBlackBy(b, fadeAmount);
                 segment->setPixel(i, r, g, b);
             }
+        }
+
+        if (config.mode == 2)
+        {
+            const uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, brightness, yellowBoost, greenCorr);
+            const uint8_t size = std::max<uint8_t>(1, std::min<uint8_t>(20, eyeSizeIn));
+            drawTwinEyes(dualPosition(segment, length, deltaTime), length, size, [&](uint16_t p) {
+                segment->setPixel(p, rgb >> 16, rgb >> 8, rgb);
+            });
+            return;
         }
 
         if (centerMode)
@@ -374,19 +414,7 @@ class CylonEffect : public Effect
         bool vertical = cfg.feature1;
 
         uint16_t dim = vertical ? renderH : renderW;
-        if (dim < 2) return;
-
-        uint16_t stepMs = (uint16_t)(256 - (speed > 255 ? 255 : speed));
-        if (stepMs == 0) stepMs = 1;
-        uint32_t step = (s.timeAcc / stepMs) % ((uint32_t)(dim - 1) * 2);
-        uint16_t pos;
-        if (step < dim)
-            pos = (uint16_t)step;
-        else
-            pos = (uint16_t)(2 * (dim - 1) - step);
-
-        uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, 255);
-        uint8_t r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+        if (dim < 2 && cfg.mode != 2) return;
 
         // Fade all pixels
         for (uint8_t y = 0; y < geo.height; y++)
@@ -399,6 +427,30 @@ class CylonEffect : public Effect
                 pb = FastLEDMath::scale8(pb, 255 - fadeAmt);
                 segment->setPixelXY(x, y, pr, pg, pb);
             }
+
+        if (cfg.mode == 2)
+        {
+            const uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, cfg.intensity, cfg.feature2, cfg.feature3);
+            drawTwinEyes(dualPosition(segment, dim, deltaTime), dim, std::min<uint8_t>(20, eyeSize), [&](uint16_t p) {
+                if (vertical)
+                    for (uint16_t x = 0; x < renderW; ++x) segment->setPixelGlobalXY(x, p, rgb >> 16, rgb >> 8, rgb);
+                else
+                    for (uint16_t y = 0; y < renderH; ++y) segment->setPixelGlobalXY(p, y, rgb >> 16, rgb >> 8, rgb);
+            });
+            return;
+        }
+
+        uint16_t stepMs = (uint16_t)(256 - (speed > 255 ? 255 : speed));
+        if (stepMs == 0) stepMs = 1;
+        uint32_t step = (s.timeAcc / stepMs) % ((uint32_t)(dim - 1) * 2);
+        uint16_t pos;
+        if (step < dim)
+            pos = (uint16_t)step;
+        else
+            pos = (uint16_t)(2 * (dim - 1) - step);
+
+        uint32_t rgb = FastLEDMath::hsv2rgb_rainbow(hue, 255, 255);
+        uint8_t r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
 
         // Draw eye band
         for (uint8_t e = 0; e < eyeSize; e++)
