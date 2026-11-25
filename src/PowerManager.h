@@ -205,16 +205,21 @@ class PowerManager
      * fallback. Measuring with the table while ETS says otherwise silently changed the
      * measured current, which moved the limiter threshold.
      */
-    LedCurrentProfile profileForProtocol(LedProtocol protocol) const
+    LedCurrentProfile profileForProtocol(LedProtocol protocol, ColorOrder order = ColorOrder::NONE) const
     {
         if (_userCurrentPerLedMa == 0) return LedProfiles::forProtocol(protocol);
 
-        const uint8_t channels = ProtocolHelper::getChannelCount(protocol);
+        // FW1906's wire stride includes padding. Split the LED budget over the active order.
+        uint8_t channels = ProtocolHelper::getChannelCount(protocol);
+        if (protocol == LedProtocol::FW1906)
+        {
+            if (order == ColorOrder::NONE) order = ProtocolHelper::getColorOrder(protocol);
+            channels = ProtocolHelper::getChannelCount(order);
+        }
         const uint16_t perChannel = (channels > 0) ? (uint16_t)(_userCurrentPerLedMa / channels) : 0;
         switch (channels)
         {
-            case 5:
-            case 6: return LedCurrentProfile(perChannel, perChannel, perChannel, perChannel, perChannel);
+            case 5: return LedCurrentProfile(perChannel, perChannel, perChannel, perChannel, perChannel);
             case 4: return LedCurrentProfile(perChannel, perChannel, perChannel, perChannel);
             default: return LedCurrentProfile(perChannel, perChannel, perChannel, 0);
         }
@@ -490,7 +495,7 @@ class PowerManager
         }
 
         if (order == ColorOrder::NONE) order = ProtocolHelper::getColorOrder(protocol);
-        const LedCurrentProfile profile = profileForProtocol(protocol);
+        const LedCurrentProfile profile = profileForProtocol(protocol, order);
         const uint16_t currentMa[] = {profile.redMA, profile.greenMA, profile.blueMA,
                                       profile.warmWhiteMA, profile.coolWhiteMA};
         uint8_t channels[6];

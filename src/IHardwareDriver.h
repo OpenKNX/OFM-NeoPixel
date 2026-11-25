@@ -118,7 +118,7 @@ enum class ColorOrder
 struct DriverCapabilities
 {
     bool supportsRGBW;     // Supports 32-bit RGBW (4 channels)
-    bool supportsRGBCCT;   // Supports 40-bit RGBCCT (5 channels)
+    bool supportsRGBCCT;   // Supports independent warm and cool white
     bool supportsDMA;      // DMA transfer available
     bool supportsAsync;    // Non-blocking show() possible
     uint32_t maxFrequency; // Maximum update frequency (Hz)
@@ -238,7 +238,8 @@ namespace ProtocolHelper
         return protocol == LedProtocol::SK6812_RGBCCT ||
                protocol == LedProtocol::WS2814_RGBCCT ||
                protocol == LedProtocol::WS2805_RGBCCT ||
-               protocol == LedProtocol::SM16825;
+               protocol == LedProtocol::SM16825 ||
+               protocol == LedProtocol::FW1906;
     }
 
     /**
@@ -286,7 +287,7 @@ namespace ProtocolHelper
                 return ColorOrder::RGBCTW;
 
             case LedProtocol::FW1906:
-                return ColorOrder::GRBCCT;
+                return ColorOrder::GRBCTW; // WLED-compatible RGB+CCT strip profile
 
             case LedProtocol::TM1814:
                 return ColorOrder::WRGB; // datasheet frame order is W R G B
@@ -463,7 +464,7 @@ namespace ProtocolHelper
 
     /**
      * @brief Lay out colour components in a strip's channel order
-     * @param out receives up to 6 channel values
+     * @param out receives up to 5 channel values
      * @return number of channels written
      * @note NONE falls back to GRB, the order most 1-wire parts use.
      */
@@ -511,6 +512,39 @@ namespace ProtocolHelper
                 return 4;
             default:
                 return 3;
+        }
+    }
+
+    // Encode one pixel into the serial driver's wire buffer after its frame prefix.
+    inline void encodeSerialPixel(uint8_t* pixel, LedProtocol protocol, ColorOrder order,
+                                  uint8_t swap, uint8_t r, uint8_t g, uint8_t b, uint8_t ww, uint8_t cw)
+    {
+        applyChannelSwap(swap, r, g, b, ww, cw);
+        uint8_t channels[5];
+        const uint8_t ordered = orderChannels(order, r, g, b, ww, cw, channels);
+        const uint8_t wireChannels = getChannelCount(protocol);
+        const uint8_t active = ordered < wireChannels ? ordered : wireChannels;
+
+        if (getBitsPerChannel(protocol) == 16)
+        {
+            // Duplicating the byte maps 0..255 to 0..65535 (value * 257).
+            for (uint8_t i = 0; i < active; ++i)
+            {
+                pixel[2 * i] = channels[i];
+                pixel[2 * i + 1] = channels[i];
+            }
+        }
+        else
+        {
+            for (uint8_t i = 0; i < active; ++i)
+                pixel[i] = channels[i];
+        }
+
+        // FW1906 consumes 48 bits even when the selected order uses fewer channels.
+        if (protocol == LedProtocol::FW1906)
+        {
+            for (uint8_t i = active; i < wireChannels; ++i)
+                pixel[i] = 0;
         }
     }
 

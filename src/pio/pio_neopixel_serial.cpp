@@ -122,6 +122,9 @@ static constexpr uint32_t pioSerialByteWord(uint8_t value)
 static_assert(pioSerialFifoPullBits(3, 0) == 24, "RGB uses one 24-bit FIFO word per pixel");
 static_assert(pioSerialFifoPullBits(4, 0) == 32, "RGBW uses one 32-bit FIFO word per pixel");
 static_assert(pioSerialFifoPullBits(5, 0) == 8, "WS2805 must pull after every payload byte");
+static_assert(pioSerialFifoPullBits(ProtocolHelper::getBytesPerLed(LedProtocol::FW1906),
+                                  ProtocolHelper::getSerialPrefixBytes(LedProtocol::FW1906)) == 8,
+              "FW1906 uses one FIFO word per byte of its 48-bit pixel");
 static_assert(pioSerialFifoPullBits(4, 8) == 8, "prefixed frames must pull after every payload byte");
 static_assert(ProtocolHelper::getColorOrder(LedProtocol::WS2805_RGBCCT) == ColorOrder::GRBCCT,
               "WS2805 stays GRBCCT");
@@ -1141,31 +1144,8 @@ void PIO_NeoPixel_Serial::rgbToBuffer(uint16_t index, uint8_t r, uint8_t g, uint
         return;
     }
 
-    // Swap runs on the logical components, before the colour order is applied.
-    ProtocolHelper::applyChannelSwap(_inst->channelSwap, r, g, b, ww, cw);
-
-    uint8_t ch[6] = {0};
-    uint8_t count = ProtocolHelper::orderChannels(_inst->colorOrder, r, g, b, ww, cw, ch);
-
-    const uint8_t bits = ProtocolHelper::getBitsPerChannel(_inst->protocol);
-    const uint8_t chBytes = (uint8_t)(bits / 8);
-    if (count * chBytes > _inst->bytesPerLed) count = (uint8_t)(_inst->bytesPerLed / chBytes);
-
-    if (bits == 16)
-    {
-        // 8-bit value widened to 16: v*257 maps 0..255 onto 0..65535 with no gap at either end.
-        for (uint8_t i = 0; i < count; ++i)
-        {
-            const uint16_t v = (uint16_t)(ch[i] * 257);
-            _inst->buffer[offset + i * 2] = (uint8_t)(v >> 8);
-            _inst->buffer[offset + i * 2 + 1] = (uint8_t)(v & 0xFF);
-        }
-    }
-    else
-    {
-        for (uint8_t i = 0; i < count; ++i)
-            _inst->buffer[offset + i] = ch[i];
-    }
+    ProtocolHelper::encodeSerialPixel(_inst->buffer + offset, _inst->protocol, _inst->colorOrder,
+                                      _inst->channelSwap, r, g, b, ww, cw);
 }
 
 /**
@@ -1567,7 +1547,7 @@ uint32_t PIO_NeoPixel_Serial::getTransferTimeoutUs() const
  *
  * @return DriverCapabilities with supported features:
  *         - supportsRGBW: true for RGBW LEDs (4 bytes/LED)
- *         - supportsRGBCCT: true for RGBCCT LEDs (5 bytes/LED)
+ *         - supportsRGBCCT: true for protocols with independent warm and cool white
  */
 DriverCapabilities PIO_NeoPixel_Serial::getCapabilities() const
 {

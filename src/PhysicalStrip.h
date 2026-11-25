@@ -108,6 +108,8 @@ class PhysicalStrip
     // ====================================================================
     void setColorOrder(ColorOrder order)
     {
+        if (order == ColorOrder::NONE && _protocol == LedProtocol::FW1906)
+            order = ProtocolHelper::getColorOrder(_protocol);
         _colorOrder = order;
 
         // Keep _config in sync, else a later applyConfig(_config) reverts to the stale default (R/G swap).

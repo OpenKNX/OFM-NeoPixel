@@ -131,7 +131,8 @@ class RMT_NeoPixel_Serial : public IHardwareDriver
     // IHardwareDriver ColorOrder interface
     void setColorOrder(ColorOrder order) override
     {
-        if (_inst) _inst->colorOrder = order;
+        if (_inst)
+            _inst->colorOrder = order == ColorOrder::NONE ? ProtocolHelper::getColorOrder(_inst->protocol) : order;
     }
     ColorOrder getColorOrder() const override { return _inst ? _inst->colorOrder : ColorOrder::RGB; }
 

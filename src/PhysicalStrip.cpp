@@ -239,6 +239,10 @@ bool PhysicalStrip::createDriver(DriverType driverType)
                 setColorOrder(ColorOrder::RGB); // WS2801: RGB
                 break;
 
+            case LedProtocol::FW1906:
+                setColorOrder(ProtocolHelper::getColorOrder(_protocol));
+                break;
+
             default:
                 // Keep NONE - driver uses protocol default from ProtocolHelper
                 break;

@@ -29,7 +29,13 @@ namespace ProtocolTableAsserts
     static_assert(getBytesPerLed(LedProtocol::UCS8903) == 6, "UCS8903 is 3 channels at 16 bit");
     static_assert(getBytesPerLed(LedProtocol::UCS8904) == 8, "UCS8904 is 4 channels at 16 bit");
     static_assert(getBytesPerLed(LedProtocol::SM16825) == 10, "SM16825 is 5 channels at 16 bit");
-    static_assert(getBytesPerLed(LedProtocol::FW1906) == 6, "FW1906 is 6 channels at 8 bit");
+    static_assert(getChannelCount(LedProtocol::FW1906) == 6 && getBytesPerLed(LedProtocol::FW1906) == 6,
+                  "FW1906 clocks six bytes per pixel");
+    static_assert(getBitsPerChannel(LedProtocol::FW1906) == 8 && getSerialPrefixBytes(LedProtocol::FW1906) == 0,
+                  "FW1906 uses raw 8-bit channels");
+    static_assert(isRGBCCT(LedProtocol::FW1906) && getColorOrder(LedProtocol::FW1906) == ColorOrder::GRBCTW &&
+                      getBytesPerLed(getColorOrder(LedProtocol::FW1906)) == 5,
+                  "FW1906 RGB+CCT profile has five active channels in GRBCTW order");
     static_assert(getBytesPerLed(LedProtocol::APA102) == 4, "APA102 is brightness plus BGR");
     static_assert(getBytesPerLed(LedProtocol::APA102_CLONE) == 4, "APA102 clone is 4 bytes");
     static_assert(getBytesPerLed(LedProtocol::SK9822) == 4, "SK9822 is 4 bytes");

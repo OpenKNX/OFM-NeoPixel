@@ -258,7 +258,8 @@ class PIO_NeoPixel_Serial : public IHardwareDriver
      */
     void setColorOrder(ColorOrder order) override
     {
-        if (_inst) _inst->colorOrder = order;
+        if (_inst)
+            _inst->colorOrder = order == ColorOrder::NONE ? ProtocolHelper::getColorOrder(_inst->protocol) : order;
     }
 
     // Configuration management (IHardwareDriver interface)
