@@ -589,6 +589,9 @@ bool VirtualStrip::syncToPhysical()
                 _pixelTransformCallback(virtualPixelIndex, r, g, b, wwPtr, cwPtr, _pixelTransformUserData);
             }
 
+            if (_outputTransformCallback)
+                _outputTransformCallback(virtualIdx, pstrip, r, g, b, ww, cw, _outputTransformContext);
+
             // Send to physical strip based on its capabilities
             if (physicalIsRGBCCT && _bytesPerLed >= 5)
             {

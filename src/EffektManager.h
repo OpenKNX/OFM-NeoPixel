@@ -26,7 +26,7 @@
 // ============================================================================
 static constexpr uint8_t  EM_COUNT      = 16;   ///< Number of Effektmanager instances
 static constexpr uint8_t  EM_CUE_COUNT  = 10;   ///< Max cues per EM (matches ETS: Cue 1..10 per EM)
-static constexpr uint8_t  EM_TEXT_LEN   = 14;   ///< Cue text length (DPT 16 compatible)
+static constexpr uint8_t  EM_TEXT_LEN   = 15;   ///< Fourteen ETS text bytes plus a terminator
 static constexpr uint8_t  EM_PARAM_COUNT = 10;  ///< Max effect parameters per cue
 
 // EM ID 0 = "no EM / stop"
@@ -44,40 +44,39 @@ enum EmStopMode : uint8_t
 };
 
 // ============================================================================
-// EffektCue — one effect preset (48 bytes)
+// CueColor — native channel values shared by both cue colours
 // ============================================================================
+struct CueColor
+{
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    uint8_t ww = 0; // Single W on RGBW output, warm white on RGBCCT output
+    uint8_t cw = 0; // Used only by RGBCCT output
+};
+
 struct EffektCue
 {
-    uint8_t  effectId;                  ///< Effect ID (0-33, 0=Solid/Aus)
-    uint8_t  params[EM_PARAM_COUNT];    ///< Effect parameters 0-9
-    uint8_t  r, g, b, w;               ///< Primary colour
-    uint8_t  brightness;               ///< Brightness 0-255
-    uint16_t durationSec;              ///< Seconds; 0=hold, UINT16_MAX=until effect reports done
-    uint16_t fadeMs;                   ///< Fade-out duration before next cue (ms, 0 = hard cut)
-    char     cueName[EM_TEXT_LEN];     ///< Cue name (null-terminated)
-    char     effectText[EM_TEXT_LEN];  ///< Effect-specific text (null-terminated)
+    uint8_t effectId = 0;
+    uint8_t params[EM_PARAM_COUNT] = {};
+    CueColor primary;
+    CueColor secondary;
+    uint8_t brightness = 0;
+    uint16_t durationSec = 0; // 0 = hold, UINT16_MAX = until effect reports done
+    uint16_t fadeMs = 0;
+    char cueName[EM_TEXT_LEN] = {};
+    char effectText[EM_TEXT_LEN] = {};
 };
-// Struct is packed by layout: 1+10+4+1+2+2+14+14 = 48 bytes (no padding needed)
-static_assert(sizeof(EffektCue) == 48, "EffektCue size mismatch — check layout");
 
 // ============================================================================
-// EffektManagerHeader — one EM configuration (~8 bytes)
+// EffektManagerHeader — sequence settings
 // ============================================================================
 struct EffektManagerHeader
 {
-    // Layout muss exakt dem ETS-XML entsprechen (NeoPixel.EM.templ.xml):
-    uint8_t  reserved[16];   ///< Byte  0–15: frei/reserviert (EM-Beschreibung ist ETS-only, nicht gespeichert)
-    uint8_t  cueCount;       ///< Byte 16:    Anzahl aktiver Cues (1–10)
-    uint8_t  loop : 1;       ///< Byte 17, Bit 0: Loop
-    uint8_t  _pad : 7;
-    uint8_t  nextEmId;       ///< Byte 18:    Folgeziel (0=Stop, 1–16)
-    uint8_t  enabled;        ///< Byte 19:    Zustand (0=Deaktiviert, 1=Aktiv, 2=Suspendiert)
-
-    EffektManagerHeader()
-        : cueCount(1), loop(0), _pad(0), nextEmId(EM_NONE), enabled(0)
-    {
-        memset(reserved, 0, sizeof(reserved));
-    }
+    uint8_t cueCount = 1;
+    bool loop = false;
+    uint8_t nextEmId = EM_NONE;
+    uint8_t enabled = 0; // 0 = disabled, 1 = active, 2 = paused in ETS
 
     // Runnable only when ACTIVE (1). Paused (2) keeps full config + KOs but does
     // NOT render; Inactive (0) is fully off (ETS also removes its KOs).
@@ -96,7 +95,7 @@ struct EffektManagerData
 
     EffektManagerData() = default;
 };
-// 16 × (20 + 10 × 48) = 16 × 500 = 8000 bytes ≈ 8 KB (EM_CUE_COUNT matches ETS Cue 1..10)
+// The application decodes ETS fields explicitly. Runtime structs are not serialized as raw bytes.
 
 // ============================================================================
 // EffektManagerRuntime — per-segment runtime state (RAM only, not persisted)

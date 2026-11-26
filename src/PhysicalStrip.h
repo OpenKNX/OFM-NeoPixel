@@ -154,6 +154,15 @@ class PhysicalStrip
      */
     void setVoltage(uint8_t voltage) { _voltage = voltage; }
 
+    void setCctRange(uint16_t warm, uint16_t cool)
+    {
+        if (warm < 1000 || cool > 10000 || warm >= cool) { warm = 2700; cool = 6500; }
+        _warmKelvin = warm;
+        _coolKelvin = cool;
+    }
+    uint16_t getWarmKelvin() const { return _warmKelvin; }
+    uint16_t getCoolKelvin() const { return _coolKelvin; }
+
     /**
      * @brief Get operating voltage for this strip
      * @return Supply voltage in volts (5, 12, or 24)
@@ -243,6 +252,7 @@ class PhysicalStrip
     void clearCustomTiming(); ///< Revert to AUTO timing
 
   private:
+    uint16_t _warmKelvin = 2700, _coolKelvin = 6500;
     IHardwareDriver* _driver;     // Underlying driver
     uint32_t _dataPin;            // GPIO pin (MOSI/Data)
     uint32_t _clockPin;           // GPIO pin (Clock for SPI)

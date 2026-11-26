@@ -431,6 +431,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         openknx.console.printHelpLine("<seg> <cue>", "Trigger cue of currently active EM on segment");
         openknx.console.printHelpLine("", "Show cue table for all segments");
         openknx.console.printHelpLine("list [all|seg]", "Cue table: active EMs (default), all configured EMs ('all'), or one segment");
+        openknx.console.printHelpLine("color <em> <cue> <1|2> <r> <g> <b> <ww> <cw>", "Set all five channels of a cue colour (0..255)");
         printDetailHelpSeparator();
         printDetailHelpParameter("<seg>=0-based Segment Index, <cue>=1..99");
         printDetailHelpExample("neo cue 0 2           Trigger cue 2 on segment 0");
@@ -827,6 +828,25 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
                 openknx.logger.log("ERROR: invalid EM/cue (em 1..16, cue 1..10)");
             return true;
         }
+        if (sub.compare(0, 6, "color ") == 0)
+        {
+            int em = 0, cue = 0, colour = 0, r = 0, g = 0, b = 0, ww = 0, cw = 0;
+            ConsoleArgStream colourArgs(sub.c_str() + 6);
+            const bool parsed = bool(colourArgs >> em >> cue >> colour >> r >> g >> b >> ww >> cw);
+            if (!parsed || colourArgs.count() != 8 || em < 1 || em > EM_COUNT || cue < 1 || cue > EM_CUE_COUNT ||
+                colour < 1 || colour > 2 || r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255 ||
+                ww < 0 || ww > 255 || cw < 0 || cw > 255)
+            {
+                openknx.logger.log("Usage: neo cue color <em> <cue> <1|2> <r> <g> <b> <ww> <cw> (channels 0..255)");
+                return true;
+            }
+            const CueColor value{uint8_t(r), uint8_t(g), uint8_t(b), uint8_t(ww), uint8_t(cw)};
+            if (openknxNeoPixelHandleCueColor(em, cue, colour, value))
+                openknx.logger.logWithValues("EM %d cue %d colour %d updated", em, cue, colour);
+            else
+                openknx.logger.log("ERROR: cue must be configured first");
+            return true;
+        }
         if (sub.compare(0, 6, "param ") == 0)
         {
             int em = 0, cue = 0, idx = -1, val = 0;
@@ -894,7 +914,7 @@ bool NeoPixel::processCommand(const std::string command, bool diagnose)
         int seg = 0, cue = 0;
         if (!(ConsoleArgStream(sub.c_str()) >> seg >> cue) || seg < 0)
         {
-            openknx.logger.log("Usage: neo cue [<seg> <cue>] | list [all|seg] | set <em> <cue> <eff> <dur> <fade> [bri r g b] | param <em> <cue> <idx> <val> | text <em> <cue> <text> | clear <em>");
+            openknx.logger.log("Usage: neo cue [<seg> <cue>] | list [all|seg] | set <em> <cue> <eff> <dur> <fade> [bri r g b] | color <em> <cue> <1|2> <r> <g> <b> <ww> <cw> | param <em> <cue> <idx> <val> | text <em> <cue> <text> | clear <em>");
             return true;
         }
         if (openknxNeoPixelHandleEmChainAction(NEO_EM_CUE, seg, cue))
@@ -1085,14 +1105,14 @@ void NeoPixel::printEmCueTable(int onlySeg)
         // The header is printed lazily (only once there's a row), so an empty result returns
         // a short "empty" line instead of a bare header.
         static const char* const kRowSep =
-            "────┼─────┼───┼────┼───────────────────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼──────┼──────┼──────────────";
+            "────┼─────┼───┼────┼───────────────────┼─────┼─────┼─────┼─────┼─────┼─────┼─────────────────────┼─────────────────────┼─────┼──────┼──────┼──────────────";
         bool headerShown = false;
         bool firstRow    = true;
         int  lastCol1    = 0;
         auto showHeader = [&headerShown]() {
             if (headerShown) return;
             headerShown = true;
-            openknx.logger.log("ID  │ Cue │ A │ FX │ Effect Name       │ P0  │ P1  │ P2  │ P3  │ P4  │ R   │ G   │ B   │ W   │ Bri │ Dur  │ Fade │ Name");
+            openknx.logger.log("ID  │ Cue │ A │ FX │ Effect Name       │ P0  │ P1  │ P2  │ P3  │ P4  │ Primary RGB/WW/CW   │ Secondary RGB/WW/CW │ Bri │ Dur  │ Fade │ Name");
             openknx.logger.log(kRowSep);
         };
         auto printCueRow = [&](int col1, const char* aMark, uint8_t cueNum, const EffektCue& cue) {
@@ -1104,10 +1124,11 @@ void NeoPixel::printEmCueTable(int onlySeg)
             if (!firstRow && col1 != lastCol1) openknx.logger.log(kRowSep);
             firstRow = false;
             lastCol1 = col1;
-            openknx.logger.logWithValues("%3d │ %3d │ %1s │ %2d │ %-17.17s │ %3d │ %3d │ %3d │ %3d │ %3d │ %3d │ %3d │ %3d │ %3d │ %3d │ %4d │ %4d │ %-14.14s",
+            openknx.logger.logWithValues("%3d │ %3d │ %1s │ %2d │ %-17.17s │ %3d │ %3d │ %3d │ %3d │ %3d │ #%02x%02x%02x / %3d / %3d │ #%02x%02x%02x / %3d / %3d │ %3d │ %4d │ %4d │ %-14.14s",
                                          col1, (int)cueNum, aMark, (int)cue.effectId, effectName,
                                          (int)cue.params[0], (int)cue.params[1], (int)cue.params[2], (int)cue.params[3], (int)cue.params[4],
-                                         (int)cue.r, (int)cue.g, (int)cue.b, (int)cue.w,
+                                         (int)cue.primary.r, (int)cue.primary.g, (int)cue.primary.b, (int)cue.primary.ww, (int)cue.primary.cw,
+                                         (int)cue.secondary.r, (int)cue.secondary.g, (int)cue.secondary.b, (int)cue.secondary.ww, (int)cue.secondary.cw,
                                          (int)cue.brightness, (int)cue.durationSec, (int)cue.fadeMs, cue.cueName);
         };
 

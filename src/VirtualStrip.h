@@ -158,7 +158,17 @@ class VirtualStrip
      */
     void setPixelTransformCallback(PixelTransformCallback callback, void* userData = nullptr);
 
+    // Runs after the shared transform for each physical mapping, including duplicated mappings.
+    using OutputTransformCallback = void (*)(uint16_t, PhysicalStrip*, uint8_t&, uint8_t&, uint8_t&, uint8_t&, uint8_t&, void*);
+    void setOutputTransformCallback(OutputTransformCallback callback, void* context)
+    {
+        _outputTransformCallback = callback;
+        _outputTransformContext = context;
+    }
+
   private:
+    OutputTransformCallback _outputTransformCallback = nullptr;
+    void* _outputTransformContext = nullptr;
     std::vector<VirtualToPhysicalMapping> _physicalStrips; // Attached physical strips
     uint16_t _totalLeds;                                   // Virtual LED count
     uint8_t* _buffer;                                      // Unified RGB(W)(CCT) buffer (ALWAYS in RGB/RGBW/RGBCCT format!)

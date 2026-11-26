@@ -1445,6 +1445,8 @@ neo cue                         # Cue table for all segments
 neo cue list [all|seg]         # Cue table: active EMs (default), all configured EMs ('all'), or one segment
 neo cue <seg> <cue>             # Trigger cue <cue> of the active EM on segment <seg>
 neo cue ?                       # Detailed cue help
+neo cue color 1 1 1 0 0 0 180 20 # Primary cue colour, independent WW/CW
+neo cue color 1 1 2 0 0 255 0 0  # Secondary cue colour
 
 # Examples
 neo em start 0 3                # Start EM 3 on segment 0

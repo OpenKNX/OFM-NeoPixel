@@ -168,6 +168,11 @@ class HclPixelTransform
                          uint8_t* ww, uint8_t* cw,
                          void* userData);
 
+    // Explicit hardware endpoints for an individual physical output.
+    static void CallbackForOutput(uint16_t pixelIndex, uint8_t& r, uint8_t& g, uint8_t& b,
+                                  uint8_t* ww, uint8_t* cw, void* userData,
+                                  uint16_t warmKelvin, uint16_t coolKelvin);
+
   private:
     static inline uint8_t u8_max3(uint8_t a, uint8_t b, uint8_t c)
     {

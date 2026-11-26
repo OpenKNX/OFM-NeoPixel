@@ -1279,8 +1279,9 @@ Build EMs/cues entirely from the console — handy for bench tests and commissio
 | `neo em bind <managerSeg>` | Wrap a console segment into the EM system | `neo em bind 0` |
 | `neo em config <em> <loop 0\|1> [nextEm]` | Configure + enable an EM | `neo em config 1 1` |
 | `neo cue set <em> <cue> <effectId> <durSec> <fadeMs> [bri] [r g b]` | Define/overwrite a cue (params auto-seeded with the effect's defaults; string effects get their default text) | `neo cue set 1 1 23 5 300` |
+| `neo cue color <em> <cue> <1|2> <r> <g> <b> <ww> <cw>` | Set one complete cue colour with independent native white channels, each 0–255. RGBW uses WW as its single W channel. | `neo cue color 1 1 2 0 0 0 180 20` |
 | `neo cue param <em> <cue> <paramIdx> <value>` | Override one effect parameter of an existing cue (clamped to the effect's range) | `neo cue param 1 1 0 255` |
-| `neo cue text <em> <cue> <text>` | Set a cue's text for string effects (e.g. Scroll Text). Full ASCII + ISO-8859-1 umlauts; quotes optional, `\"` = literal quote. ≤13 chars are stored in the cue; longer text is kept in a RAM side-store and applied when the cue activates (Scroll Text up to ~240 chars; runtime-only, lost on reboot). | `neo cue text 1 7 "Hallo \"Welt\" äöü"` |
+| `neo cue text <em> <cue> <text>` | Set a cue's text for string effects (e.g. Scroll Text). Full ASCII + ISO-8859-1 umlauts; quotes optional, `\"` = literal quote. ≤14 chars are stored in the cue; longer text is kept in a RAM side-store and applied when the cue activates (Scroll Text up to ~240 chars; runtime-only, lost on reboot). | `neo cue text 1 7 "Hallo \"Welt\" äöü"` |
 | `neo cue clear <em>` | Clear all cues of an EM | `neo cue clear 1` |
 
 ### Effektkette (Chain) Commands

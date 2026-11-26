@@ -108,6 +108,7 @@ struct EffectConfig
     // 5-Channel extension: Additional white channels for RGBCCT strips
     uint8_t primaryCW;   // Primary Cool White (0-255) for 5-channel strips
     uint8_t secondaryCW; // Secondary Cool White (0-255) for 5-channel strips
+    uint16_t primaryKelvin = 0; // Explicit CCT target, zero for independent colour-channel control.
 
     // OAM Interface Parameters
     uint8_t option1; // Effekt Option 1 (0-255) - Effect-specific parameter
@@ -399,12 +400,14 @@ class Segment
     inline uint32_t getSecondaryColor() const { return _config.secondaryRGBW; }                        // Get secondary color
     inline bool setPrimaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t w)
     {
+        _config.primaryKelvin = 0;
         _config.primaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)w;
         return true;
     } // Set primary color (4-channel RGBW)
 
     inline bool setPrimaryColor(uint32_t r, uint32_t g, uint32_t b, uint32_t ww, uint32_t cw)
     {
+        _config.primaryKelvin = 0;
         _config.primaryRGBW = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | (uint32_t)ww;
         _config.primaryCW = (uint8_t)cw;
         return true;

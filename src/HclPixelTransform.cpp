@@ -1,4 +1,6 @@
 #include "HclPixelTransform.h"
+#include "IHardwareDriver.h"
+#include <algorithm>
 #include "LedState.h"
 #include <Arduino.h>
 #include <math.h>
@@ -26,6 +28,13 @@ void HclPixelTransform::Callback(uint16_t pixelIndex,
                                  uint8_t& r, uint8_t& g, uint8_t& b,
                                  uint8_t* ww, uint8_t* cw,
                                  void* userData)
+{
+    CallbackForOutput(pixelIndex, r, g, b, ww, cw, userData, 0, 0);
+}
+
+void HclPixelTransform::CallbackForOutput(uint16_t pixelIndex, uint8_t& r, uint8_t& g, uint8_t& b,
+                                        uint8_t* ww, uint8_t* cw, void* userData,
+                                        uint16_t warmKelvin, uint16_t coolKelvin)
 {
     // FAST PATH: Early return if no context
     if (!userData) return;
@@ -59,6 +68,14 @@ void HclPixelTransform::Callback(uint16_t pixelIndex,
     {
         hclConfig = &segCfg.customHclConfig;
     }
+
+    NeoHclConfig outputConfig = *hclConfig;
+    if (warmKelvin > 0 && warmKelvin < coolKelvin)
+    {
+        outputConfig.minKelvin = warmKelvin;
+        outputConfig.maxKelvin = coolKelvin;
+    }
+    hclConfig = &outputConfig;
 
     const uint8_t masterNum = hclConfig->resolvedMaster;
     if (masterNum == 0 || masterNum > ctx->masterStates.size()) return;
@@ -183,9 +200,6 @@ void HclPixelTransform::applyToPixelCached(HclTransformContext* ctx,
                                            uint8_t* ww,
                                            uint8_t* cw)
 {
-    // For RGBCCT (5-channel): Not supported in cached path
-    if (ww && cw) return;
-
     // Use cached Kelvin RGB values from the selected LightManager master.
     const uint8_t kr = masterState.cachedKr;
     const uint8_t kg = masterState.cachedKg;
@@ -202,6 +216,24 @@ void HclPixelTransform::applyToPixelCached(HclTransformContext* ctx,
     uint8_t frac = (uint8_t)((wFrac16 + 50u) / 100u);
 
     if (frac == 0) return;
+
+    if (ww && cw)
+    {
+        // Native dual-white output uses the rendered white level, with RGB neutral
+        // extraction governed by whiteMix. Endpoint calibration runs per physical output.
+        const uint8_t neutral = u8_min3(r, g, b);
+        const uint16_t level = std::min<uint16_t>(255, uint16_t(*ww) + *cw + uint16_t(neutral) * config.whiteMix / 100);
+        uint8_t warm, cool;
+        ProtocolHelper::kelvinToWWCW(masterState.kelvin, warm, cool, config.minKelvin, config.maxKelvin);
+        const uint8_t targetCool = (uint32_t(level) * cool + 127) / 255;
+        *ww = lerp_u8(*ww, level - targetCool, frac);
+        *cw = lerp_u8(*cw, targetCool, frac);
+        const uint8_t extracted = uint16_t(neutral) * config.whiteMix / 100;
+        r = lerp_u8(r, r - extracted, frac);
+        g = lerp_u8(g, g - extracted, frac);
+        b = lerp_u8(b, b - extracted, frac);
+        return;
+    }
 
     // Use current pixel value/brightness basis
     const uint8_t vmax = u8_max3(r, g, b);

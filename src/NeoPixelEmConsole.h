@@ -80,6 +80,9 @@ bool openknxNeoPixelHandleCueSet(uint8_t emId, uint8_t cueNum, uint8_t effectId,
                                  uint16_t durSec, uint16_t fadeMs,
                                  uint8_t bri, uint8_t r, uint8_t g, uint8_t b);
 
+/** @brief Replace colour 1 or 2 of an existing cue with native RGB/WW/CW values. */
+bool openknxNeoPixelHandleCueColor(uint8_t emId, uint8_t cueNum, uint8_t colour, const CueColor& value);
+
 /** @brief Override one effect parameter of an existing cue (local-test authoring).
  *         emId & cueNum are 1-based; paramIdx is 0-based (0..EM_PARAM_COUNT-1).
  *         The cue must already exist (via cue set). Returns true on success. */
